@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,14 +25,14 @@ import (
 // ErrNoCandidate 表示模型没有任何可用候选（未配置/渠道禁用/全冷却/全熔断）。
 var ErrNoCandidate = errors.New("no available channel for this model")
 
-// 熔断退避阶梯：30s → 60s → 15min（之后连续失败保持 15min 封顶）。
+// 熔断退避阶梯：2s → 4s → 8s（之后连续失败保持 8s 封顶）。
 var penaltyLadder = []time.Duration{
-	30 * time.Second,
-	60 * time.Second,
-	15 * time.Minute,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
 }
 
-const quotaPenalty = 15 * time.Minute // 上游额度用尽/欠费等，按最大档冷却（15min）
+const quotaPenalty = 8 * time.Second // 上游额度用尽/欠费等，按最大档冷却（8s）
 
 // Router 持有路由所需依赖。
 type Router struct {
@@ -49,13 +50,47 @@ type penaltyState struct {
 // Penalizer 内存态熔断器（并发安全）。单个，供 Router 与 puller 探活共用。
 type Penalizer struct {
 	mu  sync.RWMutex
-	ch  map[int64]penaltyState // 渠道冷却（网络/5xx/429/额度）
-	key map[int64]time.Time    // Key 冷却（401/个Key限流）
+	ch  map[int64]penaltyState         // 渠道冷却（网络/5xx/429/额度）
+	key map[int64]time.Time            // Key 冷却（401/个Key限流）
+	mdl map[int64]map[string]time.Time // 模型级拒权（403 access_denied）：channel -> model -> until
 }
 
 // NewPenalizer 创建熔断器。
 func NewPenalizer() *Penalizer {
-	return &Penalizer{ch: map[int64]penaltyState{}, key: map[int64]time.Time{}}
+	return &Penalizer{ch: map[int64]penaltyState{}, key: map[int64]time.Time{}, mdl: map[int64]map[string]time.Time{}}
+}
+
+// ModelDenied 某模型在指定渠道是否被标记为"无权访问"。
+func (p *Penalizer) ModelDenied(ch int64, model string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if m, ok := p.mdl[ch]; ok {
+		if t, ok := m[model]; ok && time.Now().Before(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// DenyModel 标记模型在渠道上拒权 d 时长（403 access_denied 快速熔断）。
+func (p *Penalizer) DenyModel(ch int64, model string, d time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m := p.mdl[ch]
+	if m == nil {
+		m = map[string]time.Time{}
+		p.mdl[ch] = m
+	}
+	m[model] = time.Now().Add(d)
+}
+
+// ClearModelDenied 成功调用后清除该模型在渠道上的拒权标记。
+func (p *Penalizer) ClearModelDenied(ch int64, model string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if m, ok := p.mdl[ch]; ok {
+		delete(m, model)
+	}
 }
 
 // ChPenalized 渠道是否处于熔断中。
@@ -66,7 +101,7 @@ func (p *Penalizer) ChPenalized(id int64) bool {
 	return ok && time.Now().Before(s.until)
 }
 
-// PenaliseChan 冷却渠道并按阶梯退避：30s → 60s → 15min（此后保持 15min），返回本次冷却时长。
+// PenaliseChan 冷却渠道并按阶梯退避：2s → 4s → 8s（此后保持 8s），返回本次冷却时长。
 // forced>0 时直接按给定兜底时长。
 func (p *Penalizer) PenaliseChan(id int64, forced time.Duration) time.Duration {
 	p.mu.Lock()
@@ -124,6 +159,53 @@ type Candidate struct {
 	Channel models.Channel
 }
 
+// channelHeaders 解析渠道配置的额外请求头（JSON map），供附加到上游请求。
+func channelHeaders(ch *models.Channel) map[string]string {
+	out := map[string]string{}
+	if ch == nil || ch.ExtraHeaders == "" {
+		return out
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(ch.ExtraHeaders), &m); err != nil {
+		return out
+	}
+	for k, v := range m {
+		if k != "" && v != "" {
+			out[strings.ToLower(k)] = v
+		}
+	}
+	return out
+}
+
+// mergeHeaders 合并客户端透传头与渠道配置头（渠道配置优先）。
+func mergeHeaders(pass, chHdr map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range pass {
+		out[k] = v
+	}
+	for k, v := range chHdr {
+		out[k] = v
+	}
+	return out
+}
+
+// rewriteModel 将 OpenAI 请求体中的 "model" 字段改写为目标上游模型名（保真：其余字段原样保留）。
+// 别名/厂商前缀路由下，上游只认自己的模型 id（如 opencode / deepseek 只认裸名）。
+func rewriteModel(body []byte, upstreamModel string) []byte {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	if b, err := json.Marshal(upstreamModel); err == nil {
+		m["model"] = b
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 // Result 是转发成功/透传的结果。
 type Result struct {
 	StatusCode  int
@@ -159,7 +241,7 @@ func (r *Router) recoverChannel(ch *models.Channel) {
 func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candidate, error) {
 	rows, err := r.db.Query(`
 		SELECT mr.id, mr.display_name, mr.channel_id, mr.upstream_model, mr.priority, mr.weight, mr.enabled,
-			ch.id, ch.name, ch.base_url, ch.adapter, ch.priority, ch.weight, ch.timeout_ms, ch.enabled, ch.health_state
+			ch.id, ch.name, ch.base_url, ch.adapter, ch.priority, ch.weight, ch.timeout_ms, ch.enabled, ch.health_state, ch.extra_headers
 		FROM model_routes mr
 		JOIN channels ch ON ch.id = mr.channel_id
 		WHERE mr.display_name = ? AND mr.enabled = 1 AND ch.enabled = 1 AND ch.health_state != 'cooldown'
@@ -176,6 +258,7 @@ func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candida
 			&c.Route.Priority, &c.Route.Weight, &c.Route.Enabled,
 			&c.Channel.ID, &c.Channel.Name, &c.Channel.BaseURL, &c.Channel.Adapter,
 			&c.Channel.Priority, &c.Channel.Weight, &c.Channel.TimeoutMS, &c.Channel.Enabled, &c.Channel.HealthState,
+			&c.Channel.ExtraHeaders,
 		); err != nil {
 			return nil, err
 		}
@@ -192,13 +275,13 @@ func candidateLess(a, b Candidate) bool {
 	return a.Channel.Priority < b.Channel.Priority
 }
 
-// pickByPriority 在未排除且未熔断的候选中，取最低有效优先层级组内按权重加权随机。
-func (r *Router) pickByPriority(cands []Candidate, excludedCh map[int64]bool) *Candidate {
+// pickByPriority 在未排除/未熔断/未拒权候选中，取最低有效优先层级组内按权重加权随机。
+func (r *Router) pickByPriority(cands []Candidate, excludedCh map[int64]bool, displayModel string) *Candidate {
 	group := []Candidate{}
 	var best *Candidate
 	for i := range cands {
 		c := cands[i]
-		if excludedCh[c.Channel.ID] || r.pen.ChPenalized(c.Channel.ID) {
+		if excludedCh[c.Channel.ID] || r.pen.ChPenalized(c.Channel.ID) || r.pen.ModelDenied(c.Channel.ID, displayModel) {
 			continue
 		}
 		if best == nil || candidateLess(c, *best) {
@@ -255,7 +338,7 @@ func isQuotaExceeded(body string) bool {
 // 有效优先级 高→低 依次消费；高优先级被限流/额度用尽/失败时自动下沉到低优先级，
 // 并给失败渠道施加内存熔断（指数退避），避免每个请求都重复打失败的渠道。
 // 其余 4xx 透传；网络级失败最多尝试 3 次。
-func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayModel, upstreamPath string) (*Result, error) {
+func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayModel, upstreamPath string, passHeaders map[string]string) (*Result, error) {
 	cands, err := r.Candidates(ctx, displayModel)
 	if err != nil {
 		return nil, err
@@ -268,7 +351,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	maxNetworkAttempts := 3
 
 	for {
-		cand := r.pickByPriority(cands, excludedCh)
+		cand := r.pickByPriority(cands, excludedCh, displayModel)
 		if cand == nil {
 			break
 		}
@@ -284,12 +367,13 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			excludedCh[cand.Channel.ID] = true
 			continue
 		}
+		resBody := rewriteModel(requestBody, cand.Route.UpstreamModel)
 		resp, err := adpt.Do(ctx, adapter.ChannelFrom(&cand.Channel), apiKey, &adapter.Request{
 			Method:  http.MethodPost,
 			Path:    upstreamPath,
-			Body:    bytes.NewReader(requestBody),
-			Headers: map[string]string{},
-			Model:   displayModel,
+			Body:    bytes.NewReader(resBody),
+			Headers: mergeHeaders(passHeaders, channelHeaders(&cand.Channel)),
+			Model:   cand.Route.UpstreamModel,
 		})
 		if err != nil {
 			// 网络错误/超时：冷却该渠道（连接级故障对所有 Key 一致）
@@ -322,13 +406,16 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 			if isQuotaExceeded(bodyStr) {
-				r.penalizeChannel(&cand.Channel, quotaPenalty) // 额度用尽，15min 内不再重试
+				r.penalizeChannel(&cand.Channel, quotaPenalty) // 额度用尽，8s 后自动再试
 			} else if code == http.StatusTooManyRequests {
 				r.penalizeChannel(&cand.Channel, 0) // 普通限流，指数退避
 			} else {
-				// 非额度类 403，可能是个别 Key 的权限问题 → 仅冷却该 Key
-				r.pen.PenalizeKey(key.ID, 0)
-				failedKeys[key.ID] = true
+				// 非额度类 403/402（如 access_denied）：多为模型级权限。
+				// 不冷却 Key（避免误伤该渠道其它模型）；标记该模型在此渠道"拒权"，
+				// 后续请求快速跳过，不再浪费往返（10 分钟后自动再试）
+				if code == http.StatusForbidden || code == http.StatusPaymentRequired {
+					r.pen.DenyModel(cand.Channel.ID, displayModel, 10*time.Minute)
+				}
 			}
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
@@ -367,10 +454,12 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		case code >= http.StatusBadRequest:
 			// 其余 4xx（422 等）透传，不重试
 			r.recoverChannel(&cand.Channel)
+			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			return &Result{StatusCode: code, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 		default:
 			// 成功：清除该渠道熔断并恢复
 			r.recoverChannel(&cand.Channel)
+			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			return &Result{StatusCode: http.StatusOK, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 		}
 	}
@@ -396,7 +485,7 @@ type StreamResult struct {
 
 // ForwardChatStream 流式转发：在首个字节流出前失败会自动切换到下一候选；
 // 一旦流出即绑定该渠道。非 2xx 中 429/402/403/408/5xx/400/404 触发故障转移，其余 4xx 透传。
-func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, displayModel, upstreamPath string) (*StreamResult, error) {
+func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, displayModel, upstreamPath string, passHeaders map[string]string) (*StreamResult, error) {
 	cands, err := r.Candidates(ctx, displayModel)
 	if err != nil {
 		return nil, err
@@ -408,7 +497,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	maxNetworkAttempts := 3
 
 	for {
-		cand := r.pickByPriority(cands, excludedCh)
+		cand := r.pickByPriority(cands, excludedCh, displayModel)
 		if cand == nil {
 			break
 		}
@@ -427,9 +516,9 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 		rc, err := adpt.DoStream(ctx, adapter.ChannelFrom(&cand.Channel), apiKey, &adapter.Request{
 			Method:  http.MethodPost,
 			Path:    upstreamPath,
-			Body:    bytes.NewReader(requestBody),
-			Headers: map[string]string{},
-			Model:   displayModel,
+			Body:    bytes.NewReader(rewriteModel(requestBody, cand.Route.UpstreamModel)),
+			Headers: mergeHeaders(passHeaders, channelHeaders(&cand.Channel)),
+			Model:   cand.Route.UpstreamModel,
 		})
 		if err != nil {
 			var se *adapter.StatusError
@@ -453,8 +542,11 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 				if isQuotaExceeded(bodyStr) {
 					r.penalizeChannel(&cand.Channel, quotaPenalty)
-				} else {
+				} else if code == http.StatusTooManyRequests {
 					r.penalizeChannel(&cand.Channel, 0)
+				} else {
+					// 非额度类 403/402（access_denied 等）：模型级权限，快速拒权熔断
+					r.pen.DenyModel(cand.Channel.ID, displayModel, 10*time.Minute)
 				}
 				excludedCh[cand.Channel.ID] = true
 			case code == http.StatusUnauthorized:
@@ -470,6 +562,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			default:
 				// 其余 4xx 透传（非流，直接给客户端原始错误体）
 				r.recoverChannel(&cand.Channel)
+				r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 				return &StreamResult{StatusCode: code, ContentType: se.HeaderMap["Content-Type"], Passthrough: se.Body,
 					Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 			}
@@ -480,6 +573,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 		}
 		// 成功：绑定该渠道并返回 SSE 流
 		r.recoverChannel(&cand.Channel)
+		r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 		return &StreamResult{StatusCode: http.StatusOK, Stream: rc,
 			Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -24,6 +25,10 @@ type Config struct {
 	LogLevel string
 	// TZ 应用时区，默认 Asia/Shanghai
 	TZ string
+	// Proxy 上游出站代理，如 socks5://127.0.0.1:7891 或 http://host:port；空=直连
+	Proxy string
+	// PassthroughHeaders 额外需要透传的客户端请求头（逗号分隔，如 x-session-id,My-Header）
+	PassthroughHeaders []string
 }
 
 // Load 从环境变量读取配置；自动加载 ./.env（可选）。
@@ -32,13 +37,15 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		HTTPAddr:      getenv("LGM_HTTP_ADDR", ":8080"),
-		DBPath:        getenv("LGM_DB_PATH", "./data/llmgate.db"),
-		AdminToken:    os.Getenv("LGM_ADMIN_TOKEN"),
-		EncryptSeed:   os.Getenv("LGM_ENCRYPT_SEED"),
-		GatewayPrefix: getenv("LGM_GATEWAY_PREFIX", "/"),
-		LogLevel:      getenv("LGM_LOG_LEVEL", "release"),
-		TZ:            getenv("LGM_TZ", "Asia/Shanghai"),
+		HTTPAddr:           getenv("LGM_HTTP_ADDR", ":8080"),
+		DBPath:             getenv("LGM_DB_PATH", "./data/llmgate.db"),
+		AdminToken:         os.Getenv("LGM_ADMIN_TOKEN"),
+		EncryptSeed:        os.Getenv("LGM_ENCRYPT_SEED"),
+		GatewayPrefix:      getenv("LGM_GATEWAY_PREFIX", "/"),
+		LogLevel:           getenv("LGM_LOG_LEVEL", "release"),
+		TZ:                 getenv("LGM_TZ", "Asia/Shanghai"),
+		Proxy:              os.Getenv("LGM_PROXY"),
+		PassthroughHeaders: splitList(os.Getenv("LGM_PASSTHROUGH_HEADERS")),
 	}
 	if cfg.GatewayPrefix != "/" && (cfg.GatewayPrefix == "" || cfg.GatewayPrefix[0] != '/') {
 		return nil, fmt.Errorf("LGM_GATEWAY_PREFIX 必须以 / 开头")
@@ -51,4 +58,16 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// splitList 解析逗号/空格分隔的配置列表，统一小写、去空。
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ';' }) {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, strings.ToLower(p))
+		}
+	}
+	return out
 }

@@ -35,15 +35,16 @@ func RegisterChannelRoutes(g *gin.RouterGroup, a *app.App) {
 }
 
 type channelBody struct {
-	Name      string          `json:"name"`
-	BaseURL   string          `json:"base_url"`
-	Adapter   string          `json:"adapter"`
-	Priority  int             `json:"priority"`
-	Weight    int             `json:"weight"`
-	TimeoutMS int             `json:"timeout_ms"`
-	Enabled   *int            `json:"enabled"`
-	Note      string          `json:"note"`
-	Keys      json.RawMessage `json:"keys"` // 创建时可同时提交：["sk-x"] 或 [{"name":"主号","key":"sk-x"}]
+	Name         string            `json:"name"`
+	BaseURL      string            `json:"base_url"`
+	Adapter      string            `json:"adapter"`
+	Priority     int               `json:"priority"`
+	Weight       int               `json:"weight"`
+	TimeoutMS    int               `json:"timeout_ms"`
+	Enabled      *int              `json:"enabled"`
+	Note         string            `json:"note"`
+	ExtraHeaders map[string]string `json:"extra_headers"` // 渠道附加请求头，如 {"x-opencode-session":"..."}
+	Keys         json.RawMessage   `json:"keys"`          // 创建时可同时提交：["sk-x"] 或 [{"name":"主号","key":"sk-x"}]
 }
 
 func (b *channelBody) toModel() *models.Channel {
@@ -56,6 +57,11 @@ func (b *channelBody) toModel() *models.Channel {
 		TimeoutMS:   b.TimeoutMS,
 		Note:        b.Note,
 		HealthState: "healthy",
+	}
+	if len(b.ExtraHeaders) > 0 {
+		if hb, err := json.Marshal(b.ExtraHeaders); err == nil {
+			c.ExtraHeaders = string(hb)
+		}
 	}
 	if c.Adapter == "" {
 		c.Adapter = "openai"
@@ -150,14 +156,15 @@ func updateChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			Name      *string `json:"name"`
-			BaseURL   *string `json:"base_url"`
-			Adapter   *string `json:"adapter"`
-			Priority  *int    `json:"priority"`
-			Weight    *int    `json:"weight"`
-			TimeoutMS *int    `json:"timeout_ms"`
-			Enabled   *int    `json:"enabled"`
-			Note      *string `json:"note"`
+			Name         *string           `json:"name"`
+			BaseURL      *string           `json:"base_url"`
+			Adapter      *string           `json:"adapter"`
+			Priority     *int              `json:"priority"`
+			Weight       *int              `json:"weight"`
+			TimeoutMS    *int              `json:"timeout_ms"`
+			Enabled      *int              `json:"enabled"`
+			Note         *string           `json:"note"`
+			ExtraHeaders map[string]string `json:"extra_headers"`
 		}
 		if !decode(c, &b) {
 			return
@@ -196,6 +203,11 @@ func updateChannel(a *app.App) gin.HandlerFunc {
 		}
 		if b.Note != nil {
 			cur.Note = *b.Note
+		}
+		if b.ExtraHeaders != nil {
+			if hb, err := json.Marshal(b.ExtraHeaders); err == nil {
+				cur.ExtraHeaders = string(hb)
+			}
 		}
 		if err := store.UpdateChannel(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

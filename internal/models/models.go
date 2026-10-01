@@ -28,6 +28,7 @@ type Channel struct {
 	Enabled       int    `json:"enabled"`
 	HealthState   string `json:"health_state"`   // healthy / cooldown
 	CooldownUntil int64  `json:"cooldown_until"` // 冷却截止（unix 秒），0=无
+	ExtraHeaders  string `json:"extra_headers"`  // 渠道附加请求头（JSON 字符串），如 {"x-opencode-session":"..."}
 	Note          string `json:"note"`
 	CreatedAt     int64  `json:"created_at"`
 	UpdatedAt     int64  `json:"updated_at"`
@@ -67,6 +68,7 @@ type RequestLog struct {
 	DisplayModel     string  `json:"display_model"`
 	ChannelID        int64   `json:"channel_id"`
 	KeyID            int64   `json:"key_id"`
+	ChannelName      string  `json:"channel_name"` // 查询时联表填充，非存储字段
 	UpstreamModel    string  `json:"upstream_model"`
 	PromptTokens     int64   `json:"prompt_tokens"`
 	CompletionTokens int64   `json:"completion_tokens"`

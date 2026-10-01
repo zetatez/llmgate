@@ -9,12 +9,12 @@ import (
 
 // ---------------- 渠道（Channel） ----------------
 
-const channelCols = `id, name, base_url, adapter, priority, weight, timeout_ms, enabled, health_state, cooldown_until, note, created_at, updated_at`
+const channelCols = `id, name, base_url, adapter, priority, weight, timeout_ms, enabled, health_state, cooldown_until, extra_headers, note, created_at, updated_at`
 
 func scanChannel(row interface{ Scan(...any) error }) (*models.Channel, error) {
 	c := &models.Channel{}
 	err := row.Scan(&c.ID, &c.Name, &c.BaseURL, &c.Adapter, &c.Priority, &c.Weight,
-		&c.TimeoutMS, &c.Enabled, &c.HealthState, &c.CooldownUntil, &c.Note, &c.CreatedAt, &c.UpdatedAt)
+		&c.TimeoutMS, &c.Enabled, &c.HealthState, &c.CooldownUntil, &c.ExtraHeaders, &c.Note, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -63,13 +63,13 @@ func CreateChannel(db *sql.DB, c *models.Channel) (int64, error) {
 	return res.LastInsertId()
 }
 
-// UpdateChannel 更新渠道字段（name/base_url/priority/weight/timeout/enabled/note）。
+// UpdateChannel 更新渠道字段（name/base_url/priority/weight/timeout/enabled/note/extra_headers）。
 func UpdateChannel(db *sql.DB, c *models.Channel) error {
 	res, err := db.Exec(`
 		UPDATE channels SET name=?, base_url=?, adapter=?, priority=?, weight=?,
-			timeout_ms=?, enabled=?, note=?, updated_at=? WHERE id=?`,
+			timeout_ms=?, enabled=?, note=?, extra_headers=?, updated_at=? WHERE id=?`,
 		c.Name, c.BaseURL, c.Adapter, c.Priority, c.Weight, c.TimeoutMS,
-		c.Enabled, c.Note, models.Now(), c.ID)
+		c.Enabled, c.Note, c.ExtraHeaders, models.Now(), c.ID)
 	if err != nil {
 		return err
 	}

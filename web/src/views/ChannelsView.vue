@@ -9,7 +9,7 @@ const list = ref<Channel[]>([])
 const loading = ref(false)
 const selected = ref<Channel | null>(null)
 
-const channelDialog = reactive({ visible: false, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', note: '' })
+const channelDialog = reactive({ visible: false, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '' })
 
 async function load() {
   loading.value = true
@@ -29,11 +29,13 @@ function selectChannel(ch: Channel) {
 }
 
 function openCreate() {
-  Object.assign(channelDialog, { visible: true, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', note: '' })
+  Object.assign(channelDialog, { visible: true, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '' })
 }
 
 function openEdit(ch: Channel) {
-  Object.assign(channelDialog, { visible: true, editing: true, id: ch.id, name: ch.name, base_url: ch.base_url, adapter: ch.adapter, priority: ch.priority, weight: ch.weight, timeout_ms: ch.timeout_ms, enabled: ch.enabled, keys: '', note: ch.note })
+  let headers = ''
+  try { headers = JSON.stringify(JSON.parse(ch.extra_headers || '{}'), null, 2) } catch { headers = ch.extra_headers || '' }
+  Object.assign(channelDialog, { visible: true, editing: true, id: ch.id, name: ch.name, base_url: ch.base_url, adapter: ch.adapter, priority: ch.priority, weight: ch.weight, timeout_ms: ch.timeout_ms, enabled: ch.enabled, keys: '', headers, note: ch.note })
 }
 
 function parseKeyLines(text: string): Array<{ name: string; key: string }> {
@@ -50,6 +52,18 @@ async function submitChannel() {
     name: channelDialog.name, base_url: channelDialog.base_url, adapter: channelDialog.adapter,
     priority: +channelDialog.priority || 0, weight: +channelDialog.weight || 1, timeout_ms: +channelDialog.timeout_ms || 60000,
     enabled: channelDialog.enabled, note: channelDialog.note,
+  }
+  if (channelDialog.headers.trim()) {
+    try {
+      d.extra_headers = JSON.parse(channelDialog.headers)
+      if (typeof d.extra_headers !== 'object' || Array.isArray(d.extra_headers) || Object.keys(d.extra_headers).length == 0) {
+        ElMessage.warning('Extra Headers 需为 JSON 对象（可留空）')
+        return
+      }
+    } catch {
+      ElMessage.warning('Extra Headers 不是合法 JSON')
+      return
+    }
   }
   const extraKeys = parseKeyLines(channelDialog.keys)
   if (extraKeys.length) d.keys = extraKeys
@@ -347,6 +361,10 @@ onMounted(load)
           <el-input v-model="channelDialog.keys" type="textarea" :rows="3" placeholder="name=key, one per line" />
         </el-form-item>
         <el-form-item label="Note"><el-input v-model="channelDialog.note" /></el-form-item>
+        <el-form-item label="Extra Headers">
+          <el-input v-model="channelDialog.headers" type="textarea" :rows="3" class="code" placeholder='{"x-opencode-session":"你的 session"}' />
+          <div class="tip">JSON 对象：发给该渠道请求时附加的头（如 opencode 必需的 x-opencode-session），可留空</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="channelDialog.visible = false">Cancel</el-button>

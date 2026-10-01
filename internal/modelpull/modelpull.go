@@ -69,21 +69,44 @@ func PullChannel(ctx context.Context, a *app.App, ch *models.Channel, opt Option
 		weight = 1
 	}
 	for _, m := range names {
-		exists, err := store.RouteExists(a.DB, ch.ID, m, m)
+		ns := NamespacedName(m)
+		if ns == m {
+			// 无法推断厂商前缀：保留裸名（否则该模型不可访问）
+			exists, err := store.RouteExists(a.DB, ch.ID, m, m)
+			if err != nil {
+				return nil, err
+			}
+			if exists {
+				res.Skipped++
+			} else if _, err := store.CreateModelRoute(a.DB, &models.ModelRoute{
+				DisplayName: m, ChannelID: ch.ID, UpstreamModel: m,
+				Priority: opt.Priority, Weight: weight, Enabled: 1,
+			}); err != nil {
+				return nil, err
+			} else {
+				res.Created++
+			}
+			continue
+		}
+
+		// 统一厂商前缀命名：仅保留 vendor/model；删除对应的纯裸名自动路由
+		existsNS, err := store.RouteExists(a.DB, ch.ID, ns, m)
 		if err != nil {
 			return nil, err
 		}
-		if exists {
+		if existsNS {
 			res.Skipped++
-			continue
-		}
-		if _, err := store.CreateModelRoute(a.DB, &models.ModelRoute{
-			DisplayName: m, ChannelID: ch.ID, UpstreamModel: m,
+		} else if _, err := store.CreateModelRoute(a.DB, &models.ModelRoute{
+			DisplayName: ns, ChannelID: ch.ID, UpstreamModel: m,
 			Priority: opt.Priority, Weight: weight, Enabled: 1,
 		}); err != nil {
 			return nil, err
+		} else {
+			res.Created++
 		}
-		res.Created++
+		if _, err := store.DeleteAutoBare(a.DB, ch.ID, m); err != nil {
+			return nil, err
+		}
 	}
 	res.Total = len(names)
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	_ "llmgate/internal/adapter/openai" // init() 注册 openai 适配器
+	"llmgate/internal/adapter/openai" // init() 注册适配器；SetProxy 配置出站代理
 	"llmgate/internal/apiv1"
 	"llmgate/internal/app"
 	"llmgate/internal/config"
@@ -33,6 +33,14 @@ func main() {
 		log.Printf("timezone: %s", cfg.TZ)
 	} else {
 		log.Printf("warn: invalid LGM_TZ=%q: %v", cfg.TZ, err)
+	}
+
+	// 上游出站代理（socks5/http），用于绕过网络过滤
+	if err := openai.SetProxy(cfg.Proxy); err != nil {
+		log.Fatalf("proxy config: %v", err)
+	}
+	if cfg.Proxy != "" {
+		log.Printf("upstream proxy: %s", cfg.Proxy)
 	}
 
 	db, err := store.Open(cfg.DBPath)

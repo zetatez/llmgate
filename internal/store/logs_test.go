@@ -40,9 +40,11 @@ func TestRouteExistsAndRemoveStale(t *testing.T) {
 			t.Fatalf("create route: %v", err)
 		}
 	}
-	add("deepseek-chat", "deepseek-chat") // 同名直通：应保留
-	add("old-model", "old-model")         // 同名直通：应移除
-	add("my-alias", "deepseek-chat")      // 手动别名：应保留
+	add("deepseek-chat", "deepseek-chat")          // 同名直通：应保留
+	add("deepseek/deepseek-chat", "deepseek-chat") // 厂商前缀别名（对应预留模型 deepseek-chat 在 valid 列表）：应保留
+	add("deepseek/old-model", "old-model")         // 厂商前缀别名的陈旧路由：应移除
+	add("old-model", "old-model")                  // 同名直通陈旧：应移除
+	add("my-alias", "deepseek-chat")               // 手动别名：应保留
 
 	if exists, _ := RouteExists(db, id, "deepseek-chat", "deepseek-chat"); !exists {
 		t.Fatal("RouteExists should be true for same-name route")
@@ -58,8 +60,8 @@ func TestRouteExistsAndRemoveStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RemoveStaleRoutes: %v", err)
 	}
-	if removed != 1 {
-		t.Fatalf("expected 1 stale route removed, got %d", removed)
+	if removed != 2 {
+		t.Fatalf("expected 2 stale routes removed (plain+prefixed), got %d", removed)
 	}
 
 	names, err := ListModelRoutes(db)
@@ -70,11 +72,11 @@ func TestRouteExistsAndRemoveStale(t *testing.T) {
 	for _, r := range names {
 		got[r.DisplayName] = true
 	}
-	if !got["deepseek-chat"] || !got["my-alias"] {
+	if !got["deepseek-chat"] || !got["deepseek/deepseek-chat"] || !got["my-alias"] {
 		t.Fatalf("valid/alias routes must remain, got %v", got)
 	}
-	if got["old-model"] {
-		t.Fatal("stale route must be removed")
+	if got["old-model"] || got["deepseek/old-model"] {
+		t.Fatal("stale routes must be removed")
 	}
 }
 

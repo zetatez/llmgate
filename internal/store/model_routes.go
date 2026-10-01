@@ -95,6 +95,20 @@ func GetModelRoute(db *sql.DB, id int64) (*models.ModelRoute, error) {
 	return r, err
 }
 
+// DeleteAutoBare 删除该渠道的"纯裸名自动路由"（display_name=upstream_model 且不含 '/'），
+// 用于收敛到厂商前缀命名。手动别名（display 与 upstream 不同）不受影响。
+func DeleteAutoBare(db *sql.DB, channelID int64, upstreamModel string) (int64, error) {
+	res, err := db.Exec(`
+		DELETE FROM model_routes
+		WHERE channel_id = ? AND upstream_model = ?
+		  AND display_name = upstream_model AND display_name NOT LIKE '%/%'`,
+		channelID, upstreamModel)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // RouteExists 判断「渠道 + 显示名 + 上游模型」的完整路由是否已存在（自动同步去重用）。
 func RouteExists(db *sql.DB, channelID int64, displayName, upstreamModel string) (bool, error) {
 	var n int64
@@ -103,8 +117,9 @@ func RouteExists(db *sql.DB, channelID int64, displayName, upstreamModel string)
 	return n > 0, err
 }
 
-// RemoveStaleRoutes 删除该渠道下"同名直通"(display_name=upstream_model) 但上游已不存在的路由。
-// 手动别名映射（display_name != upstream_model）保留，避免误删用户自定义路由。
+// RemoveStaleRoutes 删除该渠道下已失效的自动路由：上游已不存在的模型。
+// 自动路由包括"同名直通"(display=upstream) 与"厂商前缀别名"(display=vendor/upstream)；
+// 手动别名映射（display 与 upstream 无关）保留，避免误删用户自定义路由。
 func RemoveStaleRoutes(db *sql.DB, channelID int64, validModels []string) (int64, error) {
 	if len(validModels) == 0 {
 		return 0, nil
@@ -117,8 +132,11 @@ func RemoveStaleRoutes(db *sql.DB, channelID int64, validModels []string) (int64
 	}
 	res, err := db.Exec(`
 		DELETE FROM model_routes
-		WHERE channel_id = ? AND display_name = upstream_model
-		  AND upstream_model NOT IN (`+placeholders+`)`, args...)
+		WHERE channel_id = ?
+		  AND upstream_model NOT IN (`+placeholders+`)
+		  AND (display_name = upstream_model
+		       OR (INSTR(display_name, '/') > 0
+		           AND SUBSTR(display_name, INSTR(display_name, '/') + 1) = upstream_model))`, args...)
 	if err != nil {
 		return 0, err
 	}

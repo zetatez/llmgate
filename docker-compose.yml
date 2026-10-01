@@ -1,8 +1,9 @@
 services:
   llmgate:
     build: .
-    ports:
-      - 3210:3210
+    # host 网络：直通宿主网络栈，让 LGM_PROXY 的 127.0.0.1:7891 可直接访问；
+    # 应用监听 LGM_HTTP_ADDR（默认 :3210），等价于原端口映射
+    network_mode: host
     environment:
       - LGM_ADMIN_TOKEN=${LGM_ADMIN_TOKEN:-}
       - LGM_ENCRYPT_SEED=${LGM_ENCRYPT_SEED:-}
@@ -11,8 +12,9 @@ services:
       - LGM_LOG_LEVEL=${LGM_LOG_LEVEL:-release}
       - LGM_TZ=${LGM_TZ:-Asia/Shanghai}
       - TZ=${LGM_TZ:-Asia/Shanghai}
-      - LGM_DB_PATH=/data/llmgate.db # 容器内 DB 路径固定指向挂载卷；不受 .env 的 LGM_DB_PATH 影响. .env 里的 LGM_DB_PATH 仅用于本地 make dev-backend
+      # 上游出站代理，如 socks5://127.0.0.1:7891；空=直连
+      - LGM_PROXY=${LGM_PROXY:-}
+      - LGM_DB_PATH=/data/llmgate.db # 容器内 DB 路径固定指向挂载卷；.env 的 LGM_DB_PATH 仅用于本地 make dev-backend
     volumes:
       - ./data:/data
     restart: unless-stopped
-

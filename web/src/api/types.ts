@@ -10,6 +10,7 @@ export interface Channel {
   timeout_ms: number
   enabled: number
   health_state: string
+  extra_headers: string
   note: string
   created_at: number
   updated_at: number
@@ -60,6 +61,7 @@ export interface RequestLog {
   display_model: string
   channel_id: number
   key_id: number
+  channel_name?: string
   upstream_model: string
   prompt_tokens: number
   completion_tokens: number

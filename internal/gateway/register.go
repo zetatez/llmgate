@@ -4,6 +4,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -71,6 +72,41 @@ func bearerValue(h string) string {
 	return ""
 }
 
+// passThroughDefault 常见客户端/上游会要求透传的会话头白名单（小写比较）。
+var passThroughDefault = map[string]bool{
+	"x-opencode-session":  true,
+	"x-codex-session":     true,
+	"x-api-key":           false, // 禁用：避免覆盖我们的 Bearer 鉴权
+	"openai-organization": true,
+	"openai-project":      true,
+	"openai-request-id":   true,
+	"x-request-id":        true,
+	"x-conversation-id":   true,
+}
+
+// buildPassHeaders 从客户端请求头中提取需要透传给上游的头（白名单 + 配置扩展），大小写不敏感。
+func buildPassHeaders(h http.Header, extra []string) map[string]string {
+	allowed := map[string]bool{}
+	for k := range passThroughDefault {
+		if passThroughDefault[k] {
+			allowed[k] = true
+		}
+	}
+	for _, e := range extra {
+		allowed[strings.ToLower(e)] = true
+	}
+	out := map[string]string{}
+	for name := range h {
+		key := strings.ToLower(name)
+		if allowed[key] {
+			if v := h.Get(name); v != "" {
+				out[key] = v
+			}
+		}
+	}
+	return out
+}
+
 func handleListModels(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rows, err := a.DB.Query(`SELECT DISTINCT display_name FROM model_routes WHERE enabled = 1`)
@@ -122,11 +158,20 @@ func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamP
 			CreatedAt:    models.Now(),
 		}
 
+		// 需要透传的上游会话头（opencode/codex/OpenAI 系客户端等，白名单 + LGM_PASSTHROUGH_HEADERS 扩展）
+		passHeaders := buildPassHeaders(c.Request.Header, a.Cfg.PassthroughHeaders)
+
+		// opencode.ai 要求请求带稳定的 x-opencode-session（用于会话路由/缓存）；
+		// 客户端没带时按「用户+模型」派生稳定值自动附带（渠道配置的额外头可覆盖）
+		if _, ok := passHeaders["x-opencode-session"]; !ok {
+			passHeaders["x-opencode-session"] = fmt.Sprintf("llmgate-%d-%s", user.ID, meta.Model)
+		}
+
 		if meta.Stream {
-			handleStreamRoute(c, a, bus, rt, body, meta.Model, upstreamPath, logEntry)
+			handleStreamRoute(c, a, bus, rt, body, meta.Model, upstreamPath, logEntry, passHeaders)
 			return
 		}
-		handlePlainRoute(c, a, bus, rt, body, meta.Model, upstreamPath, logEntry)
+		handlePlainRoute(c, a, bus, rt, body, meta.Model, upstreamPath, logEntry, passHeaders)
 	}
 }
 
@@ -138,10 +183,22 @@ func finalizeLog(a *app.App, bus *logbus.Bus, logEntry *models.RequestLog) {
 	bus.Write(logEntry)
 }
 
+// oneLine 把多行文本压成单行（用于日志/错误记录，避免换行破坏展示）。
+func oneLine(s string, max int) string {
+	if max <= 0 {
+		max = 200
+	}
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > max {
+		s = s[:max] + "..."
+	}
+	return s
+}
+
 // handlePlainRoute 非流式转发。
-func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Router, body []byte, model, upstreamPath string, logEntry *models.RequestLog) {
+func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Router, body []byte, model, upstreamPath string, logEntry *models.RequestLog, passHeaders map[string]string) {
 	start := time.Now()
-	res, ferr := rt.ForwardChat(c.Request.Context(), body, model, upstreamPath)
+	res, ferr := rt.ForwardChat(c.Request.Context(), body, model, upstreamPath, passHeaders)
 	logEntry.LatencyMS = time.Since(start).Milliseconds()
 
 	if res != nil {
@@ -162,25 +219,25 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 		return
 	}
 	logEntry.Status = "error"
-	logEntry.ErrorCode = "route_failed"
+	logEntry.ErrorCode = oneLine(ferr.Error(), 200) // 单行：渠道 + 原因（如 channel opencode: upstream 403 ...）
 	finalizeLog(a, bus, logEntry)
 	code, msg := mapRouteError(ferr)
-	c.JSON(code, gin.H{"error": gin.H{"message": msg, "type": "upstream_error"}})
+	c.JSON(code, gin.H{"error": gin.H{"message": oneLine(msg, 500), "type": "upstream_error"}})
 }
 
 // handleStreamRoute SSE 流式代理：首字节前可故障转移，流出后绑定渠道；
 // 上游中断时补发标准 error 事件。
-func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Router, body []byte, model, upstreamPath string, logEntry *models.RequestLog) {
+func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Router, body []byte, model, upstreamPath string, logEntry *models.RequestLog, passHeaders map[string]string) {
 	start := time.Now()
-	sr, ferr := rt.ForwardChatStream(c.Request.Context(), body, model, upstreamPath)
+	sr, ferr := rt.ForwardChatStream(c.Request.Context(), body, model, upstreamPath, passHeaders)
 	logEntry.LatencyMS = time.Since(start).Milliseconds()
 
 	if ferr != nil {
 		logEntry.Status = "error"
-		logEntry.ErrorCode = "route_failed"
+		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
 		finalizeLog(a, bus, logEntry)
 		code, msg := mapRouteError(ferr)
-		c.JSON(code, gin.H{"error": gin.H{"message": msg, "type": "upstream_error"}})
+		c.JSON(code, gin.H{"error": gin.H{"message": oneLine(msg, 500), "type": "upstream_error"}})
 		return
 	}
 

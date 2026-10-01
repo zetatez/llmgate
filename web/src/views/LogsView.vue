@@ -49,9 +49,15 @@ onMounted(load)
       <el-table-column label="Time" width="170">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column prop="display_model" label="Model" width="140" />
-      <el-table-column prop="channel_id" label="Ch." width="60" />
-      <el-table-column prop="upstream_model" label="Upstream Model" width="130" show-overflow-tooltip />
+      <el-table-column prop="display_model" label="Model" width="150" show-overflow-tooltip />
+      <el-table-column label="Channel" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.channel_name || `#${row.channel_id}` }}</template>
+      </el-table-column>
+      <el-table-column label="Upstream" min-width="140" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.channel_name ? `${row.channel_name}/${row.upstream_model}` : row.upstream_model }}
+        </template>
+      </el-table-column>
       <el-table-column label="Tokens (p/c/t)" width="120">
         <template #default="{ row }">{{ row.prompt_tokens }} / {{ row.completion_tokens }} / {{ row.total_tokens }}</template>
       </el-table-column>

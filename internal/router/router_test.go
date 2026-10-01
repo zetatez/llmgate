@@ -16,17 +16,17 @@ func mkCandidate(chID, chPrio, chWeight, routePrio, routeWeight int64) Candidate
 
 func TestPenaltyLadder(t *testing.T) {
 	p := NewPenalizer()
-	if d := p.PenaliseChan(1, 0); d != 30*time.Second {
-		t.Fatalf("first penalty = %v, want 30s", d)
+	if d := p.PenaliseChan(1, 0); d != 2*time.Second {
+		t.Fatalf("first penalty = %v, want 2s", d)
 	}
-	if d := p.PenaliseChan(1, 0); d != 60*time.Second {
-		t.Fatalf("second penalty = %v, want 60s", d)
+	if d := p.PenaliseChan(1, 0); d != 4*time.Second {
+		t.Fatalf("second penalty = %v, want 4s", d)
 	}
-	if d := p.PenaliseChan(1, 0); d != 15*time.Minute {
-		t.Fatalf("third penalty = %v, want 15min", d)
+	if d := p.PenaliseChan(1, 0); d != 8*time.Second {
+		t.Fatalf("third penalty = %v, want 8s", d)
 	}
-	if d := p.PenaliseChan(1, 0); d != 15*time.Minute {
-		t.Fatalf("fourth penalty = %v, want 15min (capped)", d)
+	if d := p.PenaliseChan(1, 0); d != 8*time.Second {
+		t.Fatalf("fourth penalty = %v, want 8s (capped)", d)
 	}
 	if !p.ChPenalized(1) {
 		t.Fatal("channel 1 should be penalized")
@@ -36,8 +36,8 @@ func TestPenaltyLadder(t *testing.T) {
 		t.Fatal("channel 1 should be cleared")
 	}
 	// 清除后退避从头开始
-	if d := p.PenaliseChan(1, 0); d != 30*time.Second {
-		t.Fatalf("post-clear penalty = %v, want 30s", d)
+	if d := p.PenaliseChan(1, 0); d != 2*time.Second {
+		t.Fatalf("post-clear penalty = %v, want 2s", d)
 	}
 }
 
@@ -56,6 +56,21 @@ func TestKeyPenalty(t *testing.T) {
 	}
 	if p.KeyPenalized(2) {
 		t.Fatal("key 2 should not be penalized")
+	}
+}
+
+func TestModelDenied(t *testing.T) {
+	p := NewPenalizer()
+	p.DenyModel(7, "gpt-x", 10*time.Minute)
+	if !p.ModelDenied(7, "gpt-x") {
+		t.Fatal("gpt-x on ch7 should be denied")
+	}
+	if p.ModelDenied(7, "other-model") || p.ModelDenied(8, "gpt-x") {
+		t.Fatal("different model/channel should not be denied")
+	}
+	p.ClearModelDenied(7, "gpt-x")
+	if p.ModelDenied(7, "gpt-x") {
+		t.Fatal("denied flag should be cleared")
 	}
 }
 
@@ -81,23 +96,23 @@ func TestPickByPriority(t *testing.T) {
 		mkCandidate(1, 0, 1, 0, 1), // 最优
 		mkCandidate(2, 0, 1, 1, 1), // 次
 	}
-	pick := r.pickByPriority(cands, map[int64]bool{})
+	pick := r.pickByPriority(cands, map[int64]bool{}, "m")
 	if pick == nil || pick.Channel.ID != 1 {
 		t.Fatalf("expected channel 1 to be picked, got %+v", pick)
 	}
 	// 排除渠道 1 → 应选渠道 2
-	pick = r.pickByPriority(cands, map[int64]bool{1: true})
+	pick = r.pickByPriority(cands, map[int64]bool{1: true}, "m")
 	if pick == nil || pick.Channel.ID != 2 {
 		t.Fatalf("expected channel 2 after excluding 1, got %+v", pick)
 	}
 	// 熔断渠道 1 → 应选渠道 2
 	r.pen.PenaliseChan(1, time.Hour)
-	pick = r.pickByPriority(cands, map[int64]bool{})
+	pick = r.pickByPriority(cands, map[int64]bool{}, "m")
 	if pick == nil || pick.Channel.ID != 2 {
 		t.Fatalf("expected channel 2 when channel 1 penalized, got %+v", pick)
 	}
 	// 全部排除 → nil
-	if pick := r.pickByPriority(cands, map[int64]bool{1: true, 2: true}); pick != nil {
+	if pick := r.pickByPriority(cands, map[int64]bool{1: true, 2: true}, "m"); pick != nil {
 		t.Fatal("expected nil when all excluded")
 	}
 }
