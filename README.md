@@ -117,7 +117,7 @@ docs/                 design.md 设计文档 / deploy.md 部署指南 / model-pr
 
 - [x] Phase 1：渠道/号池/模型路由 CRUD、非流式转发、熔断故障转移、日志统计、管理后台、Docker 部署
 - [x] 增强：自动模型同步（定时+手动）、单价费用估算、渠道优先级/权重生效、东八区、令牌随时复制
-- [ ] Phase 2：SSE 流式、DB 级健康状态持久化与恢复、日志保留清理任务、单元测试
+- [x] Phase 2：**SSE 流式转发**（首字节前故障转移、中断错误事件、用量捕获）、**DB 级冷却持久化 + 探活自愈**、**日志保留自动清理**、**单元测试**（quota/secret/router/store）
 - [ ] Phase 3（按需）：其他协议适配器（Anthropic/Gemini）、Prometheus 指标、响应缓存、告警
 
 详见 [docs/design.md](docs/design.md) 与 [docs/deploy.md](docs/deploy.md)。

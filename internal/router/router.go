@@ -37,7 +37,7 @@ const quotaPenalty = 15 * time.Minute // 上游额度用尽/欠费等，按最�
 type Router struct {
 	db     *sql.DB
 	secret *secret.Manager
-	pen    *penalizer
+	pen    *Penalizer
 }
 
 // penaltyState 单个目标（渠道或 Key）的熔断信息。
@@ -46,27 +46,29 @@ type penaltyState struct {
 	attempts int
 }
 
-// penalizer 无锁需外部加锁；内存态熔断，进程重启即清零。
-type penalizer struct {
+// Penalizer 内存态熔断器（并发安全）。单个，供 Router 与 puller 探活共用。
+type Penalizer struct {
 	mu  sync.RWMutex
 	ch  map[int64]penaltyState // 渠道冷却（网络/5xx/429/额度）
 	key map[int64]time.Time    // Key 冷却（401/个Key限流）
 }
 
-func newPenalizer() *penalizer {
-	return &penalizer{ch: map[int64]penaltyState{}, key: map[int64]time.Time{}}
+// NewPenalizer 创建熔断器。
+func NewPenalizer() *Penalizer {
+	return &Penalizer{ch: map[int64]penaltyState{}, key: map[int64]time.Time{}}
 }
 
-func (p *penalizer) chPenalized(id int64) bool {
+// ChPenalized 渠道是否处于熔断中。
+func (p *Penalizer) ChPenalized(id int64) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	s, ok := p.ch[id]
 	return ok && time.Now().Before(s.until)
 }
 
-// penalizeChan 冷却渠道并按阶梯退避：30s → 60s → 15min（此后保持 15min）。
-// forced>0 时直接按给定兜底时长。冷却过期后的下一次失败会继续沿阶梯（已封顶则保持 15min）。
-func (p *penalizer) penalizeChan(id int64, forced time.Duration) {
+// PenaliseChan 冷却渠道并按阶梯退避：30s → 60s → 15min（此后保持 15min），返回本次冷却时长。
+// forced>0 时直接按给定兜底时长。
+func (p *Penalizer) PenaliseChan(id int64, forced time.Duration) time.Duration {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	s := p.ch[id]
@@ -84,10 +86,11 @@ func (p *penalizer) penalizeChan(id int64, forced time.Duration) {
 	}
 	s.until = time.Now().Add(d)
 	p.ch[id] = s
+	return d
 }
 
-// clearChan 成功响应后清除渠道冷却并重置退避。
-func (p *penalizer) clearChan(id int64) {
+// ClearChan 成功响应后清除渠道冷却并重置退避。
+func (p *Penalizer) ClearChan(id int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, ok := p.ch[id]; ok {
@@ -95,14 +98,15 @@ func (p *penalizer) clearChan(id int64) {
 	}
 }
 
-func (p *penalizer) keyPenalized(id int64) bool {
+// KeyPenalized Key 是否处于熔断中。
+func (p *Penalizer) KeyPenalized(id int64) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	t, ok := p.key[id]
 	return ok && time.Now().Before(t)
 }
 
-func (p *penalizer) penalizeKey(id int64, d time.Duration) {
+func (p *Penalizer) PenalizeKey(id int64, d time.Duration) {
 	if id <= 0 {
 		return
 	}
@@ -131,9 +135,24 @@ type Result struct {
 	Retries     int
 }
 
-// New 创建 Router。
-func New(a *app.App) *Router {
-	return &Router{db: a.DB, secret: a.Secret, pen: newPenalizer()}
+// New 创建 Router，使用外部注入的共享熔断器（与 puller 探活共用）。
+func New(a *app.App, pen *Penalizer) *Router {
+	if pen == nil {
+		pen = NewPenalizer()
+	}
+	return &Router{db: a.DB, secret: a.Secret, pen: pen}
+}
+
+// penalizeChannel 冷却渠道（内存 + DB 持久化 cooldown，重启不丢）。
+func (r *Router) penalizeChannel(ch *models.Channel, forced time.Duration) {
+	d := r.pen.PenaliseChan(ch.ID, forced)
+	_ = store.SetChannelCooldown(r.db, ch.ID, models.Now()+int64(d.Seconds()))
+}
+
+// recoverChannel 渠道恢复（清内存熔断 + DB 恢复 healthy）。
+func (r *Router) recoverChannel(ch *models.Channel) {
+	r.pen.ClearChan(ch.ID)
+	_ = store.SetChannelHealthy(r.db, ch.ID)
 }
 
 // Candidates 返回某模型可参与路由的候选（启用路由 + 启用渠道 + 非 cooldown）。
@@ -165,7 +184,7 @@ func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candida
 	return out, rows.Err()
 }
 
-// effectiveLevel 有效优先层级 = (路由优先级, 渠道优先级)，越小越先消费。
+// candidateLess 有效优先层级比较 = (路由优先级, 渠道优先级)，越小越先消费。
 func candidateLess(a, b Candidate) bool {
 	if a.Route.Priority != b.Route.Priority {
 		return a.Route.Priority < b.Route.Priority
@@ -179,7 +198,7 @@ func (r *Router) pickByPriority(cands []Candidate, excludedCh map[int64]bool) *C
 	var best *Candidate
 	for i := range cands {
 		c := cands[i]
-		if excludedCh[c.Channel.ID] || r.pen.chPenalized(c.Channel.ID) {
+		if excludedCh[c.Channel.ID] || r.pen.ChPenalized(c.Channel.ID) {
 			continue
 		}
 		if best == nil || candidateLess(c, *best) {
@@ -206,7 +225,7 @@ func (r *Router) pickKey(channelID int64, failedKeys map[int64]bool) (*models.Ch
 	}
 	var available []*models.ChannelKey
 	for _, k := range keys {
-		if k.Enabled == 1 && !failedKeys[k.ID] && !r.pen.keyPenalized(k.ID) {
+		if k.Enabled == 1 && !failedKeys[k.ID] && !r.pen.KeyPenalized(k.ID) {
 			available = append(available, k)
 		}
 	}
@@ -276,7 +295,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			// 网络错误/超时：冷却该渠道（连接级故障对所有 Key 一致）
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
-			r.pen.penalizeChan(cand.Channel.ID, 0)
+			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -288,7 +307,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		if err != nil {
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
-			r.pen.penalizeChan(cand.Channel.ID, 0)
+			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -303,12 +322,12 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 			if isQuotaExceeded(bodyStr) {
-				r.pen.penalizeChan(cand.Channel.ID, quotaPenalty) // 额度用尽，5min 内不再重试
+				r.penalizeChannel(&cand.Channel, quotaPenalty) // 额度用尽，15min 内不再重试
 			} else if code == http.StatusTooManyRequests {
-				r.pen.penalizeChan(cand.Channel.ID, 0) // 普通限流，指数退避
+				r.penalizeChannel(&cand.Channel, 0) // 普通限流，指数退避
 			} else {
 				// 非额度类 403，可能是个别 Key 的权限问题 → 仅冷却该 Key
-				r.pen.penalizeKey(key.ID, 0)
+				r.pen.PenalizeKey(key.ID, 0)
 				failedKeys[key.ID] = true
 			}
 			excludedCh[cand.Channel.ID] = true
@@ -320,7 +339,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			// Key 无效：冷却该 Key，同渠道换 Key 重试
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: unauthorized key", cand.Channel.Name)
-			r.pen.penalizeKey(key.ID, 5*time.Minute)
+			r.pen.PenalizeKey(key.ID, 5*time.Minute)
 			failedKeys[key.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -329,7 +348,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		case code == http.StatusRequestTimeout || code >= http.StatusInternalServerError:
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, truncate(string(body), 300))
-			r.pen.penalizeChan(cand.Channel.ID, 0)
+			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -340,20 +359,129 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, truncate(string(body), 300))
 			excludedCh[cand.Channel.ID] = true
-			r.pen.clearChan(cand.Channel.ID)
+			r.recoverChannel(&cand.Channel)
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
 			}
 			continue
 		case code >= http.StatusBadRequest:
 			// 其余 4xx（422 等）透传，不重试
-			r.pen.clearChan(cand.Channel.ID)
+			r.recoverChannel(&cand.Channel)
 			return &Result{StatusCode: code, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 		default:
 			// 成功：清除该渠道熔断并恢复
-			r.pen.clearChan(cand.Channel.ID)
+			r.recoverChannel(&cand.Channel)
 			return &Result{StatusCode: http.StatusOK, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 		}
+	}
+
+	if networkAttempts > 0 {
+		return nil, lastErr
+	}
+	return nil, ErrNoCandidate
+}
+
+// StreamResult 是流式转发结果：Stream 为已连接的上游 SSE 流；
+// Passthrough 非空时表示上游以非 2xx 透传（无流）。
+type StreamResult struct {
+	StatusCode  int
+	ContentType string
+	Stream      io.ReadCloser
+	Passthrough []byte
+	Channel     models.Channel
+	Route       models.ModelRoute
+	KeyID       int64
+	Retries     int
+}
+
+// ForwardChatStream 流式转发：在首个字节流出前失败会自动切换到下一候选；
+// 一旦流出即绑定该渠道。非 2xx 中 429/402/403/408/5xx/400/404 触发故障转移，其余 4xx 透传。
+func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, displayModel, upstreamPath string) (*StreamResult, error) {
+	cands, err := r.Candidates(ctx, displayModel)
+	if err != nil {
+		return nil, err
+	}
+	excludedCh := map[int64]bool{}
+	failedKeys := map[int64]bool{}
+	var lastErr error
+	networkAttempts := 0
+	maxNetworkAttempts := 3
+
+	for {
+		cand := r.pickByPriority(cands, excludedCh)
+		if cand == nil {
+			break
+		}
+		key, apiKey, err := r.pickKey(cand.Channel.ID, failedKeys)
+		if err != nil {
+			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
+			excludedCh[cand.Channel.ID] = true
+			continue
+		}
+		adpt := adapter.Get(cand.Channel.Adapter)
+		if adpt == nil {
+			lastErr = fmt.Errorf("channel %s: adapter %q not registered", cand.Channel.Name, cand.Channel.Adapter)
+			excludedCh[cand.Channel.ID] = true
+			continue
+		}
+		rc, err := adpt.DoStream(ctx, adapter.ChannelFrom(&cand.Channel), apiKey, &adapter.Request{
+			Method:  http.MethodPost,
+			Path:    upstreamPath,
+			Body:    bytes.NewReader(requestBody),
+			Headers: map[string]string{},
+			Model:   displayModel,
+		})
+		if err != nil {
+			var se *adapter.StatusError
+			if !errors.As(err, &se) {
+				// 网络/连接失败
+				networkAttempts++
+				lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
+				r.penalizeChannel(&cand.Channel, 0)
+				excludedCh[cand.Channel.ID] = true
+				if networkAttempts >= maxNetworkAttempts {
+					return nil, lastErr
+				}
+				continue
+			}
+			// 上游已响应（非 2xx）
+			code := se.StatusCode
+			bodyStr := truncate(string(se.Body), 300)
+			switch {
+			case code == http.StatusTooManyRequests || code == http.StatusPaymentRequired || code == http.StatusForbidden:
+				networkAttempts++
+				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
+				if isQuotaExceeded(bodyStr) {
+					r.penalizeChannel(&cand.Channel, quotaPenalty)
+				} else {
+					r.penalizeChannel(&cand.Channel, 0)
+				}
+				excludedCh[cand.Channel.ID] = true
+			case code == http.StatusUnauthorized:
+				networkAttempts++
+				lastErr = fmt.Errorf("channel %s: unauthorized key", cand.Channel.Name)
+				r.pen.PenalizeKey(key.ID, 5*time.Minute)
+				failedKeys[key.ID] = true
+			case code == http.StatusRequestTimeout || code >= http.StatusInternalServerError || code == http.StatusBadRequest || code == http.StatusNotFound:
+				networkAttempts++
+				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
+				r.penalizeChannel(&cand.Channel, 0)
+				excludedCh[cand.Channel.ID] = true
+			default:
+				// 其余 4xx 透传（非流，直接给客户端原始错误体）
+				r.recoverChannel(&cand.Channel)
+				return &StreamResult{StatusCode: code, ContentType: se.HeaderMap["Content-Type"], Passthrough: se.Body,
+					Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
+			}
+			if networkAttempts >= maxNetworkAttempts {
+				return nil, lastErr
+			}
+			continue
+		}
+		// 成功：绑定该渠道并返回 SSE 流
+		r.recoverChannel(&cand.Channel)
+		return &StreamResult{StatusCode: http.StatusOK, Stream: rc,
+			Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 	}
 
 	if networkAttempts > 0 {

@@ -335,6 +335,15 @@ func ChannelStatsToday(db *sql.DB) ([]ChannelDayStats, error) {
 	return out, rows.Err()
 }
 
+// DeleteOldLogs 删除创建时间早于 cutoff 的请求日志，返回删除条数（日志保留清理任务）。
+func DeleteOldLogs(db *sql.DB, cutoff int64) (int64, error) {
+	res, err := db.Exec(`DELETE FROM request_logs WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // RecentFailures 最近 N 条失败日志。
 func RecentFailures(db *sql.DB, n int) ([]*models.RequestLog, error) {
 	if n <= 0 || n > 50 {

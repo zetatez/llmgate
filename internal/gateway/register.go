@@ -2,9 +2,11 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,12 +21,12 @@ import (
 
 // Register 挂载网关路由，全部请求走用户令牌鉴权。
 // 注意：gate 组路径由调用方传入（cfg.GatewayPrefix + "v1"）。
-func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus) {
+func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Penalizer) {
 	v1.Use(gatewayAuth(a))
 	v1.GET("/models", handleListModels(a))
-	v1.POST("/chat/completions", handleForward(a, bus, "/v1/chat/completions"))
-	v1.POST("/completions", handleForward(a, bus, "/v1/completions"))
-	v1.POST("/embeddings", handleForward(a, bus, "/v1/embeddings"))
+	v1.POST("/chat/completions", handleForward(a, bus, pen, "/v1/chat/completions"))
+	v1.POST("/completions", handleForward(a, bus, pen, "/v1/completions"))
+	v1.POST("/embeddings", handleForward(a, bus, pen, "/v1/embeddings"))
 }
 
 const ctxUserKey = "llmgate.user"
@@ -35,24 +37,24 @@ func gatewayAuth(a *app.App) gin.HandlerFunc {
 		token := bearerValue(c.GetHeader("Authorization"))
 		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": gin.H{"message": "缺少 Authorization: Bearer <sk-xxx>", "type": "unauthorized"},
+				"error": gin.H{"message": "missing Authorization: Bearer <sk-xxx>", "type": "unauthorized"},
 			})
 			return
 		}
 		user, err := store.GetUserByTokenHash(a.DB, app.HashToken(token))
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "内部错误", "type": "internal_error"}})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "internal error", "type": "internal_error"}})
 			return
 		}
 		if user == nil || user.Status != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": gin.H{"message": "令牌无效或已停用", "type": "unauthorized"},
+				"error": gin.H{"message": "invalid or disabled token", "type": "unauthorized"},
 			})
 			return
 		}
 		if user.QuotaLimit > 0 && user.QuotaUsed >= user.QuotaLimit {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": gin.H{"message": "额度已用完", "type": "quota_exceeded"},
+				"error": gin.H{"message": "quota exceeded", "type": "quota_exceeded"},
 			})
 			return
 		}
@@ -90,8 +92,8 @@ func handleListModels(a *app.App) gin.HandlerFunc {
 	}
 }
 
-// handleForward 读取请求体，走路由转发（非流式；stream=true 返回 501）。
-func handleForward(a *app.App, bus *logbus.Bus, upstreamPath string) gin.HandlerFunc {
+// handleForward 读取请求体，按 stream 分流：非流式转发或 SSE 流式代理。
+func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamPath string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -104,68 +106,154 @@ func handleForward(a *app.App, bus *logbus.Bus, upstreamPath string) gin.Handler
 		}
 		if err := json.Unmarshal(body, &meta); err != nil || meta.Model == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{"message": "缺少合法 model 字段", "type": "invalid_request_error"},
-			})
-			return
-		}
-		if meta.Stream {
-			c.JSON(http.StatusNotImplemented, gin.H{
-				"error": gin.H{"message": "流式响应暂未支持（Phase 2）", "type": "not_implemented"},
+				"error": gin.H{"message": "missing valid model field", "type": "invalid_request_error"},
 			})
 			return
 		}
 
 		userAny, _ := c.Get(ctxUserKey)
 		user := userAny.(*models.User)
+		rt := router.New(a, pen)
 
-		rt := router.New(a)
-		start := time.Now()
-		res, ferr := rt.ForwardChat(c.Request.Context(), body, meta.Model, upstreamPath)
-		latency := time.Since(start).Milliseconds()
-
-		// 记录日志（异步）
 		logEntry := &models.RequestLog{
 			UserID:       user.ID,
 			DisplayModel: meta.Model,
 			Stream:       boolToInt(meta.Stream),
-			LatencyMS:    latency,
 			CreatedAt:    models.Now(),
 		}
-		if res != nil {
-			logEntry.ChannelID = res.Channel.ID
-			logEntry.KeyID = res.KeyID
-			logEntry.UpstreamModel = res.Route.UpstreamModel
-			logEntry.Status = successOrError(res.StatusCode)
-			if logEntry.Status == "error" {
-				logEntry.ErrorCode = http.StatusText(res.StatusCode)
-			}
-			parseUsage(res.Body, logEntry)
-		} else {
-			logEntry.Status = "error"
-			logEntry.ErrorCode = "route_failed"
-		}
-		// 成本估算（读 settings 中 model_pricing）
-		pricingStr, _ := a.GetSetting("model_pricing")
-		if pricing, perr := quota.ParsePricing(pricingStr); perr == nil {
-			logEntry.Cost = quota.EstimateCost(pricing, meta.Model,
-				logEntry.PromptTokens, logEntry.CompletionTokens)
-		}
-		bus.Write(logEntry)
-		if logEntry.Status == "success" {
-			_ = store.AddUserQuota(a.DB, user.ID, logEntry.Cost)
-		}
-		_ = store.TouchChannelKey(a.DB, resKeyIDForLog(res))
 
-		if ferr != nil {
-			code, msg := mapRouteError(ferr)
-			c.JSON(code, gin.H{"error": gin.H{"message": msg, "type": "upstream_error"}})
+		if meta.Stream {
+			handleStreamRoute(c, a, bus, rt, body, meta.Model, upstreamPath, logEntry)
 			return
 		}
-		c.Data(res.StatusCode, contentType(res), res.Body)
+		handlePlainRoute(c, a, bus, rt, body, meta.Model, upstreamPath, logEntry)
 	}
 }
 
-// parseUsage 从上游响应体解析 usage，并写回日志字段。
+func finalizeLog(a *app.App, bus *logbus.Bus, logEntry *models.RequestLog) {
+	pricingStr, _ := a.GetSetting("model_pricing")
+	if pricing, perr := quota.ParsePricing(pricingStr); perr == nil {
+		logEntry.Cost = quota.EstimateCost(pricing, logEntry.DisplayModel, logEntry.PromptTokens, logEntry.CompletionTokens)
+	}
+	bus.Write(logEntry)
+}
+
+// handlePlainRoute 非流式转发。
+func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Router, body []byte, model, upstreamPath string, logEntry *models.RequestLog) {
+	start := time.Now()
+	res, ferr := rt.ForwardChat(c.Request.Context(), body, model, upstreamPath)
+	logEntry.LatencyMS = time.Since(start).Milliseconds()
+
+	if res != nil {
+		logEntry.ChannelID = res.Channel.ID
+		logEntry.KeyID = res.KeyID
+		logEntry.UpstreamModel = res.Route.UpstreamModel
+		logEntry.Status = successOrError(res.StatusCode)
+		if logEntry.Status == "error" {
+			logEntry.ErrorCode = http.StatusText(res.StatusCode)
+		}
+		parseUsage(res.Body, logEntry)
+		finalizeLog(a, bus, logEntry)
+		if logEntry.Status == "success" {
+			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+		}
+		_ = store.TouchChannelKey(a.DB, res.KeyID)
+		c.Data(res.StatusCode, contentType(res), res.Body)
+		return
+	}
+	logEntry.Status = "error"
+	logEntry.ErrorCode = "route_failed"
+	finalizeLog(a, bus, logEntry)
+	code, msg := mapRouteError(ferr)
+	c.JSON(code, gin.H{"error": gin.H{"message": msg, "type": "upstream_error"}})
+}
+
+// handleStreamRoute SSE 流式代理：首字节前可故障转移，流出后绑定渠道；
+// 上游中断时补发标准 error 事件。
+func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Router, body []byte, model, upstreamPath string, logEntry *models.RequestLog) {
+	start := time.Now()
+	sr, ferr := rt.ForwardChatStream(c.Request.Context(), body, model, upstreamPath)
+	logEntry.LatencyMS = time.Since(start).Milliseconds()
+
+	if ferr != nil {
+		logEntry.Status = "error"
+		logEntry.ErrorCode = "route_failed"
+		finalizeLog(a, bus, logEntry)
+		code, msg := mapRouteError(ferr)
+		c.JSON(code, gin.H{"error": gin.H{"message": msg, "type": "upstream_error"}})
+		return
+	}
+
+	if sr != nil {
+		logEntry.ChannelID = sr.Channel.ID
+		logEntry.KeyID = sr.KeyID
+		logEntry.UpstreamModel = sr.Route.UpstreamModel
+	}
+	if sr.Passthrough != nil {
+		// 上游非 2xx 透传（原始错误体，非 SSE）
+		logEntry.Status = successOrError(sr.StatusCode)
+		if logEntry.Status == "error" {
+			logEntry.ErrorCode = http.StatusText(sr.StatusCode)
+		}
+		finalizeLog(a, bus, logEntry)
+		if logEntry.Status == "success" {
+			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+		}
+		ct := sr.ContentType
+		if ct == "" {
+			ct = "application/json"
+		}
+		c.Data(sr.StatusCode, ct, sr.Passthrough)
+		return
+	}
+
+	// SSE 代理
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.WriteHeader(http.StatusOK)
+	flusher, _ := c.Writer.(http.Flusher)
+
+	logEntry.Status = "success"
+	var usageBuf bytes.Buffer
+	buf := make([]byte, 32<<10)
+	for {
+		n, rerr := sr.Stream.Read(buf)
+		if n > 0 {
+			_, _ = c.Writer.Write(buf[:n])
+			if usageBuf.Len() < 1<<20 {
+				usageBuf.Write(buf[:n])
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			// 上游流中断：给客户端明确信号
+			logEntry.Status = "error"
+			logEntry.ErrorCode = "stream_interrupted"
+			_, _ = c.Writer.Write([]byte("data: {\"error\":{\"message\":\"upstream stream interrupted\",\"type\":\"stream_error\"}}\n\n"))
+			_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+			if flusher != nil {
+				flusher.Flush()
+			}
+			break
+		}
+	}
+	_ = sr.Stream.Close()
+	parseUsageFromSSE(usageBuf.Bytes(), logEntry)
+	finalizeLog(a, bus, logEntry)
+	if logEntry.Status == "success" {
+		_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+	}
+	_ = store.TouchChannelKey(a.DB, logEntry.KeyID)
+}
+
+// parseUsage 从（非流式）上游响应体解析 usage。
 func parseUsage(body []byte, l *models.RequestLog) {
 	var up struct {
 		Usage struct {
@@ -181,6 +269,29 @@ func parseUsage(body []byte, l *models.RequestLog) {
 	}
 }
 
+// parseUsageFromSSE 从 SSE 文本中提取最后一个包含 usage 的 data 块（需客户端开启 stream_options.include_usage）。
+func parseUsageFromSSE(buf []byte, l *models.RequestLog) {
+	for _, line := range strings.Split(string(buf), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") || !strings.Contains(line, "usage") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		var u struct {
+			Usage struct {
+				PromptTokens     int64 `json:"prompt_tokens"`
+				CompletionTokens int64 `json:"completion_tokens"`
+				TotalTokens      int64 `json:"total_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(payload), &u); err == nil && u.Usage.TotalTokens > 0 {
+			l.PromptTokens = u.Usage.PromptTokens
+			l.CompletionTokens = u.Usage.CompletionTokens
+			l.TotalTokens = u.Usage.TotalTokens
+		}
+	}
+}
+
 func successOrError(code int) string {
 	if code >= 200 && code < 400 {
 		return "success"
@@ -190,7 +301,7 @@ func successOrError(code int) string {
 
 func mapRouteError(err error) (int, string) {
 	if err == router.ErrNoCandidate {
-		return http.StatusNotFound, "模型没有可用路由/渠道"
+		return http.StatusNotFound, "no available channel for this model"
 	}
 	return http.StatusBadGateway, err.Error()
 }
@@ -207,11 +318,4 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
-}
-
-func resKeyIDForLog(res *router.Result) int64 {
-	if res == nil {
-		return 0
-	}
-	return res.KeyID
 }

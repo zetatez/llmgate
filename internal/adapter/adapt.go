@@ -3,6 +3,7 @@ package adapter
 
 import (
 	"context"
+	"fmt"
 	"io"
 )
 
@@ -15,6 +16,16 @@ type Request struct {
 	Headers map[string]string // 需要附加/覆盖的头
 	Model   string            // 本次请求的对外模型名（仅日志用）
 }
+
+// StatusError 是上游返回非 2xx 时的错误，携带状态码与响应体，供路由层判定 failover 或透传。
+type StatusError struct {
+	StatusCode int
+	Body       []byte
+	HeaderMap  map[string]string
+}
+
+// Error 实现 error 接口。
+func (e *StatusError) Error() string { return fmt.Sprintf("upstream status %d", e.StatusCode) }
 
 // Response 返回给路由层的上游响应。
 type Response struct {

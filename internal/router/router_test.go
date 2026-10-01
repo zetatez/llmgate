@@ -1,0 +1,132 @@
+package router
+
+import (
+	"testing"
+	"time"
+
+	"llmgate/internal/models"
+)
+
+func mkCandidate(chID, chPrio, chWeight, routePrio, routeWeight int64) Candidate {
+	return Candidate{
+		Channel: models.Channel{ID: chID, Priority: int(chPrio), Weight: int(chWeight)},
+		Route:   models.ModelRoute{ChannelID: chID, Priority: int(routePrio), Weight: int(routeWeight)},
+	}
+}
+
+func TestPenaltyLadder(t *testing.T) {
+	p := NewPenalizer()
+	if d := p.PenaliseChan(1, 0); d != 30*time.Second {
+		t.Fatalf("first penalty = %v, want 30s", d)
+	}
+	if d := p.PenaliseChan(1, 0); d != 60*time.Second {
+		t.Fatalf("second penalty = %v, want 60s", d)
+	}
+	if d := p.PenaliseChan(1, 0); d != 15*time.Minute {
+		t.Fatalf("third penalty = %v, want 15min", d)
+	}
+	if d := p.PenaliseChan(1, 0); d != 15*time.Minute {
+		t.Fatalf("fourth penalty = %v, want 15min (capped)", d)
+	}
+	if !p.ChPenalized(1) {
+		t.Fatal("channel 1 should be penalized")
+	}
+	p.ClearChan(1)
+	if p.ChPenalized(1) {
+		t.Fatal("channel 1 should be cleared")
+	}
+	// 清除后退避从头开始
+	if d := p.PenaliseChan(1, 0); d != 30*time.Second {
+		t.Fatalf("post-clear penalty = %v, want 30s", d)
+	}
+}
+
+func TestPenaltyForced(t *testing.T) {
+	p := NewPenalizer()
+	if d := p.PenaliseChan(9, quotaPenalty); d != quotaPenalty {
+		t.Fatalf("forced penalty = %v, want %v", d, quotaPenalty)
+	}
+}
+
+func TestKeyPenalty(t *testing.T) {
+	p := NewPenalizer()
+	p.PenalizeKey(1, time.Minute)
+	if !p.KeyPenalized(1) {
+		t.Fatal("key 1 should be penalized")
+	}
+	if p.KeyPenalized(2) {
+		t.Fatal("key 2 should not be penalized")
+	}
+}
+
+func TestCandidateLess(t *testing.T) {
+	a := mkCandidate(1, 1, 1, 5, 1) // routePrio 5, chPrio 1
+	b := mkCandidate(2, 0, 1, 5, 1) // routePrio 5, chPrio 0
+	c := mkCandidate(3, 0, 1, 1, 1) // routePrio 1
+	if !candidateLess(c, a) {
+		t.Fatal("lower route priority should come first")
+	}
+	if !candidateLess(b, a) {
+		t.Fatal("same route priority, lower channel priority should come first")
+	}
+	if candidateLess(a, b) {
+		t.Fatal("higher channel priority should not win")
+	}
+}
+
+func TestPickByPriority(t *testing.T) {
+	r := &Router{pen: NewPenalizer()}
+	// 高优先级(route 0, ch 0) 权重1；低优先级(route 1)
+	cands := []Candidate{
+		mkCandidate(1, 0, 1, 0, 1), // 最优
+		mkCandidate(2, 0, 1, 1, 1), // 次
+	}
+	pick := r.pickByPriority(cands, map[int64]bool{})
+	if pick == nil || pick.Channel.ID != 1 {
+		t.Fatalf("expected channel 1 to be picked, got %+v", pick)
+	}
+	// 排除渠道 1 → 应选渠道 2
+	pick = r.pickByPriority(cands, map[int64]bool{1: true})
+	if pick == nil || pick.Channel.ID != 2 {
+		t.Fatalf("expected channel 2 after excluding 1, got %+v", pick)
+	}
+	// 熔断渠道 1 → 应选渠道 2
+	r.pen.PenaliseChan(1, time.Hour)
+	pick = r.pickByPriority(cands, map[int64]bool{})
+	if pick == nil || pick.Channel.ID != 2 {
+		t.Fatalf("expected channel 2 when channel 1 penalized, got %+v", pick)
+	}
+	// 全部排除 → nil
+	if pick := r.pickByPriority(cands, map[int64]bool{1: true, 2: true}); pick != nil {
+		t.Fatal("expected nil when all excluded")
+	}
+}
+
+func TestWeightedRandomRespectsWeights(t *testing.T) {
+	// 单元素必然返回它
+	items := []int{42}
+	if *weightedRandom(items, func(int) int { return 1 }) != 42 {
+		t.Fatal("single item failed")
+	}
+	// 权重全 0 → 返回首个（兜底）
+	zero := []string{"a", "b"}
+	if *weightedRandom(zero, func(string) int { return 0 }) != "a" {
+		t.Fatal("zero-weight fallback failed")
+	}
+}
+
+func TestIsQuotaExceeded(t *testing.T) {
+	cases := map[string]bool{
+		`{"error":{"message":"insufficient_quota"}}`: true,
+		"you have exceeded your quota":               true,
+		"billing issue on your account":              true,
+		"model not found":                            false,
+		"the server had an error":                    false,
+		"":                                           false,
+	}
+	for body, want := range cases {
+		if got := isQuotaExceeded(body); got != want {
+			t.Fatalf("isQuotaExceeded(%q) = %v, want %v", body, got, want)
+		}
+	}
+}

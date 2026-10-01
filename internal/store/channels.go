@@ -9,12 +9,12 @@ import (
 
 // ---------------- 渠道（Channel） ----------------
 
-const channelCols = `id, name, base_url, adapter, priority, weight, timeout_ms, enabled, health_state, note, created_at, updated_at`
+const channelCols = `id, name, base_url, adapter, priority, weight, timeout_ms, enabled, health_state, cooldown_until, note, created_at, updated_at`
 
 func scanChannel(row interface{ Scan(...any) error }) (*models.Channel, error) {
 	c := &models.Channel{}
 	err := row.Scan(&c.ID, &c.Name, &c.BaseURL, &c.Adapter, &c.Priority, &c.Weight,
-		&c.TimeoutMS, &c.Enabled, &c.HealthState, &c.Note, &c.CreatedAt, &c.UpdatedAt)
+		&c.TimeoutMS, &c.Enabled, &c.HealthState, &c.CooldownUntil, &c.Note, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -91,10 +91,34 @@ func DeleteChannel(db *sql.DB, id int64) error {
 	return nil
 }
 
-// SetChannelHealth 更新渠道健康状态。
-func SetChannelHealth(db *sql.DB, id int64, state string) error {
-	_, err := db.Exec(`UPDATE channels SET health_state=?, updated_at=? WHERE id=?`, state, models.Now(), id)
+// SetChannelCooldown 将渠道置为冷却并写入截止时间（熔断持久化）。
+func SetChannelCooldown(db *sql.DB, id int64, until int64) error {
+	_, err := db.Exec(`UPDATE channels SET health_state='cooldown', cooldown_until=?, updated_at=? WHERE id=?`, until, models.Now(), id)
 	return err
+}
+
+// SetChannelHealthy 恢复渠道健康（清冷却标记）。
+func SetChannelHealthy(db *sql.DB, id int64) error {
+	_, err := db.Exec(`UPDATE channels SET health_state='healthy', cooldown_until=0, updated_at=? WHERE id=?`, models.Now(), id)
+	return err
+}
+
+// ListCooldownChannels 返回冷却中且已到期的渠道（供探活任务尝试恢复）。
+func ListCooldownChannels(db *sql.DB, dueAt int64) ([]*models.Channel, error) {
+	rows, err := db.Query(`SELECT `+channelCols+` FROM channels WHERE health_state='cooldown' AND cooldown_until <= ?`, dueAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.Channel
+	for rows.Next() {
+		c, err := scanChannel(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // ---------------- 渠道 Key 池 ----------------

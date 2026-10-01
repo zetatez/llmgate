@@ -16,6 +16,7 @@ import (
 	"llmgate/internal/gateway"
 	"llmgate/internal/logbus"
 	"llmgate/internal/puller"
+	"llmgate/internal/router"
 	"llmgate/internal/store"
 	"llmgate/internal/web"
 )
@@ -52,9 +53,13 @@ func main() {
 	logBus := logbus.New(db, 1024)
 	defer logBus.Close()
 
-	// 定时自动拉取上游模型并映射（间隔由 settings 配置，默认 60 分钟）
-	modelPuller := puller.New(a)
+	// 共享熔断器：Router（网关）与 Puller（探活自愈）共用一个实例
+	pen := router.NewPenalizer()
+
+	// 定时自动拉取上游模型 + 冷却探活 + 日志清理
+	modelPuller := puller.New(a, pen)
 	go modelPuller.Run()
+	go modelPuller.RunBackground()
 
 	if cfg.LogLevel == "debug" {
 		gin.SetMode(gin.DebugMode)
@@ -70,7 +75,7 @@ func main() {
 	})
 
 	apiv1.Register(r.Group("/api/admin"), a, modelPuller.SyncNow)
-	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus)
+	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus, pen)
 
 	// 生产构建（-tags embedweb）时托管前端静态资源；本地开发返回 nil 不影响运行
 	if h := web.Handler(); h != nil {

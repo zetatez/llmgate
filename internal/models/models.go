@@ -18,18 +18,19 @@ type User struct {
 
 // Channel 表示一个上游套餐（渠道）。
 type Channel struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	BaseURL     string `json:"base_url"`
-	Adapter     string `json:"adapter"`
-	Priority    int    `json:"priority"`
-	Weight      int    `json:"weight"`
-	TimeoutMS   int    `json:"timeout_ms"`
-	Enabled     int    `json:"enabled"`
-	HealthState string `json:"health_state"`
-	Note        string `json:"note"`
-	CreatedAt   int64  `json:"created_at"`
-	UpdatedAt   int64  `json:"updated_at"`
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	BaseURL       string `json:"base_url"`
+	Adapter       string `json:"adapter"`
+	Priority      int    `json:"priority"`
+	Weight        int    `json:"weight"`
+	TimeoutMS     int    `json:"timeout_ms"`
+	Enabled       int    `json:"enabled"`
+	HealthState   string `json:"health_state"`   // healthy / cooldown
+	CooldownUntil int64  `json:"cooldown_until"` // 冷却截止（unix 秒），0=无
+	Note          string `json:"note"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
 }
 
 // ChannelKey 是渠道下的一个 API Key。

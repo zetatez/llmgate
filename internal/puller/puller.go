@@ -11,8 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"llmgate/internal/adapter"
 	"llmgate/internal/app"
 	"llmgate/internal/modelpull"
+	"llmgate/internal/models"
+	"llmgate/internal/router"
 	"llmgate/internal/store"
 )
 
@@ -22,12 +25,13 @@ const defaultIntervalMin = 60
 type Puller struct {
 	a    *app.App
 	stop chan struct{}
+	pen  *router.Penalizer
 	mu   sync.Mutex // 定时循环与手动 SyncNow 互斥，避免并发同步
 }
 
 // New 创建定时拉取任务。
-func New(a *app.App) *Puller {
-	return &Puller{a: a, stop: make(chan struct{})}
+func New(a *app.App, pen *router.Penalizer) *Puller {
+	return &Puller{a: a, pen: pen, stop: make(chan struct{})}
 }
 
 // Run 阻塞执行：启动立即跑一次，之后按设定的间隔循环。
@@ -54,6 +58,79 @@ func (p *Puller) SyncNow() map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.tick()
+}
+
+// RunBackground 后台任务：冷却渠道探活自愈（每 20s）+ 日志保留清理（每小时）。
+func (p *Puller) RunBackground() {
+	probeTk := time.NewTicker(20 * time.Second)
+	cleanTk := time.NewTicker(time.Hour)
+	defer probeTk.Stop()
+	defer cleanTk.Stop()
+
+	p.probeOnce()
+	p.cleanupOnce()
+	for {
+		select {
+		case <-probeTk.C:
+			p.probeOnce()
+		case <-cleanTk.C:
+			p.cleanupOnce()
+		case <-p.stop:
+			return
+		}
+	}
+}
+
+// probeOnce 对"冷却已到期"的渠道做一次轻量探活，成功则恢复 healthy 并清内存熔断。
+func (p *Puller) probeOnce() {
+	a := p.a
+	due, err := store.ListCooldownChannels(a.DB, models.Now())
+	if err != nil {
+		log.Printf("puller: list cooldown channels: %v", err)
+		return
+	}
+	for _, ch := range due {
+		if ch.Enabled != 1 {
+			_ = store.SetChannelHealthy(a.DB, ch.ID)
+			p.pen.ClearChan(ch.ID)
+			continue
+		}
+		apiKey, err := a.FirstEnabledKey(ch.ID)
+		if err != nil {
+			continue
+		}
+		adpt := adapter.Get(ch.Adapter)
+		if adpt == nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ch.TimeoutMS)*time.Millisecond)
+		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
+		cancel()
+		if err != nil || resp == nil || resp.StatusCode >= 400 {
+			continue
+		}
+		resp.Body.Close()
+		_ = store.SetChannelHealthy(a.DB, ch.ID)
+		p.pen.ClearChan(ch.ID)
+		log.Printf("puller: channel %q 探活成功，已恢复 healthy", ch.Name)
+	}
+}
+
+// cleanupOnce 按 log_retain_days 清理过期请求日志（0 = 禁用）。
+func (p *Puller) cleanupOnce() {
+	days := intSetting(p.a, "log_retain_days", 30)
+	if days <= 0 {
+		return
+	}
+	cutoff := models.Now() - int64(days)*86400
+	n, err := store.DeleteOldLogs(p.a.DB, cutoff)
+	if err != nil {
+		log.Printf("puller: cleanup logs: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("puller: 清理 %d 条过期日志（保留 %d 天）", n, days)
+	}
 }
 
 // Stop 停止任务。
