@@ -4,6 +4,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"time"
 	_ "time/tzdata" // 内嵌时区数据，容器无系统 tzdata 也能 LoadLocation
 
@@ -29,6 +30,7 @@ func main() {
 
 	// 设置应用时区（SQLite 'localtime' 依赖进程 TZ 环境变量，需与 LGM_TZ 保持一致）
 	if loc, err := time.LoadLocation(cfg.TZ); err == nil {
+		_ = os.Setenv("TZ", cfg.TZ)
 		time.Local = loc
 		log.Printf("timezone: %s", cfg.TZ)
 	} else {

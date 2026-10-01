@@ -84,21 +84,12 @@ var passThroughDefault = map[string]bool{
 	"x-conversation-id":   true,
 }
 
-// buildPassHeaders 从客户端请求头中提取需要透传给上游的头（白名单 + 配置扩展），大小写不敏感。
-func buildPassHeaders(h http.Header, extra []string) map[string]string {
-	allowed := map[string]bool{}
-	for k := range passThroughDefault {
-		if passThroughDefault[k] {
-			allowed[k] = true
-		}
-	}
-	for _, e := range extra {
-		allowed[strings.ToLower(e)] = true
-	}
+// buildPassHeaders 从客户端请求头中提取需要透传给上游的头（内置白名单），大小写不敏感。
+func buildPassHeaders(h http.Header) map[string]string {
 	out := map[string]string{}
 	for name := range h {
 		key := strings.ToLower(name)
-		if allowed[key] {
+		if passThroughDefault[key] {
 			if v := h.Get(name); v != "" {
 				out[key] = v
 			}
@@ -158,8 +149,8 @@ func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamP
 			CreatedAt:    models.Now(),
 		}
 
-		// 需要透传的上游会话头（opencode/codex/OpenAI 系客户端等，白名单 + LGM_PASSTHROUGH_HEADERS 扩展）
-		passHeaders := buildPassHeaders(c.Request.Header, a.Cfg.PassthroughHeaders)
+		// 需要透传的上游会话头（opencode/codex/OpenAI 系客户端白名单）
+		passHeaders := buildPassHeaders(c.Request.Header)
 
 		// opencode.ai 要求请求带稳定的 x-opencode-session（用于会话路由/缓存）；
 		// 客户端没带时按「用户+模型」派生稳定值自动附带（渠道配置的额外头可覆盖）
