@@ -27,6 +27,18 @@ go.work.sum
 # env file
 .env
 
+# 前端产物
+web/node_modules
+web/dist
+internal/web/dist
+
+# 构建与运行产物
+bin/
+data/
+*.db
+*.db-wal
+*.db-shm
+
 # Editor/IDE
 # .idea/
 # .vscode/

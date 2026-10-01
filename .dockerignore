@@ -1,0 +1,12 @@
+.git
+data
+bin
+docs
+web/node_modules
+web/dist
+internal/web/dist
+.env
+Dockerfile
+docker-compose.yml
+Makefile
+README.md

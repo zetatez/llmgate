@@ -1,0 +1,18 @@
+services:
+  llmgate:
+    build: .
+    ports:
+      - 3210:3210
+    environment:
+      - LGM_ADMIN_TOKEN=${LGM_ADMIN_TOKEN:-}
+      - LGM_ENCRYPT_SEED=${LGM_ENCRYPT_SEED:-}
+      - LGM_GATEWAY_PREFIX=${LGM_GATEWAY_PREFIX:-/}
+      - LGM_HTTP_ADDR=${LGM_HTTP_ADDR:-:3210}
+      - LGM_LOG_LEVEL=${LGM_LOG_LEVEL:-release}
+      - LGM_TZ=${LGM_TZ:-Asia/Shanghai}
+      - TZ=${LGM_TZ:-Asia/Shanghai}
+      - LGM_DB_PATH=/data/llmgate.db # 容器内 DB 路径固定指向挂载卷；不受 .env 的 LGM_DB_PATH 影响. .env 里的 LGM_DB_PATH 仅用于本地 make dev-backend
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
