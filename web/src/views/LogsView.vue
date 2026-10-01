@@ -11,7 +11,9 @@ const limit = ref(50)
 
 function fmtTime(ts: number) {
   if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString()
+  const d = new Date(ts * 1000)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
 async function load() {
@@ -45,8 +47,7 @@ onMounted(load)
       </div>
     </template>
     <el-table v-loading="loading" :data="list" size="small" max-height="70vh">
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column label="Time" width="170">
+      <el-table-column label="Time" width="165" class-name="nowrap">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column prop="display_model" label="Model" width="150" show-overflow-tooltip />
@@ -58,11 +59,10 @@ onMounted(load)
           {{ row.channel_name ? `${row.channel_name}/${row.upstream_model}` : row.upstream_model }}
         </template>
       </el-table-column>
-      <el-table-column label="Tokens (p/c/t)" width="120">
-        <template #default="{ row }">{{ row.prompt_tokens }} / {{ row.completion_tokens }} / {{ row.total_tokens }}</template>
+      <el-table-column label="Tokens" width="90" class-name="nowrap">
+        <template #default="{ row }">{{ row.total_tokens }}</template>
       </el-table-column>
-      <el-table-column prop="cost" label="Cost ($)" width="90" />
-      <el-table-column prop="latency_ms" label="Latency (ms)" width="100" />
+      <el-table-column prop="latency_ms" label="Latency (ms)" width="100" class-name="nowrap" />
       <el-table-column label="Status" width="90">
         <template #default="{ row }">
           <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
@@ -75,4 +75,5 @@ onMounted(load)
 
 <style scoped>
 .filters { display: flex; gap: 8px; align-items: center; }
+.nowrap { white-space: nowrap; }
 </style>
