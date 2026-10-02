@@ -34,8 +34,12 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 	v1.POST("/responses", handleResponses(a, bus, pen))
 }
 
-// drainCtx 服务停机信号：main 在收到 SIGTERM/SIGINT 时取消。
-// 流式 handler 据此尽早优雅终止并向对端发出明确的失败终态，而非等到 Shutdown 超时强断。
+// drainCtx 服务停机信号：main 收到 SIGTERM 时取消。
+// 流式 handler 借此区分「服务停机」与「客户端断开」，从而：
+//   - 服务停机：不主动掐断健康流，让其在途内容自然跑完并发 completed（由空闲超时兜底卡死流）
+//   - 客户端断开：立刻停止读上游，避免白烧额度
+//
+// 注意：不会对仍在产出的健康流发 failed。
 var drainCtx = context.Background()
 
 // SetDrainContext 注入停机信号上下文（main 启动时调用一次）。
@@ -45,7 +49,7 @@ func SetDrainContext(ctx context.Context) {
 	}
 }
 
-// draining 是否处于停机/排空中。
+// draining 是否已进入停机（停止接收新请求、等待在途流自然结束）。
 func draining() bool {
 	select {
 	case <-drainCtx.Done():
@@ -326,18 +330,8 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	buf := make([]byte, 32<<10)
 	clientGone := false
 	for {
-		// 服务停机：给仍连着的对端补发错误终态 + [DONE]，避免重启/停机时无信号硬断。
-		if draining() {
-			logEntry.Status = "error"
-			logEntry.ErrorCode = "server_shutdown"
-			_, _ = c.Writer.Write([]byte("data: {\"error\":{\"message\":\"server is shutting down\",\"type\":\"stream_error\"}}\n\n"))
-			_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
-			if flusher != nil {
-				flusher.Flush()
-			}
-			break
-		}
 		// 客户端已断开连接：立即停止读上游，避免在渠道上继续白烧额度/占用连接。
+		// 注意：服务停机不在此打断——健康流应自然跑完（由空闲超时兜底卡死的流）。
 		if c.Request.Context().Err() != nil {
 			clientGone = true
 			break

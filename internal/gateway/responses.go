@@ -227,7 +227,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 	buf := make([]byte, 32<<10)
 	interrupted := false
 	for {
-		if draining() || c.Request.Context().Err() != nil {
+		if c.Request.Context().Err() != nil {
 			interrupted = true
 			break
 		}
@@ -240,7 +240,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 			break
 		}
 		if rerr != nil {
-			if draining() || c.Request.Context().Err() != nil {
+			if c.Request.Context().Err() != nil {
 				interrupted = true
 				break
 			}

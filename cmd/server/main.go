@@ -120,21 +120,17 @@ func main() {
 		}
 	}()
 
-	// 优雅停机：收到 SIGTERM/SIGINT 后先通知网关（流式 handler 尽早补发失败终态），
-	// 再停止接收新连接，给在途请求最多 grace 时间自然结束；超时后强关连接。
-	drainCtx, drainCancel := context.WithCancel(context.Background())
-	gateway.SetDrainContext(drainCtx)
+	// 优雅停机：收到 SIGTERM/SIGINT 后不再接收新请求，等待在途请求（含长流式）自然结束，
+	// 而不是掐断。健康流靠各自「空闲超时」兜底（卡死的流最多空等一档超时），
+	// 因此等待是有限的，可安全地让它们自然产出并在 flush 后正常结束。
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	drainCancel()
-	const grace = 10 * time.Second
-	log.Printf("shutting down: draining in-flight requests (grace %s)", grace)
-	ctx, cancel := context.WithTimeout(context.Background(), grace)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("shutdown: drain timed out (%v); force-closing remaining connections", err)
-		_ = srv.Close()
+	gateway.SetDrainContext(context.Background())
+	log.Printf("shutting down: stopping new connections; waiting for in-flight requests to finish naturally")
+	// 无强制时限：等待所有在途请求完成；长流会自然结束（空闲超时兜底），不会无限挂起。
+	if err := srv.Shutdown(context.Background()); err != nil {
+		log.Printf("shutdown: %v", err)
 	}
 	log.Println("server stopped")
 }
