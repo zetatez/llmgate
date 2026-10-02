@@ -114,8 +114,11 @@ func (p *Puller) probeOnce() {
 		if adpt == nil {
 			continue
 		}
+		// 用真实聊天路径探活（带该渠道任一启用路由的模型）：避免“models 列表通但 chat 挂”
+		// 导致冷却被反复误恢复（探活过 20s 一轮，聊天接口持续 EOF/超时则不会恢复）。
+		probeModel, _ := store.ProbeRouteModel(a.DB, ch.ID)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ch.TimeoutMS)*time.Millisecond)
-		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
+		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.HealthRequest(probeModel))
 		cancel()
 		if err != nil || resp == nil || resp.StatusCode >= 400 {
 			continue

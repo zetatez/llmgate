@@ -405,6 +405,8 @@ func mapRouteError(err error) (int, string) {
 		return http.StatusNotFound, "no available channel for this model"
 	case errors.Is(err, router.ErrChannelBusy):
 		return http.StatusServiceUnavailable, "all channels are temporarily unavailable, please retry shortly"
+	case errors.Is(err, router.ErrNetworkExhausted):
+		return http.StatusServiceUnavailable, "all channels failed due to network errors, please retry shortly"
 	default:
 		return http.StatusBadGateway, err.Error()
 	}

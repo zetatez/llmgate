@@ -111,6 +111,18 @@ func DeleteAutoBare(db *sql.DB, channelID int64, upstreamModel string) (int64, e
 	return res.RowsAffected()
 }
 
+// ProbeRouteModel 返回渠道首个启用路由的上游模型名（探活用；无则空串）。
+func ProbeRouteModel(db *sql.DB, channelID int64) (string, error) {
+	var m string
+	err := db.QueryRow(
+		`SELECT upstream_model FROM model_routes WHERE channel_id=? AND enabled=1 ORDER BY priority ASC, id ASC LIMIT 1`,
+		channelID).Scan(&m)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return m, err
+}
+
 // RouteExists 判断「渠道 + 显示名 + 上游模型」的完整路由是否已存在（自动同步去重用）。
 func RouteExists(db *sql.DB, channelID int64, displayName, upstreamModel string) (bool, error) {
 	var n int64

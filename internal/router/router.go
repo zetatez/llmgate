@@ -29,6 +29,10 @@ var ErrNoCandidate = errors.New("no available channel for this model")
 // （临时性 → 503+Retry-After，客户端可自动退避重试实现无缝续接）。
 var ErrChannelBusy = errors.New("all channels are temporarily cooling down for this model, please retry shortly")
 
+// ErrNetworkExhausted 表示所有候选渠道都因纯网络故障（未收到任何 HTTP 响应）失败：
+// 同样是临时性 → 503+Retry-After，让客户端退避重试而不是立刻撞同一坏渠道。
+var ErrNetworkExhausted = errors.New("all channels failed due to network errors, please retry shortly")
+
 // 熔断退避阶梯：2s → 4s → 8s（之后连续失败保持 8s 封顶）。
 var penaltyLadder = []time.Duration{
 	2 * time.Second,
@@ -386,6 +390,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	excludedCh := map[int64]bool{}
 	failedKeys := map[int64]bool{}
 	var lastErr error
+	lastNetworkErr := false // 最近一次失败是否为纯网络故障（未收到 HTTP 响应）
 	networkAttempts := 0
 	maxNetworkAttempts := 5
 
@@ -421,6 +426,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		if err != nil {
 			// 网络错误/超时：冷却该渠道（连接级故障对所有 Key 一致）
 			networkAttempts++
+			lastNetworkErr = true
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
 			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
@@ -432,7 +438,9 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResp+1))
 		resp.Body.Close()
 		if err != nil {
+			// 响应体读取中断：连接在响应中途被掐断，同样视为纯网络故障
 			networkAttempts++
+			lastNetworkErr = true
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
 			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
@@ -457,6 +465,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			// 429 限流 / 402/403 通常是额度、余额、欠费
 			bodyStr := truncate(string(body), 300)
 			networkAttempts++
+			lastNetworkErr = false // 上游已响应：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 			if isQuotaExceeded(bodyStr) {
 				r.penalizeChannel(&cand.Channel, quotaPenalty) // 额度用尽，8s 后自动再试
@@ -478,6 +487,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		case code == http.StatusUnauthorized:
 			// Key 无效：冷却该 Key，同渠道换 Key 重试
 			networkAttempts++
+			lastNetworkErr = false // 上游已响应 401：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: unauthorized key", cand.Channel.Name)
 			r.pen.PenalizeKey(key.ID, 5*time.Minute)
 			failedKeys[key.ID] = true
@@ -487,6 +497,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			continue
 		case code == http.StatusRequestTimeout || code >= http.StatusInternalServerError:
 			networkAttempts++
+			lastNetworkErr = false // 上游已响应 5xx：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, truncate(string(body), 300))
 			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
@@ -497,6 +508,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		case code == http.StatusBadRequest || code == http.StatusNotFound:
 			// 模型在该渠道不可用 → 故障转移
 			networkAttempts++
+			lastNetworkErr = false // 上游已响应：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, truncate(string(body), 300))
 			excludedCh[cand.Channel.ID] = true
 			r.recoverChannel(&cand.Channel)
@@ -518,6 +530,10 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	}
 
 	if networkAttempts > 0 {
+		if lastNetworkErr {
+			// 全部候选都死于纯网络故障（无任何 HTTP 响应）：临时性，客户端应退避重试。
+			return nil, ErrNetworkExhausted
+		}
 		return nil, lastErr
 	}
 	if len(cands) == 0 {
@@ -553,6 +569,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	excludedCh := map[int64]bool{}
 	failedKeys := map[int64]bool{}
 	var lastErr error
+	lastNetworkErr := false // 最近一次失败是否为纯网络故障（未收到 HTTP 响应）
 	networkAttempts := 0
 	maxNetworkAttempts := 5
 
@@ -589,6 +606,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			if !errors.As(err, &se) {
 				// 网络/连接失败
 				networkAttempts++
+				lastNetworkErr = true
 				lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
 				r.penalizeChannel(&cand.Channel, 0)
 				excludedCh[cand.Channel.ID] = true
@@ -600,6 +618,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			// 上游已响应（非 2xx）
 			code := se.StatusCode
 			bodyStr := truncate(string(se.Body), 300)
+			lastNetworkErr = false // 上游已响应：非纯网络故障
 			switch {
 			case code == http.StatusTooManyRequests || code == http.StatusPaymentRequired || code == http.StatusForbidden:
 				networkAttempts++
@@ -656,9 +675,10 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			}
 		}
 		if firstErr != nil && !bytes.Contains(firstBuf, []byte("data:")) {
-			// 首事件前中断：视为未交付，走故障转移
+			// 首事件前中断：视为未交付，走故障转移（连接已建但流即死 → 纯网络故障）
 			rc.Close()
 			networkAttempts++
+			lastNetworkErr = true
 			lastErr = fmt.Errorf("channel %s: stream died before first event: %v", cand.Channel.Name, firstErr)
 			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
@@ -675,6 +695,10 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	}
 
 	if networkAttempts > 0 {
+		if lastNetworkErr {
+			// 全部候选都死于纯网络故障（无任何 HTTP 响应）：临时性，客户端应退避重试。
+			return nil, ErrNetworkExhausted
+		}
 		return nil, lastErr
 	}
 	if len(cands) == 0 {
