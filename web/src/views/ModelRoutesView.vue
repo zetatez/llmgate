@@ -12,7 +12,14 @@ const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
 const expandedKeys = ref<string[]>([])
 const activeTab = ref('synced')
 
-const dialog = reactive({ visible: false, editing: false, id: 0, display_name: '', channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1 })
+const dialog = reactive({ visible: false, editing: false, id: 0, display_name: '', channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1, custom_price: false, price_input: 0 as number | null, price_output: 0 as number | null })
+
+// 价格展示：保留最多 6 位小数并去掉末尾 0；null → 'auto'
+function fmtPrice(v: number | null | undefined): string {
+  if (v == null) return 'auto'
+  const s = (+v).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
+  return `$${s}`
+}
 
 interface Group {
   display_name: string
@@ -101,18 +108,18 @@ const customGroups = computed<Array<{ display_name: string; routes: ModelRoute[]
 
 const customDialog = reactive({
   visible: false, editing: false, name: '',
-  rows: [] as Array<{ channel_id: number; upstream_model: string; priority: number; weight: number; enabled: number }>,
+  rows: [] as Array<{ channel_id: number; upstream_model: string; priority: number; weight: number; enabled: number; price_custom: boolean; price_input: number; price_output: number }>,
 })
 
 function openCustomCreate() {
   customDialog.visible = true
   customDialog.editing = false
   customDialog.name = ''
-  customDialog.rows = [{ channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1 }]
+  customDialog.rows = [{ channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1, price_custom: false, price_input: 0, price_output: 0 }]
 }
 
 function addCustomRow() {
-  customDialog.rows.push({ channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1 })
+  customDialog.rows.push({ channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1, price_custom: false, price_input: 0, price_output: 0 })
 }
 
 function removeCustomRow(i: number) {
@@ -136,6 +143,8 @@ async function saveCustomGroup() {
         display_name: name, channel_id: row.channel_id,
         upstream_model: row.upstream_model.trim(), priority: +row.priority || 0,
         weight: +row.weight || 1, enabled: row.enabled,
+        price_input: row.price_custom ? (+row.price_input || 0) : null,
+        price_output: row.price_custom ? (+row.price_output || 0) : null,
       })
     }
     ElMessage.success(`已保存「${name}」，共 ${rows.length} 条上游映射`)
@@ -149,6 +158,9 @@ function openCustomEdit(g: { display_name: string; routes: ModelRoute[] }) {
   customDialog.name = g.display_name
   customDialog.rows = g.routes.map((r) => ({
     channel_id: r.channel_id, upstream_model: r.upstream_model, priority: r.priority, weight: r.weight, enabled: r.enabled,
+    price_custom: r.price_input != null || r.price_output != null,
+    price_input: r.price_input ?? 0,
+    price_output: r.price_output ?? 0,
   }))
   customDialog.visible = true
 }
@@ -186,11 +198,17 @@ function onRowClick(row: Group) {
 }
 
 function openCreate(prefillModel = '') {
-  Object.assign(dialog, { visible: true, editing: false, id: 0, display_name: prefillModel, channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1 })
+  Object.assign(dialog, { visible: true, editing: false, id: 0, display_name: prefillModel, channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1, custom_price: false, price_input: 0, price_output: 0 })
 }
 
 function openEdit(r: ModelRoute) {
-  Object.assign(dialog, { visible: true, editing: true, id: r.id, display_name: r.display_name, channel_id: r.channel_id, upstream_model: r.upstream_model, priority: r.priority, weight: r.weight, enabled: r.enabled })
+  Object.assign(dialog, {
+    visible: true, editing: true, id: r.id, display_name: r.display_name, channel_id: r.channel_id, upstream_model: r.upstream_model,
+    priority: r.priority, weight: r.weight, enabled: r.enabled,
+    custom_price: r.price_input != null || r.price_output != null,
+    price_input: r.price_input ?? 0,
+    price_output: r.price_output ?? 0,
+  })
 }
 
 async function submit() {
@@ -205,6 +223,8 @@ async function submit() {
     priority: +dialog.priority || 0,
     weight: +dialog.weight || 1,
     enabled: dialog.enabled,
+    price_input: dialog.custom_price ? (+(dialog.price_input ?? 0) || 0) : null,
+    price_output: dialog.custom_price ? (+(dialog.price_output ?? 0) || 0) : null,
   }
   try {
     if (dialog.editing) await modelRoutesApi.update(dialog.id, d)
@@ -264,6 +284,12 @@ onMounted(load)
               <el-table-column prop="upstream_model" label="Upstream Model" min-width="160" show-overflow-tooltip />
               <el-table-column prop="priority" label="Priority" width="90" />
               <el-table-column prop="weight" label="Weight" width="80" />
+              <el-table-column label="Price in/out ($/1M)" width="150" show-overflow-tooltip>
+                <template #default="{ row: r }">
+                  <span v-if="r.price_input == null && r.price_output == null" class="tip">auto (global)</span>
+                  <span v-else>{{ fmtPrice(r.price_input) }} / {{ fmtPrice(r.price_output) }}</span>
+                </template>
+              </el-table-column>
               <el-table-column label="Enabled" width="130">
                 <template #default="{ row: r }">
                   <el-tooltip :content="r.channel_enabled ? (r.enabled ? 'Active' : 'Route disabled') : 'Channel is disabled — route inactive'">
@@ -324,6 +350,12 @@ onMounted(load)
                   <el-table-column prop="upstream_model" label="Upstream Model" min-width="150" show-overflow-tooltip />
                   <el-table-column prop="priority" label="Priority" width="80" />
                   <el-table-column prop="weight" label="Weight" width="70" />
+                  <el-table-column label="Price in/out ($/1M)" width="140" show-overflow-tooltip>
+                    <template #default="{ row: r }">
+                      <span v-if="r.price_input == null && r.price_output == null" class="tip">auto</span>
+                      <span v-else>{{ fmtPrice(r.price_input) }} / {{ fmtPrice(r.price_output) }}</span>
+                    </template>
+                  </el-table-column>
                   <el-table-column label="Enabled" width="90">
                     <template #default="{ row: r }">
                       <el-tag :type="r.effective_enabled ? 'success' : 'info'" size="small">{{ r.effective_enabled ? 'Active' : 'Inactive' }}</el-tag>
@@ -368,25 +400,35 @@ onMounted(load)
           <el-input v-model="customDialog.name" placeholder="如 flash / my-agent-model" />
         </el-form-item>
         <el-form-item label="上游映射（多行）">
-          <div v-for="(row, i) in customDialog.rows" :key="i" class="row-line">
-            <el-select v-model="row.channel_id" style="width: 170px" placeholder="渠道" @change="row.upstream_model = ''">
-              <el-option v-for="ch in channels" :key="ch.id" :label="ch.name" :value="ch.id" />
-            </el-select>
-            <el-select
-              v-model="row.upstream_model"
-              style="width: 190px"
-              filterable
-              allow-create
-              default-first-option
-              placeholder="搜索上游模型或直接输入"
-              :no-data-text="'该渠道暂无已同步模型，可手动输入'"
-            >
-              <el-option v-for="m in upstreamOptions(row.channel_id)" :key="m" :label="m" :value="m" />
-            </el-select>
-            <el-input-number v-model="row.priority" :min="-10" :max="10" title="优先级(小=先)" />
-            <el-input-number v-model="row.weight" :min="1" title="权重" />
-            <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" />
-            <el-button v-if="customDialog.rows.length > 1" link type="danger" size="small" @click="removeCustomRow(i)">删</el-button>
+          <div v-for="(row, i) in customDialog.rows" :key="i" class="row-block">
+            <div class="row-line">
+              <el-select v-model="row.channel_id" style="width: 170px" placeholder="渠道" @change="row.upstream_model = ''">
+                <el-option v-for="ch in channels" :key="ch.id" :label="ch.name" :value="ch.id" />
+              </el-select>
+              <el-select
+                v-model="row.upstream_model"
+                style="width: 190px"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="搜索上游模型或直接输入"
+                :no-data-text="'该渠道暂无已同步模型，可手动输入'"
+              >
+                <el-option v-for="m in upstreamOptions(row.channel_id)" :key="m" :label="m" :value="m" />
+              </el-select>
+              <el-input-number v-model="row.priority" :min="-10" :max="10" title="优先级(小=先)" size="small" />
+              <el-input-number v-model="row.weight" :min="1" title="权重" size="small" />
+              <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" />
+              <el-button v-if="customDialog.rows.length > 1" link type="danger" size="small" @click="removeCustomRow(i)">删</el-button>
+            </div>
+            <div class="row-line price-line">
+              <el-checkbox v-model="row.price_custom" size="small">自定义单价($/百万tokens)</el-checkbox>
+              <template v-if="row.price_custom">
+                <el-input-number v-model="row.price_input" :min="0" :precision="6" :step="0.05" size="small" placeholder="输入价" title="输入价 $/1M" />
+                <el-input-number v-model="row.price_output" :min="0" :precision="6" :step="0.1" size="small" placeholder="输出价" title="输出价 $/1M" />
+              </template>
+              <span v-else class="tip">未开启时该映射按全局 model_pricing 计费</span>
+            </div>
           </div>
           <el-button size="small" class="mt" @click="addCustomRow">+ 添加一条上游映射</el-button>
         </el-form-item>
@@ -428,6 +470,18 @@ onMounted(load)
         <el-form-item label="Enabled">
           <el-switch v-model="dialog.enabled" :active-value="1" :inactive-value="0" />
         </el-form-item>
+        <el-form-item label="自定义单价">
+          <el-switch v-model="dialog.custom_price" />
+          <span class="tip">开启按本路由单价计费；关闭回退全局 model_pricing</span>
+        </el-form-item>
+        <template v-if="dialog.custom_price">
+          <el-form-item label="输入价 $/1M">
+            <el-input-number v-model="dialog.price_input" :min="0" :precision="6" :step="0.05" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="输出价 $/1M">
+            <el-input-number v-model="dialog.price_output" :min="0" :precision="6" :step="0.1" style="width: 100%" />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="dialog.visible = false">Cancel</el-button>
@@ -445,5 +499,7 @@ onMounted(load)
 .inner-table { margin: 4px 16px 0; }
 .add-route-btn { margin-left: 16px; }
 .row-line { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.row-block { margin-bottom: 10px; }
+.price-line { margin-top: -2px; padding-left: 130px; }
 .tip-line { font-size: 12px; color: #909399; margin: 12px 4px 0; line-height: 1.6; }
 </style>

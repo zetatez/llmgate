@@ -8,7 +8,7 @@ import (
 	"llmgate/internal/models"
 )
 
-const routeCols = `id, display_name, channel_id, upstream_model, priority, weight, enabled, created_at, updated_at`
+const routeCols = `id, display_name, channel_id, upstream_model, priority, weight, enabled, price_input, price_output, created_at, updated_at`
 
 // ListModelRoutes 返回全部模型路由。
 func ListModelRoutes(db *sql.DB) ([]*models.ModelRoute, error) {
@@ -20,7 +20,7 @@ func ListModelRoutes(db *sql.DB) ([]*models.ModelRoute, error) {
 	var out []*models.ModelRoute
 	for rows.Next() {
 		r := &models.ModelRoute{}
-		if err := rows.Scan(&r.ID, &r.DisplayName, &r.ChannelID, &r.UpstreamModel, &r.Priority, &r.Weight, &r.Enabled, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.DisplayName, &r.ChannelID, &r.UpstreamModel, &r.Priority, &r.Weight, &r.Enabled, &r.PriceInput, &r.PriceOutput, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -38,7 +38,7 @@ func ListRoutesForModel(db *sql.DB, displayName string) ([]*models.ModelRoute, e
 	var out []*models.ModelRoute
 	for rows.Next() {
 		r := &models.ModelRoute{}
-		if err := rows.Scan(&r.ID, &r.DisplayName, &r.ChannelID, &r.UpstreamModel, &r.Priority, &r.Weight, &r.Enabled, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.DisplayName, &r.ChannelID, &r.UpstreamModel, &r.Priority, &r.Weight, &r.Enabled, &r.PriceInput, &r.PriceOutput, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -49,9 +49,10 @@ func ListRoutesForModel(db *sql.DB, displayName string) ([]*models.ModelRoute, e
 // CreateModelRoute 插入路由。
 func CreateModelRoute(db *sql.DB, r *models.ModelRoute) (int64, error) {
 	res, err := db.Exec(`
-		INSERT INTO model_routes (display_name, channel_id, upstream_model, priority, weight, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.DisplayName, r.ChannelID, r.UpstreamModel, r.Priority, r.Weight, r.Enabled, models.Now(), models.Now())
+		INSERT INTO model_routes (display_name, channel_id, upstream_model, priority, weight, enabled, price_input, price_output, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.DisplayName, r.ChannelID, r.UpstreamModel, r.Priority, r.Weight, r.Enabled,
+		r.PriceInput, r.PriceOutput, models.Now(), models.Now())
 	if err != nil {
 		return 0, err
 	}
@@ -61,8 +62,9 @@ func CreateModelRoute(db *sql.DB, r *models.ModelRoute) (int64, error) {
 // UpdateModelRoute 更新路由。
 func UpdateModelRoute(db *sql.DB, r *models.ModelRoute) error {
 	res, err := db.Exec(`
-		UPDATE model_routes SET display_name=?, channel_id=?, upstream_model=?, priority=?, weight=?, enabled=?, updated_at=? WHERE id=?`,
-		r.DisplayName, r.ChannelID, r.UpstreamModel, r.Priority, r.Weight, r.Enabled, models.Now(), r.ID)
+		UPDATE model_routes SET display_name=?, channel_id=?, upstream_model=?, priority=?, weight=?, enabled=?, price_input=?, price_output=?, updated_at=? WHERE id=?`,
+		r.DisplayName, r.ChannelID, r.UpstreamModel, r.Priority, r.Weight, r.Enabled,
+		r.PriceInput, r.PriceOutput, models.Now(), r.ID)
 	if err != nil {
 		return err
 	}
@@ -88,7 +90,7 @@ func DeleteModelRoute(db *sql.DB, id int64) error {
 func GetModelRoute(db *sql.DB, id int64) (*models.ModelRoute, error) {
 	row := db.QueryRow(`SELECT `+routeCols+` FROM model_routes WHERE id=?`, id)
 	r := &models.ModelRoute{}
-	err := row.Scan(&r.ID, &r.DisplayName, &r.ChannelID, &r.UpstreamModel, &r.Priority, &r.Weight, &r.Enabled, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &r.DisplayName, &r.ChannelID, &r.UpstreamModel, &r.Priority, &r.Weight, &r.Enabled, &r.PriceInput, &r.PriceOutput, &r.CreatedAt, &r.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

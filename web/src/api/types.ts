@@ -41,6 +41,9 @@ export interface ModelRoute {
   priority: number
   weight: number
   enabled: number
+  /** 路由级自定义单价 USD/百万tokens；null = 回退全局 model_pricing */
+  price_input?: number | null
+  price_output?: number | null
 }
 
 export interface User {

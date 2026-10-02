@@ -262,6 +262,7 @@ func (r *Router) recoverChannel(ch *models.Channel) {
 func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candidate, error) {
 	rows, err := r.db.Query(`
 		SELECT mr.id, mr.display_name, mr.channel_id, mr.upstream_model, mr.priority, mr.weight, mr.enabled,
+			mr.price_input, mr.price_output,
 			ch.id, ch.name, ch.base_url, ch.adapter, ch.priority, ch.weight, ch.timeout_ms, ch.enabled, ch.health_state, ch.extra_headers
 		FROM model_routes mr
 		JOIN channels ch ON ch.id = mr.channel_id
@@ -276,7 +277,7 @@ func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candida
 		var c Candidate
 		if err := rows.Scan(
 			&c.Route.ID, &c.Route.DisplayName, &c.Route.ChannelID, &c.Route.UpstreamModel,
-			&c.Route.Priority, &c.Route.Weight, &c.Route.Enabled,
+			&c.Route.Priority, &c.Route.Weight, &c.Route.Enabled, &c.Route.PriceInput, &c.Route.PriceOutput,
 			&c.Channel.ID, &c.Channel.Name, &c.Channel.BaseURL, &c.Channel.Adapter,
 			&c.Channel.Priority, &c.Channel.Weight, &c.Channel.TimeoutMS, &c.Channel.Enabled, &c.Channel.HealthState,
 			&c.Channel.ExtraHeaders,

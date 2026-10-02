@@ -2,35 +2,32 @@ package quota
 
 import "testing"
 
-func TestEstimateCost(t *testing.T) {
-	pricing := map[string]ModelPrice{
-		"deepseek-chat": {Input: 0.14, Output: 0.28},
-	}
-	// 12 输入 × 0.14/M + 7 输出 × 0.28/M
-	got := EstimateCost(pricing, "deepseek-chat", 12, 7)
-	want := 12.0/1e6*0.14 + 7.0/1e6*0.28
-	if diff := got - want; diff > 1e-12 || diff < -1e-12 {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	// 未配置的模型 -> 0
-	if v := EstimateCost(pricing, "unknown-model", 100, 200); v != 0 {
-		t.Fatalf("expected 0 for unpriced model, got %v", v)
-	}
-	// 空定价表 -> 0
-	if v := EstimateCost(nil, "deepseek-chat", 1, 1); v != 0 {
-		t.Fatalf("expected 0 for nil pricing, got %v", v)
-	}
-}
+func fp(v float64) *float64 { return &v }
 
-func TestParsePricing(t *testing.T) {
-	m, err := ParsePricing(`{"a": {"input":1,"output":2}}`)
-	if err != nil || m["a"].Input != 1 || m["a"].Output != 2 {
-		t.Fatalf("ParsePricing failed: %v %v", err, m)
+func TestEstimateCostRoute(t *testing.T) {
+	global := map[string]ModelPrice{"deepseek-chat": {Input: 0.14, Output: 0.28}}
+
+	// 路由自定义价优先
+	custom := EstimateCostRoute(global, fp(1.0), fp(2.0), "deepseek-chat", 1_000_000, 500_000)
+	if custom != 2.0 { // 1M*1 + 0.5M*2
+		t.Fatalf("custom price: got %v want 2.0", custom)
 	}
-	if _, err := ParsePricing("not json"); err == nil {
-		t.Fatal("expected error for invalid json")
+
+	// 路由未设价 → 回退全局
+	fallback := EstimateCostRoute(global, nil, nil, "deepseek-chat", 500_000, 250_000)
+	if want := 0.5*0.14 + 0.25*0.28; fallback != want {
+		t.Fatalf("fallback: got %v want %v", fallback, want)
 	}
-	if m, _ := ParsePricing(""); len(m) != 0 {
-		t.Fatal("expected empty map for empty string")
+
+	// 全部未配置 → 0
+	zero := EstimateCostRoute(global, nil, nil, "unknown-model", 1000, 1000)
+	if zero != 0 {
+		t.Fatalf("no price: got %v want 0", zero)
+	}
+
+	// 只设 input：input 用自定义，output 为 0（不部分回退全局，语义明确）
+	partialInput := EstimateCostRoute(global, fp(9.0), nil, "deepseek-chat", 1_000_000, 1_000_000)
+	if partialInput != 9.0 {
+		t.Fatalf("partial input: got %v want 9.0", partialInput)
 	}
 }

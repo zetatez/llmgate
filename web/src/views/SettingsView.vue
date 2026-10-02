@@ -27,7 +27,7 @@ const defs: SettingDef[] = [
   { key: 'pull_interval_min', label: 'Auto-pull interval (min)', type: 'number', min: 0, step: 10, help: '0 = disabled. Runs immediately at startup, then on interval' },
   { key: 'pull_default_priority', label: 'Default pull priority', type: 'number', min: -10, max: 10, step: 1, help: 'Priority of auto-created routes (lower = preferred)' },
   { key: 'pull_default_weight', label: 'Default pull weight', type: 'number', min: 1, step: 1, help: 'Weight of auto-created routes' },
-  { key: 'model_pricing', label: 'Model pricing', type: 'pricing', help: 'Cost estimate per model, USD per 1M tokens (JSON)' },
+  { key: 'model_pricing', label: 'Model pricing', type: 'pricing', help: 'Fallback price per model, USD per 1M tokens (JSON). Routes with custom pricing override this.' },
 ]
 
 const lastRun = computed(() => {

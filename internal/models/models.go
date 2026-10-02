@@ -57,8 +57,11 @@ type ModelRoute struct {
 	Priority      int    `json:"priority"`
 	Weight        int    `json:"weight"`
 	Enabled       int    `json:"enabled"`
-	CreatedAt     int64  `json:"created_at"`
-	UpdatedAt     int64  `json:"updated_at"`
+	// 路由级自定义单价（USD / 百万 tokens）；nil = 回退全局 model_pricing（按对外模型名计费）
+	PriceInput  *float64 `json:"price_input"`
+	PriceOutput *float64 `json:"price_output"`
+	CreatedAt   int64    `json:"created_at"`
+	UpdatedAt   int64    `json:"updated_at"`
 }
 
 // RequestLog 记录一次网关转发的用量与结果。

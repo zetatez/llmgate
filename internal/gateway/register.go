@@ -177,10 +177,11 @@ func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamP
 	}
 }
 
-func finalizeLog(a *app.App, bus *logbus.Bus, logEntry *models.RequestLog) {
+func finalizeLog(a *app.App, bus *logbus.Bus, logEntry *models.RequestLog, priceIn, priceOut *float64) {
 	pricingStr, _ := a.GetSetting("model_pricing")
 	if pricing, perr := quota.ParsePricing(pricingStr); perr == nil {
-		logEntry.Cost = quota.EstimateCost(pricing, logEntry.DisplayModel, logEntry.PromptTokens, logEntry.CompletionTokens)
+		// 成本计算：路由自定义单价优先，否则回退全局 model_pricing（按对外模型名）
+		logEntry.Cost = quota.EstimateCostRoute(pricing, priceIn, priceOut, logEntry.DisplayModel, logEntry.PromptTokens, logEntry.CompletionTokens)
 	}
 	bus.Write(logEntry)
 }
@@ -212,7 +213,7 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 			logEntry.ErrorCode = http.StatusText(res.StatusCode)
 		}
 		parseUsage(res.Body, logEntry)
-		finalizeLog(a, bus, logEntry)
+		finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
 		if logEntry.Status == "success" {
 			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
 		}
@@ -222,7 +223,7 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 	}
 	logEntry.Status = "error"
 	logEntry.ErrorCode = oneLine(ferr.Error(), 200) // 单行：渠道 + 原因（如 channel opencode: upstream 403 ...）
-	finalizeLog(a, bus, logEntry)
+	finalizeLog(a, bus, logEntry, nil, nil)
 	code, msg := mapRouteError(ferr)
 	if retryAfter := retryAfterFor(code); retryAfter != "" {
 		c.Header("Retry-After", retryAfter)
@@ -248,7 +249,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	if ferr != nil {
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-		finalizeLog(a, bus, logEntry)
+		finalizeLog(a, bus, logEntry, nil, nil)
 		code, msg := mapRouteError(ferr)
 		if ra := retryAfterFor(code); ra != "" {
 			c.Header("Retry-After", ra)
@@ -268,7 +269,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 		if logEntry.Status == "error" {
 			logEntry.ErrorCode = http.StatusText(sr.StatusCode)
 		}
-		finalizeLog(a, bus, logEntry)
+		finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
 		if logEntry.Status == "success" {
 			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
 		}
@@ -345,7 +346,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	}
 	_ = sr.Stream.Close()
 	parseUsageFromSSE(usageBuf.Bytes(), logEntry)
-	finalizeLog(a, bus, logEntry)
+	finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
 	if logEntry.Status == "success" {
 		_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
 	}

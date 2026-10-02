@@ -19,16 +19,18 @@ func RegisterModelRouteRoutes(g *gin.RouterGroup, a *app.App) {
 }
 
 type routeJSON struct {
-	ID               int64  `json:"id"`
-	DisplayName      string `json:"display_name"`
-	ChannelID        int64  `json:"channel_id"`
-	ChannelName      string `json:"channel_name"`
-	ChannelEnabled   int    `json:"channel_enabled"`   // 所属渠道是否启用
-	EffectiveEnabled int    `json:"effective_enabled"` // 有效 = 路由启用 AND 渠道启用
-	UpstreamModel    string `json:"upstream_model"`
-	Priority         int    `json:"priority"`
-	Weight           int    `json:"weight"`
-	Enabled          int    `json:"enabled"`
+	ID               int64    `json:"id"`
+	DisplayName      string   `json:"display_name"`
+	ChannelID        int64    `json:"channel_id"`
+	ChannelName      string   `json:"channel_name"`
+	ChannelEnabled   int      `json:"channel_enabled"`   // 所属渠道是否启用
+	EffectiveEnabled int      `json:"effective_enabled"` // 有效 = 路由启用 AND 渠道启用
+	UpstreamModel    string   `json:"upstream_model"`
+	Priority         int      `json:"priority"`
+	Weight           int      `json:"weight"`
+	Enabled          int      `json:"enabled"`
+	PriceInput       *float64 `json:"price_input"`
+	PriceOutput      *float64 `json:"price_output"`
 }
 
 func toRouteJSON(r *models.ModelRoute, chName string, chEnabled int) routeJSON {
@@ -40,6 +42,7 @@ func toRouteJSON(r *models.ModelRoute, chName string, chEnabled int) routeJSON {
 		ID: r.ID, DisplayName: r.DisplayName, ChannelID: r.ChannelID, ChannelName: chName,
 		ChannelEnabled: chEnabled, EffectiveEnabled: eff,
 		UpstreamModel: r.UpstreamModel, Priority: r.Priority, Weight: r.Weight, Enabled: r.Enabled,
+		PriceInput: r.PriceInput, PriceOutput: r.PriceOutput,
 	}
 }
 
@@ -72,12 +75,14 @@ func listModelRoutes(a *app.App) gin.HandlerFunc {
 func createModelRoute(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var b struct {
-			DisplayName   string `json:"display_name"`
-			ChannelID     int64  `json:"channel_id"`
-			UpstreamModel string `json:"upstream_model"`
-			Priority      int    `json:"priority"`
-			Weight        int    `json:"weight"`
-			Enabled       *int   `json:"enabled"`
+			DisplayName   string   `json:"display_name"`
+			ChannelID     int64    `json:"channel_id"`
+			UpstreamModel string   `json:"upstream_model"`
+			Priority      int      `json:"priority"`
+			Weight        int      `json:"weight"`
+			Enabled       *int     `json:"enabled"`
+			PriceInput    *float64 `json:"price_input"`
+			PriceOutput   *float64 `json:"price_output"`
 		}
 		if !decode(c, &b) {
 			return
@@ -97,6 +102,7 @@ func createModelRoute(a *app.App) gin.HandlerFunc {
 		r := &models.ModelRoute{
 			DisplayName: b.DisplayName, ChannelID: b.ChannelID, UpstreamModel: b.UpstreamModel,
 			Priority: b.Priority, Weight: weight, Enabled: enabled,
+			PriceInput: b.PriceInput, PriceOutput: b.PriceOutput,
 		}
 		id, err := store.CreateModelRoute(a.DB, r)
 		if err != nil {
@@ -114,12 +120,14 @@ func updateModelRoute(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			DisplayName   string `json:"display_name"`
-			ChannelID     int64  `json:"channel_id"`
-			UpstreamModel string `json:"upstream_model"`
-			Priority      int    `json:"priority"`
-			Weight        int    `json:"weight"`
-			Enabled       *int   `json:"enabled"`
+			DisplayName   string   `json:"display_name"`
+			ChannelID     int64    `json:"channel_id"`
+			UpstreamModel string   `json:"upstream_model"`
+			Priority      int      `json:"priority"`
+			Weight        int      `json:"weight"`
+			Enabled       *int     `json:"enabled"`
+			PriceInput    *float64 `json:"price_input"`
+			PriceOutput   *float64 `json:"price_output"`
 		}
 		if !decode(c, &b) {
 			return
@@ -148,6 +156,9 @@ func updateModelRoute(a *app.App) gin.HandlerFunc {
 		if b.Enabled != nil {
 			cur.Enabled = *b.Enabled
 		}
+		// 价格以请求体为准（前端总带上两字段；null 即清除自定义价回退全局）
+		cur.PriceInput = b.PriceInput
+		cur.PriceOutput = b.PriceOutput
 		if err := store.UpdateModelRoute(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
