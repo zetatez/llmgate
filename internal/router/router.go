@@ -549,10 +549,10 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			return &Result{StatusCode: code, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 		default:
-			// 成功：清除该渠道熔断并恢复
+			// 成功（2xx）或上游 3xx：清除该渠道熔断并恢复，透传真实状态码
 			r.recoverChannel(&cand.Channel)
 			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
-			return &Result{StatusCode: http.StatusOK, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
+			return &Result{StatusCode: resp.StatusCode, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 		}
 	}
 
@@ -690,10 +690,18 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				lastErr = fmt.Errorf("channel %s: unauthorized key", cand.Channel.Name)
 				r.pen.PenalizeKey(key.ID, 5*time.Minute)
 				failedKeys[key.ID] = true
-			case code == http.StatusRequestTimeout || code >= http.StatusInternalServerError || code == http.StatusBadRequest || code == http.StatusNotFound:
+			case code == http.StatusRequestTimeout || code >= http.StatusInternalServerError:
+				// 连接级/服务端故障：冷却整条渠道，指数退避
 				networkAttempts++
 				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 				r.penalizeChannel(&cand.Channel, 0)
+				excludedCh[cand.Channel.ID] = true
+			case code == http.StatusBadRequest || code == http.StatusNotFound:
+				// 400/404 多为"该模型在此渠道不可用/不认此协议"，属模型级问题：
+				// 与非流式一致，仅排除故障转移，不冷却整条渠道（避免拖累其上其它模型）
+				networkAttempts++
+				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
+				r.recoverChannel(&cand.Channel)
 				excludedCh[cand.Channel.ID] = true
 			default:
 				// 其余 4xx 透传（非流，直接给客户端原始错误体）

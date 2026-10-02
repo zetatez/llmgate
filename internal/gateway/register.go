@@ -103,7 +103,11 @@ func buildPassHeaders(h http.Header) map[string]string {
 
 func handleListModels(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rows, err := a.DB.Query(`SELECT DISTINCT display_name FROM model_routes WHERE enabled = 1`)
+		// 只对外暴露真正可路由的模型：路由+渠道均启用（渠道停用则不可见，避免客户端选中后 404）
+		rows, err := a.DB.Query(`
+			SELECT DISTINCT mr.display_name FROM model_routes mr
+			JOIN channels ch ON ch.id = mr.channel_id
+			WHERE mr.enabled = 1 AND ch.enabled = 1`)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "query models failed"})
 			return

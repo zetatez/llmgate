@@ -170,7 +170,11 @@ func updateChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		cur, err := store.GetChannel(a.DB, id)
-		if err != nil || cur == nil {
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if cur == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
 			return
 		}
@@ -224,6 +228,10 @@ func deleteChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		if err := store.DeleteChannel(a.DB, id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -239,7 +247,11 @@ func testChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		ch, err := store.GetChannel(a.DB, id)
-		if err != nil || ch == nil {
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if ch == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
 			return
 		}
@@ -431,7 +443,11 @@ func updateKey(a *app.App) gin.HandlerFunc {
 			return
 		}
 		cur, err := store.GetChannelKey(a.DB, id)
-		if err != nil || cur == nil {
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if cur == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "key not found"})
 			return
 		}

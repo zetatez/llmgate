@@ -3,6 +3,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,9 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrNotFound 表示按主键操作的记录不存在（供 handler 映射为 404）。
+var ErrNotFound = errors.New("record not found")
 
 // Open 打开（或创建）SQLite 数据库，并设置 WAL 等连接级参数。
 // 会自动创建数据库所在的父目录。

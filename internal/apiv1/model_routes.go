@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -123,8 +124,8 @@ func updateModelRoute(a *app.App) gin.HandlerFunc {
 			DisplayName   string   `json:"display_name"`
 			ChannelID     int64    `json:"channel_id"`
 			UpstreamModel string   `json:"upstream_model"`
-			Priority      int      `json:"priority"`
-			Weight        int      `json:"weight"`
+			Priority      *int     `json:"priority"`
+			Weight        *int     `json:"weight"`
 			Enabled       *int     `json:"enabled"`
 			PriceInput    *float64 `json:"price_input"`
 			PriceOutput   *float64 `json:"price_output"`
@@ -132,7 +133,6 @@ func updateModelRoute(a *app.App) gin.HandlerFunc {
 		if !decode(c, &b) {
 			return
 		}
-		b.Weight = normalizeWeight(b.Weight)
 		cur, err := store.GetModelRoute(a.DB, id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -151,8 +151,13 @@ func updateModelRoute(a *app.App) gin.HandlerFunc {
 		if b.UpstreamModel != "" {
 			cur.UpstreamModel = b.UpstreamModel
 		}
-		cur.Priority = b.Priority
-		cur.Weight = b.Weight
+		// 部分更新：仅覆盖请求体中出现的字段，避免"快捷启停只传 enabled"时重置优先级/权重
+		if b.Priority != nil {
+			cur.Priority = *b.Priority
+		}
+		if b.Weight != nil {
+			cur.Weight = normalizeWeight(*b.Weight)
+		}
 		if b.Enabled != nil {
 			cur.Enabled = *b.Enabled
 		}
@@ -179,6 +184,10 @@ func deleteModelRoute(a *app.App) gin.HandlerFunc {
 			return
 		}
 		if err := store.DeleteModelRoute(a.DB, id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "route not found"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

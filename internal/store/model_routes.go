@@ -81,7 +81,7 @@ func DeleteModelRoute(db *sql.DB, id int64) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("route %d not found", id)
+		return fmt.Errorf("%w: DeleteModelRoute(id=%d)", ErrNotFound, id)
 	}
 	return nil
 }
