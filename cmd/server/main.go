@@ -120,11 +120,14 @@ func main() {
 		}
 	}()
 
-	// 优雅停机：收到 SIGTERM/SIGINT 后停止接收新连接，给在途请求（含长流式）最多 grace 时间
-	// 自然结束；超时后强关连接，避免部署/重启硬杀导致客户端侧"无信号中断"。
+	// 优雅停机：收到 SIGTERM/SIGINT 后先通知网关（流式 handler 尽早补发失败终态），
+	// 再停止接收新连接，给在途请求最多 grace 时间自然结束；超时后强关连接。
+	drainCtx, drainCancel := context.WithCancel(context.Background())
+	gateway.SetDrainContext(drainCtx)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	drainCancel()
 	const grace = 10 * time.Second
 	log.Printf("shutting down: draining in-flight requests (grace %s)", grace)
 	ctx, cancel := context.WithTimeout(context.Background(), grace)

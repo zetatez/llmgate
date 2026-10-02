@@ -227,7 +227,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 	buf := make([]byte, 32<<10)
 	interrupted := false
 	for {
-		if c.Request.Context().Err() != nil {
+		if draining() || c.Request.Context().Err() != nil {
 			interrupted = true
 			break
 		}
@@ -240,7 +240,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 			break
 		}
 		if rerr != nil {
-			if c.Request.Context().Err() != nil {
+			if draining() || c.Request.Context().Err() != nil {
 				interrupted = true
 				break
 			}
@@ -255,7 +255,15 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 	// 先解析用量，再发 done/completed，保证 usage 正确
 	parseUsageFromSSE(usageBuf.Bytes(), logEntry)
 
-	if !interrupted {
+	if interrupted {
+		// 客户端断开或服务停机（优雅停机超时强关）：给仍连着的对端一个明确失败终态，
+		// 否则 SDK 等不到 completed/failed 会挂起或误判。对已断开的对端，写失败也无害。
+		logEntry.Status = "error"
+		logEntry.ErrorCode = "stream_interrupted"
+		sw.emit("response.failed", map[string]any{
+			"type": "response.failed", "response": baseResponse(respID, model, sr.Route.UpstreamModel, statusFailed),
+		})
+	} else {
 		conv.finalize(sr.Route.UpstreamModel)
 		// 收尾：done 之后发 completed
 		output := conv.buildOutput()

@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,27 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 	v1.POST("/completions", handleForward(a, bus, pen, "/v1/completions"))
 	v1.POST("/embeddings", handleForward(a, bus, pen, "/v1/embeddings"))
 	v1.POST("/responses", handleResponses(a, bus, pen))
+}
+
+// drainCtx 服务停机信号：main 在收到 SIGTERM/SIGINT 时取消。
+// 流式 handler 据此尽早优雅终止并向对端发出明确的失败终态，而非等到 Shutdown 超时强断。
+var drainCtx = context.Background()
+
+// SetDrainContext 注入停机信号上下文（main 启动时调用一次）。
+func SetDrainContext(ctx context.Context) {
+	if ctx != nil {
+		drainCtx = ctx
+	}
+}
+
+// draining 是否处于停机/排空中。
+func draining() bool {
+	select {
+	case <-drainCtx.Done():
+		return true
+	default:
+		return false
+	}
 }
 
 const ctxUserKey = "llmgate.user"
@@ -304,6 +326,17 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	buf := make([]byte, 32<<10)
 	clientGone := false
 	for {
+		// 服务停机：给仍连着的对端补发错误终态 + [DONE]，避免重启/停机时无信号硬断。
+		if draining() {
+			logEntry.Status = "error"
+			logEntry.ErrorCode = "server_shutdown"
+			_, _ = c.Writer.Write([]byte("data: {\"error\":{\"message\":\"server is shutting down\",\"type\":\"stream_error\"}}\n\n"))
+			_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+			if flusher != nil {
+				flusher.Flush()
+			}
+			break
+		}
 		// 客户端已断开连接：立即停止读上游，避免在渠道上继续白烧额度/占用连接。
 		if c.Request.Context().Err() != nil {
 			clientGone = true
