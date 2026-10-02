@@ -2,10 +2,7 @@ services:
   llmgate:
     build:
       context: .
-      # 构建用 host 网络：避免 rootless Docker 下 buildkit 桥接网络(veth)创建失败
       network: host
-    # host 网络：直通宿主网络栈，让 LGM_PROXY 的 127.0.0.1:7891 可直接访问；
-    # 应用监听 LGM_HTTP_ADDR（默认 :3210），等价于原端口映射
     network_mode: host
     environment:
       - LGM_ADMIN_TOKEN=${LGM_ADMIN_TOKEN:-}
@@ -15,13 +12,12 @@ services:
       - LGM_LOG_LEVEL=${LGM_LOG_LEVEL:-release}
       - LGM_TZ=${LGM_TZ:-Asia/Shanghai}
       - TZ=${LGM_TZ:-Asia/Shanghai}
-      # 上游出站代理，如 socks5://127.0.0.1:7891；空=直连
       - LGM_PROXY=${LGM_PROXY:-}
-      - LGM_DB_PATH=/data/llmgate.db # 容器内 DB 路径固定指向挂载卷；.env 的 LGM_DB_PATH 仅用于本地 make dev-backend
+      - LGM_DB_PATH=/data/llmgate.db
     volumes:
       - ./data:/data
     restart: always
     # 停机宽限：给长流式足够的自然收尾时间，避免 docker 在默认 10s 后 SIGKILL 掐断在途流。
     # 服务在流跑完后会正常退出（无需等满该时长）；仅当确实有长流时才等待其自然结束。
     # 应大于应用内 LGM_SHUTDOWN_GRACE（默认 280s），否则会被 docker 抢先 SIGKILL。
-    stop_grace_period: 300s
+    stop_grace_period: 10s

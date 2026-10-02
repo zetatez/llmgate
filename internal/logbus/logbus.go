@@ -71,8 +71,20 @@ func (b *Bus) run() {
 		case <-ticker.C:
 			flush()
 		case <-b.stop:
-			flush()
-			return
+			// 收尾前先排空缓冲区中尚未消费的日志，避免停机丢失在途审计日志。
+			// 通道有界且默认非阻塞写，用非阻塞读排到空再刷盘 + 返回，不会阻塞。
+			for {
+				select {
+				case l := <-b.ch:
+					batch = append(batch, l)
+					if len(batch) >= flushBatchSize {
+						flush()
+					}
+				default:
+					flush()
+					return
+				}
+			}
 		}
 	}
 }

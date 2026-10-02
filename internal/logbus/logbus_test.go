@@ -97,6 +97,20 @@ func TestCloseStopsWorker(t *testing.T) {
 	b.Close() // 不 panic、能正常结束后台协程
 }
 
+// 回归：Close 必须排空缓冲区中尚未消费的在途日志，不得丢失。
+func TestCloseDrainsBufferedLogs(t *testing.T) {
+	db := openDB(t)
+	b := New(db, 0)
+	n := 7 // 不足批量阈值，全留在通道/批量中
+	for i := 0; i < n; i++ {
+		b.Write(mkLog())
+	}
+	b.Close() // 立即收尾：不等待 ticker，Close 应排空并刷盘
+	if got := countLogs(t, db); got != n {
+		t.Fatalf("Close 后应落库 %d 条，实际 %d（存在丢缓冲日志缺陷）", n, got)
+	}
+}
+
 // 缓冲满时 Write 应丢弃而非阻塞/panic。
 func TestWriteWhenFullDrops(t *testing.T) {
 	db := openDB(t)
