@@ -187,30 +187,40 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 
 	sw := &sseEmitter{w: c.Writer, flusher: flusher}
 	respID := "resp_" + randHex(12)
-	itemID := "msg_" + randHex(10)
 
-	var accumulated strings.Builder
 	var usageBuf bytes.Buffer
 	logEntry.Status = "success"
 
-	// 开场事件
+	// 开场事件（输出 item 采取 lazy：等收到上游增量后再决定是 reasoning 还是 message）
 	sw.emit("response.created", map[string]any{
 		"type": "response.created", "response": baseResponse(respID, model, sr.Route.UpstreamModel, statusRunning),
 	})
-	sw.emit("response.output_item.added", map[string]any{
-		"type": "response.output_item.added", "output_index": 0,
-		"item": map[string]any{"id": itemID, "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}},
-	})
-	sw.emit("response.content_part.added", map[string]any{
-		"type": "response.content_part.added", "item_id": itemID, "output_index": 0, "content_index": 0,
-		"part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}},
+	sw.emit("response.in_progress", map[string]any{
+		"type": "response.in_progress", "response": baseResponse(respID, model, sr.Route.UpstreamModel, statusRunning),
 	})
 
-	if len(sr.Buffered) > 0 {
+	// 负责把上游 chat delta 转成 lazy 的 Responses output item 序列。
+	conv := &responsesSSE{sw: sw}
+
+	// 逐帧处理：支持跨 read 边界的部分帧（先攒到完整 \n\n 再解析）
+	var frameBuf bytes.Buffer
+	feed := func(chunk []byte) {
 		if usageBuf.Len() < 1<<20 {
-			usageBuf.Write(sr.Buffered)
+			usageBuf.Write(chunk)
 		}
-		emitDelTask(sw, itemID, sr.Buffered, &accumulated)
+		frameBuf.Write(chunk)
+		for {
+			idx := bytes.Index(frameBuf.Bytes(), []byte("\n\n"))
+			if idx < 0 {
+				break
+			}
+			frame := frameBuf.Next(idx + 2)
+			conv.ingestFrame(frame)
+		}
+	}
+
+	if len(sr.Buffered) > 0 {
+		feed(sr.Buffered)
 		flush(flusher)
 	}
 
@@ -223,10 +233,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 		}
 		n, rerr := sr.Stream.Read(buf)
 		if n > 0 {
-			if usageBuf.Len() < 1<<20 {
-				usageBuf.Write(buf[:n])
-			}
-			emitDelTask(sw, itemID, buf[:n], &accumulated)
+			feed(buf[:n])
 			flush(flusher)
 		}
 		if rerr == io.EOF {
@@ -245,25 +252,20 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 	}
 	_ = sr.Stream.Close()
 
-	// 先解析用量，再发出 completed，保证 usage 正确
+	// 先解析用量，再发 done/completed，保证 usage 正确
 	parseUsageFromSSE(usageBuf.Bytes(), logEntry)
 
 	if !interrupted {
-		sw.emit("response.output_item.done", map[string]any{
-			"type": "response.output_item.done", "output_index": 0,
-			"item": map[string]any{"id": itemID, "type": "message", "status": "completed", "role": "assistant",
-				"content": []any{map[string]any{"type": "output_text", "text": accumulated.String(), "annotations": []any{}}}},
-		})
+		conv.finalize(sr.Route.UpstreamModel)
+		// 收尾：done 之后发 completed
+		output := conv.buildOutput()
 		sw.emit("response.completed", map[string]any{
 			"type": "response.completed",
 			"response": map[string]any{
 				"id": respID, "object": "response", "created_at": time.Now().Unix(),
-				"status": "completed", "model": sr.Route.UpstreamModel,
-				"output": []any{map[string]any{
-					"id": itemID, "type": "message", "status": "completed", "role": "assistant",
-					"content": []any{map[string]any{"type": "output_text", "text": accumulated.String(), "annotations": []any{}}},
-				}},
-				"usage": usageFromLog(logEntry),
+				"status": "completed", "model": upstreamModelifEmpty(sr.Route.UpstreamModel, model),
+				"output": output,
+				"usage":  usageFromLog(logEntry),
 			},
 		})
 	}
@@ -278,6 +280,135 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 		_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
 	}
 	_ = store.TouchChannelKey(a.DB, logEntry.KeyID)
+}
+
+// responsesSSE 把上游 chat 增量 lazy 转成 Responses 的 output item 序列：
+// 先出现 reasoning_content → 建 reasoning item；后出现 content → 建 message item；末尾各自 done。
+// 符合 OpenAI Responses 流协议（推理模型必须先发 reasoning item）。
+type responsesSSE struct {
+	sw       *sseEmitter
+	reasonID string
+	msgID    string
+	reason   strings.Builder
+	msg      strings.Builder
+}
+
+// ingestFrame 处理一个完整 SSE 帧（含尾部 \n\n）。
+func (r *responsesSSE) ingestFrame(frame []byte) {
+	line := strings.TrimSpace(string(frame))
+	if !strings.HasPrefix(line, "data:") {
+		return
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	if payload == "" || payload == "[DONE]" {
+		return
+	}
+	var chunk struct {
+		Choices []struct {
+			Delta struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(payload), &chunk); err != nil || len(chunk.Choices) == 0 {
+		return
+	}
+	d := chunk.Choices[0].Delta
+	if d.ReasoningContent != "" {
+		r.emitReason(d.ReasoningContent)
+	}
+	if d.Content != "" {
+		r.emitText(d.Content)
+	}
+}
+
+func (r *responsesSSE) emitReason(delta string) {
+	if r.reasonID == "" {
+		r.reasonID = "reason_" + randHex(10)
+		r.sw.emit("response.output_item.added", map[string]any{
+			"type": "response.output_item.added", "output_index": 0,
+			"item": map[string]any{"id": r.reasonID, "type": "reasoning", "status": "in_progress", "summary": []any{}},
+		})
+		// 必须先用 summary_part.added 填充 summary[0]，否则后续 summary_text.delta 会因缺内容而报错
+		r.sw.emit("response.reasoning_summary_part.added", map[string]any{
+			"type": "response.reasoning_summary_part.added", "item_id": r.reasonID, "output_index": 0, "summary_index": 0,
+			"part": map[string]any{"type": "summary_text", "text": ""},
+		})
+	}
+	r.reason.WriteString(delta)
+	r.sw.emit("response.reasoning_summary_text.delta", map[string]any{
+		"type": "response.reasoning_summary_text.delta", "item_id": r.reasonID, "output_index": 0, "summary_index": 0, "delta": delta,
+	})
+}
+
+func (r *responsesSSE) emitText(delta string) {
+	if r.msgID == "" {
+		r.msgID = "msg_" + randHex(10)
+		idx := r.msgOutputIndex()
+		r.sw.emit("response.output_item.added", map[string]any{
+			"type": "response.output_item.added", "output_index": idx,
+			"item": map[string]any{"id": r.msgID, "type": "message", "status": "in_progress", "role": "assistant", "content": []any{}},
+		})
+		r.sw.emit("response.content_part.added", map[string]any{
+			"type": "response.content_part.added", "item_id": r.msgID, "output_index": idx, "content_index": 0,
+			"part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}},
+		})
+	}
+	r.msg.WriteString(delta)
+	r.sw.emit("response.output_text.delta", map[string]any{
+		"type": "response.output_text.delta", "item_id": r.msgID, "output_index": r.msgOutputIndex(), "content_index": 0, "delta": delta,
+	})
+}
+
+func (r *responsesSSE) msgOutputIndex() int {
+	if r.reasonID != "" {
+		return 1
+	}
+	return 0
+}
+
+func (r *responsesSSE) reasonItem() any {
+	return map[string]any{
+		"id": r.reasonID, "type": "reasoning", "status": "completed",
+		"summary": []any{map[string]any{"type": "summary_text", "text": r.reason.String()}},
+	}
+}
+
+func (r *responsesSSE) msgItem() any {
+	return map[string]any{
+		"id": r.msgID, "type": "message", "status": "completed", "role": "assistant",
+		"content": []any{map[string]any{"type": "output_text", "text": r.msg.String(), "annotations": []any{}}},
+	}
+}
+
+func (r *responsesSSE) buildOutput() []any {
+	if r.reasonID == "" && r.msgID == "" {
+		// 没有任何输出（异常）：给一个空消息兜底，避免 Codex 收不到 message
+		r.msgID = "msg_" + randHex(10)
+	}
+	out := make([]any, 0, 2)
+	if r.reasonID != "" {
+		out = append(out, r.reasonItem())
+	}
+	if r.msgID != "" {
+		out = append(out, r.msgItem())
+	}
+	return out
+}
+
+// finalize 依序发 reasoning / message 两个 output_item.done。
+func (r *responsesSSE) finalize(model string) {
+	if r.reasonID != "" {
+		r.sw.emit("response.output_item.done", map[string]any{
+			"type": "response.output_item.done", "output_index": 0, "item": r.reasonItem(),
+		})
+	}
+	if r.msgID != "" {
+		r.sw.emit("response.output_item.done", map[string]any{
+			"type": "response.output_item.done", "output_index": r.msgOutputIndex(), "item": r.msgItem(),
+		})
+	}
 }
 
 const (
