@@ -30,6 +30,7 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 	v1.POST("/chat/completions", handleForward(a, bus, pen, "/v1/chat/completions"))
 	v1.POST("/completions", handleForward(a, bus, pen, "/v1/completions"))
 	v1.POST("/embeddings", handleForward(a, bus, pen, "/v1/embeddings"))
+	v1.POST("/responses", handleResponses(a, bus, pen))
 }
 
 const ctxUserKey = "llmgate.user"
