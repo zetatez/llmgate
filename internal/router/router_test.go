@@ -117,6 +117,37 @@ func TestPickByPriority(t *testing.T) {
 	}
 }
 
+// 所有候选渠道都在冷却（熔断）时，仍应"最后手段"兜底选中最低优先级渠道，
+// 不能因为瞬时冷却就误报"无可用渠道"。
+func TestPickLastResortOnCooldown(t *testing.T) {
+	r := &Router{pen: NewPenalizer()}
+	cands := []Candidate{
+		mkCandidate(1, 0, 1, 0, 1),
+		mkCandidate(2, 1, 1, 1, 1),
+	}
+	// 两个渠道都熔断冷却
+	r.pen.PenaliseChan(1, time.Hour)
+	r.pen.PenaliseChan(2, time.Hour)
+	pick := r.pickByPriority(cands, map[int64]bool{}, "m")
+	if pick == nil {
+		t.Fatal("expected last-resort pick when all channels are in cooldown")
+	}
+	if pick.Channel.ID != 1 {
+		t.Fatalf("expected lowest-priority channel 1 as last resort, got %d", pick.Channel.ID)
+	}
+	// 排除后严格路径仍为空，兜底应落到仅剩的渠道 2
+	pick = r.pickByPriority(cands, map[int64]bool{1: true}, "m")
+	if pick == nil || pick.Channel.ID != 2 {
+		t.Fatalf("expected last-resort on channel 2, got %+v", pick)
+	}
+	// 模型级 403 拒权不应被兜底绕过
+	r.pen.DenyModel(1, "m", time.Hour)
+	pick = r.pickByPriority(cands, map[int64]bool{2: true}, "m")
+	if pick != nil {
+		t.Fatalf("expected nil when only remaining channel is model-denied, got %+v", pick)
+	}
+}
+
 func TestWeightedRandomRespectsWeights(t *testing.T) {
 	// 单元素必然返回它
 	items := []int{42}

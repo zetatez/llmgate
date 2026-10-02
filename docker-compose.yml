@@ -1,6 +1,9 @@
 services:
   llmgate:
-    build: .
+    build:
+      context: .
+      # 构建用 host 网络：避免 rootless Docker 下 buildkit 桥接网络(veth)创建失败
+      network: host
     # host 网络：直通宿主网络栈，让 LGM_PROXY 的 127.0.0.1:7891 可直接访问；
     # 应用监听 LGM_HTTP_ADDR（默认 :3210），等价于原端口映射
     network_mode: host

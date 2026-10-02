@@ -10,6 +10,22 @@ const loading = ref(false)
 const chartEl = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 
+// 把大数字变成人可读的 k / M，方便一眼看懂（悬浮显示精确值）。
+function humanNum(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '-'
+  const abs = Math.abs(n)
+  if (abs >= 1e9) return +(n / 1e9).toFixed(2) + 'B'
+  if (abs >= 1e6) return +(n / 1e6).toFixed(2) + 'M'
+  if (abs >= 1e3) return +(n / 1e3).toFixed(1) + 'k'
+  return String(n)
+}
+
+function humanMoney(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '-'
+  if (Math.abs(n) >= 1000) return (n / 1000).toFixed(2) + 'k'
+  return n.toFixed(4)
+}
+
 async function load() {
   loading.value = true
   try {
@@ -21,23 +37,60 @@ async function load() {
   }
 }
 
+// 仪表盘主色盘（模型用）。
+const MODEL_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc']
+
+// 把每日×模型数据折叠成「每天各模型 token 占比」的堆叠柱状图。
 function renderChart() {
   if (!payload.value || !chartEl.value) return
-  const week = payload.value.week
+  const days = payload.value.week.map((p) => p.date)
+  const marks = payload.value.week_models || []
+
+  // 各模型 7 天内累计 token，取 Top 7，其余并入"其他"，避免图例爆炸
+  const totals = new Map<string, number>()
+  for (const m of marks) totals.set(m.model, (totals.get(m.model) || 0) + m.tokens)
+  const topModels = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([m]) => m)
+
+  // 组装每个模型的逐日 token（缺失补 0）
+  const seriesByModel = new Map<string, number[]>()
+  for (const m of marks) {
+    if (!topModels.includes(m.model)) continue
+    if (!seriesByModel.has(m.model)) seriesByModel.set(m.model, days.map(() => 0))
+    const idx = days.indexOf(m.date)
+    if (idx >= 0) seriesByModel.get(m.model)![idx] += m.tokens
+  }
+  // 每天归一化为占比（0-100），让 yAxis 按百分比显示
+  const dayTotal = days.map((_, i) =>
+    topModels.reduce((s, m) => s + (seriesByModel.get(m)![i] || 0), 0),
+  )
+  const toPct = (i: number, v: number) => (dayTotal[i] > 0 ? (v / dayTotal[i]) * 100 : 0)
+
   chart = echarts.init(chartEl.value)
   chart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['Requests', 'Tokens (k)'] },
-    grid: { left: 40, right: 40, top: 40, bottom: 30 },
-    xAxis: { type: 'category', data: week.map((p) => p.date) },
-    yAxis: [
-      { type: 'value', name: 'Requests' },
-      { type: 'value', name: 'Tokens' },
-    ],
-    series: [
-      { name: 'Requests', type: 'bar', data: week.map((p) => p.requests), itemStyle: { color: '#1677ff' } },
-      { name: 'Tokens (k)', type: 'line', yAxisIndex: 1, smooth: true, data: week.map((p) => p.total_tokens / 1000), itemStyle: { color: '#13c2c2' } },
-    ],
+    tooltip: {
+      trigger: 'axis',
+      formatter(params: any[]) {
+        const total = params.reduce((s: number, p: any) => s + (p.value || 0), 0)
+        let html = params[0].axisValue + '<br/>'
+        for (const p of params) {
+          const share = total > 0 ? (p.value / total).toFixed(1) + '%' : '0%'
+          html += `${p.marker}${p.seriesName}: ${humanNum(p.value)} token (${share})<br/>`
+        }
+        html += `合计: ${humanNum(total)} token`
+        return html
+      },
+    },
+    legend: { type: 'scroll', bottom: 0 },
+    grid: { left: 50, right: 20, top: 30, bottom: 40 },
+    xAxis: { type: 'category', data: days },
+    yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
+    series: topModels.map((m, i) => ({
+      name: m,
+      type: 'bar',
+      stack: 'models',
+      data: days.map((_, j) => +(toPct(j, seriesByModel.get(m)![j] || 0)).toFixed(2)),
+      itemStyle: { color: MODEL_COLORS[i % MODEL_COLORS.length] },
+    })),
   })
 }
 
@@ -60,21 +113,41 @@ onBeforeUnmount(() => {
   <div v-loading="loading">
     <el-row :gutter="12">
       <el-col :span="6">
-        <el-card shadow="never"><div class="stat"><div class="num">{{ payload?.today.total_requests ?? '-' }}</div><div class="label">Requests Today</div></div></el-card>
+        <el-card shadow="never">
+          <div class="stat">
+            <div class="num" :title="`${payload?.today.total_requests ?? 0} req`">{{ humanNum(payload?.today.total_requests) }}</div>
+            <div class="label">Requests Today</div>
+          </div>
+        </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="never"><div class="stat"><div class="num">{{ payload?.today.total_tokens ?? '-' }}</div><div class="label">Tokens Today</div></div></el-card>
+        <el-card shadow="never">
+          <div class="stat">
+            <div class="num" :title="`${payload?.today.total_tokens ?? 0} tokens`">{{ humanNum(payload?.today.total_tokens) }}</div>
+            <div class="label">Tokens Today</div>
+          </div>
+        </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="never"><div class="stat"><div class="num">{{ payload?.today.cost?.toFixed(4) ?? '-' }}</div><div class="label">Cost Today ($)</div></div></el-card>
+        <el-card shadow="never">
+          <div class="stat">
+            <div class="num" :title="`$${(payload?.today.cost ?? 0).toFixed(4)}`">{{ humanMoney(payload?.today.cost) }}</div>
+            <div class="label">Cost Today ($)</div>
+          </div>
+        </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="never"><div class="stat"><div class="num" :style="{ color: (payload?.today.errors || 0) > 0 ? '#f56c6c' : '#67c23a' }">{{ payload?.today.errors ?? '-' }}</div><div class="label">Errors Today</div></div></el-card>
+        <el-card shadow="never">
+          <div class="stat">
+            <div class="num" :style="{ color: (payload?.today.errors || 0) > 0 ? '#f56c6c' : '#67c23a' }" :title="`${payload?.today.errors ?? 0}`">{{ humanNum(payload?.today.errors) }}</div>
+            <div class="label">Errors Today</div>
+          </div>
+        </el-card>
       </el-col>
     </el-row>
 
     <el-card shadow="never" class="mt">
-      <template #header>Usage Trend (Last 7 Days)</template>
+      <template #header>Usage Trend (Last 7 Days) · 按模型占比</template>
       <div ref="chartEl" style="height: 300px"></div>
     </el-card>
 

@@ -216,8 +216,8 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 	c.JSON(code, gin.H{"error": gin.H{"message": oneLine(msg, 500), "type": "upstream_error"}})
 }
 
-// handleStreamRoute SSE 流式代理：首字节前可故障转移，流出后绑定渠道；
-// 上游中断时补发标准 error 事件。
+// handleStreamRoute SSE 流式代理：上游首个 data 事件前可透明故障转移（连接即死不外露）；
+// 首事件交付后绑定渠道；流中断时补发标准 error 事件。
 func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Router, body []byte, model, upstreamPath string, logEntry *models.RequestLog, passHeaders map[string]string) {
 	start := time.Now()
 	sr, ferr := rt.ForwardChatStream(c.Request.Context(), body, model, upstreamPath, passHeaders)
@@ -255,7 +255,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 		return
 	}
 
-	// SSE 代理
+	// SSE 代理：首事件已在路由层缓冲确认（上游稳定），先写给客户端再继续转发
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
@@ -265,6 +265,15 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 
 	logEntry.Status = "success"
 	var usageBuf bytes.Buffer
+	if len(sr.Buffered) > 0 {
+		_, _ = c.Writer.Write(sr.Buffered)
+		if usageBuf.Len() < 1<<20 {
+			usageBuf.Write(sr.Buffered)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 	buf := make([]byte, 32<<10)
 	for {
 		n, rerr := sr.Stream.Read(buf)

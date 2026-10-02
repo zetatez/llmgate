@@ -237,14 +237,16 @@ func (r *Router) recoverChannel(ch *models.Channel) {
 	_ = store.SetChannelHealthy(r.db, ch.ID)
 }
 
-// Candidates 返回某模型可参与路由的候选（启用路由 + 启用渠道 + 非 cooldown）。
+// Candidates 返回某模型可参与路由的候选（启用路由 + 启用渠道）。
+// 注意：不在此处排除冷却渠道——冷却/拒权由 pickByPriority 在"最后手段"阶段决定，
+// 以免模型的所有候选渠道都在冷却时误报"无可用渠道"。
 func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candidate, error) {
 	rows, err := r.db.Query(`
 		SELECT mr.id, mr.display_name, mr.channel_id, mr.upstream_model, mr.priority, mr.weight, mr.enabled,
 			ch.id, ch.name, ch.base_url, ch.adapter, ch.priority, ch.weight, ch.timeout_ms, ch.enabled, ch.health_state, ch.extra_headers
 		FROM model_routes mr
 		JOIN channels ch ON ch.id = mr.channel_id
-		WHERE mr.display_name = ? AND mr.enabled = 1 AND ch.enabled = 1 AND ch.health_state != 'cooldown'
+		WHERE mr.display_name = ? AND mr.enabled = 1 AND ch.enabled = 1
 		ORDER BY mr.priority ASC, ch.priority ASC, mr.id ASC`, displayModel)
 	if err != nil {
 		return nil, err
@@ -275,13 +277,27 @@ func candidateLess(a, b Candidate) bool {
 	return a.Channel.Priority < b.Channel.Priority
 }
 
-// pickByPriority 在未排除/未熔断/未拒权候选中，取最低有效优先层级组内按权重加权随机。
+// pickByPriority 在未排除/未拒绝/未熔断候选中，取最低有效优先层级组内按权重加权随机。
+// 严谨筛选无可选时，"最后手段"兜底：忽略渠道冷却仍去尝试最低层级候选（可用性优先），
+// 但始终尊重 excludedCh 与本模型的 403 拒权标记，避免明知会被打回 403 仍去撞。
 func (r *Router) pickByPriority(cands []Candidate, excludedCh map[int64]bool, displayModel string) *Candidate {
+	c := r.pickBest(cands, excludedCh, displayModel, false)
+	if c != nil {
+		return c
+	}
+	return r.pickBest(cands, excludedCh, displayModel, true)
+}
+
+// pickBest 在内层筛选后的候选中取最低有效优先级组内加权随机；allowCooldown=true 时忽略渠道冷却。
+func (r *Router) pickBest(cands []Candidate, excludedCh map[int64]bool, displayModel string, allowCooldown bool) *Candidate {
 	group := []Candidate{}
 	var best *Candidate
 	for i := range cands {
 		c := cands[i]
-		if excludedCh[c.Channel.ID] || r.pen.ChPenalized(c.Channel.ID) || r.pen.ModelDenied(c.Channel.ID, displayModel) {
+		if excludedCh[c.Channel.ID] || r.pen.ModelDenied(c.Channel.ID, displayModel) {
+			continue
+		}
+		if !allowCooldown && r.pen.ChPenalized(c.Channel.ID) {
 			continue
 		}
 		if best == nil || candidateLess(c, *best) {
@@ -337,7 +353,7 @@ func isQuotaExceeded(body string) bool {
 // ForwardChat 将 OpenAI 兼容请求体转发给 displayModel 对应的候选渠道。
 // 有效优先级 高→低 依次消费；高优先级被限流/额度用尽/失败时自动下沉到低优先级，
 // 并给失败渠道施加内存熔断（指数退避），避免每个请求都重复打失败的渠道。
-// 其余 4xx 透传；网络级失败最多尝试 3 次。
+// 其余 4xx 透传；网络级失败/上游错误最多尝试 5 次。
 func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayModel, upstreamPath string, passHeaders map[string]string) (*Result, error) {
 	cands, err := r.Candidates(ctx, displayModel)
 	if err != nil {
@@ -348,7 +364,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	failedKeys := map[int64]bool{}
 	var lastErr error
 	networkAttempts := 0
-	maxNetworkAttempts := 3
+	maxNetworkAttempts := 5
 
 	for {
 		cand := r.pickByPriority(cands, excludedCh, displayModel)
@@ -476,6 +492,9 @@ type StreamResult struct {
 	StatusCode  int
 	ContentType string
 	Stream      io.ReadCloser
+	// Buffered 是网关在确认上游稳定前预读的首批 SSE 事件（可能含首个 data 事件），
+	// 调用方必须先写给客户端再继续读 Stream。
+	Buffered    []byte
 	Passthrough []byte
 	Channel     models.Channel
 	Route       models.ModelRoute
@@ -483,8 +502,8 @@ type StreamResult struct {
 	Retries     int
 }
 
-// ForwardChatStream 流式转发：在首个字节流出前失败会自动切换到下一候选；
-// 一旦流出即绑定该渠道。非 2xx 中 429/402/403/408/5xx/400/404 触发故障转移，其余 4xx 透传。
+// ForwardChatStream 流式转发：在上游稳定送出首个 SSE data 事件前失败会自动切换下一候选；
+// 一旦首个事件交付即绑定该渠道。非 2xx 中 429/402/403/408/5xx/400/404 触发故障转移，其余 4xx 透传。
 func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, displayModel, upstreamPath string, passHeaders map[string]string) (*StreamResult, error) {
 	cands, err := r.Candidates(ctx, displayModel)
 	if err != nil {
@@ -494,7 +513,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	failedKeys := map[int64]bool{}
 	var lastErr error
 	networkAttempts := 0
-	maxNetworkAttempts := 3
+	maxNetworkAttempts := 5
 
 	for {
 		cand := r.pickByPriority(cands, excludedCh, displayModel)
@@ -571,10 +590,42 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			}
 			continue
 		}
-		// 成功：绑定该渠道并返回 SSE 流
+		// 已连上上游（HTTP 200），但还不能立刻交付给客户端：
+		// 先缓冲直到出现第一个 SSE data 事件。若在首个事件前断流（EOF/网络中断），
+		// 说明这条渠道"连接即死"，对客户端透明地换下一候选/Key 重试，避免空流/断流暴露给用户。
+		firstBuf := make([]byte, 0, 8<<10)
+		rbuf := make([]byte, 16<<10)
+		firstErr := error(nil)
+	bufferLoop:
+		for {
+			n, rerr := rc.Read(rbuf)
+			if n > 0 {
+				firstBuf = append(firstBuf, rbuf[:n]...)
+				if bytes.Contains(firstBuf, []byte("data:")) || len(firstBuf) >= 512<<10 {
+					break bufferLoop
+				}
+			}
+			if rerr != nil {
+				firstErr = rerr
+				break bufferLoop
+			}
+		}
+		if firstErr != nil && !bytes.Contains(firstBuf, []byte("data:")) {
+			// 首事件前中断：视为未交付，走故障转移
+			rc.Close()
+			networkAttempts++
+			lastErr = fmt.Errorf("channel %s: stream died before first event: %v", cand.Channel.Name, firstErr)
+			r.penalizeChannel(&cand.Channel, 0)
+			excludedCh[cand.Channel.ID] = true
+			if networkAttempts >= maxNetworkAttempts {
+				return nil, lastErr
+			}
+			continue
+		}
+		// 稳定交付：恢复渠道并绑定
 		r.recoverChannel(&cand.Channel)
 		r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
-		return &StreamResult{StatusCode: http.StatusOK, Stream: rc,
+		return &StreamResult{StatusCode: http.StatusOK, Stream: rc, Buffered: firstBuf,
 			Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 	}
 

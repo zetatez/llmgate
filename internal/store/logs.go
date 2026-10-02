@@ -109,6 +109,44 @@ type UsagePoint struct {
 	Cost         float64 `json:"cost"`
 }
 
+// UsageModelPoint 每日×模型用量（用于仪表盘堆叠占比图）。
+type UsageModelPoint struct {
+	Date     string `json:"date"` // YYYY-MM-DD
+	Model    string `json:"model"`
+	Requests int64  `json:"requests"`
+	Tokens   int64  `json:"tokens"`
+}
+
+// UsageModelByDay 返回最近 days 天按「日期 × 模型」拆分的用量，按日期升序、模型名升序。
+func UsageModelByDay(db *sql.DB, days int) ([]UsageModelPoint, error) {
+	if days <= 0 {
+		days = 7
+	}
+	rows, err := db.Query(`
+		SELECT strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS day,
+			COALESCE(display_model, 'unknown'),
+			COUNT(*), SUM(total_tokens)
+		FROM request_logs
+		WHERE created_at >= ?
+		GROUP BY day, display_model
+		ORDER BY day ASC, display_model ASC`, unixDayStart(days-1))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UsageModelPoint{}
+	for rows.Next() {
+		var p UsageModelPoint
+		var reqs, tok sql.NullInt64
+		if err := rows.Scan(&p.Date, &p.Model, &reqs, &tok); err != nil {
+			return nil, err
+		}
+		p.Requests, p.Tokens = reqs.Int64, tok.Int64
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // UsageByDay 返回最近 days 天（含今天）每天聚合，不足的日期补零。
 func UsageByDay(db *sql.DB, days int) ([]UsagePoint, error) {
 	if days <= 0 {

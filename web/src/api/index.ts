@@ -1,7 +1,7 @@
 import { adminApi } from './client'
 import type {
   Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute,
-  ModelUsage, RequestLog, SettingItem, UsagePoint, UsageSummary, User, UserModelUsage,
+  ModelUsage, RequestLog, SettingItem, UsageModelPoint, UsagePoint, UsageSummary, User, UserModelUsage,
 } from './types'
 
 interface DataEnvelope<T> { data: T }
@@ -60,4 +60,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, RequestLog, SettingItem, UsagePoint, UsageSummary, User, UserModelUsage }
+export type { Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, RequestLog, SettingItem, UsageModelPoint, UsagePoint, UsageSummary, User, UserModelUsage }

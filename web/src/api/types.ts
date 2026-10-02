@@ -104,10 +104,18 @@ export interface ChannelDayStat {
 
 export interface DashboardPayload {
   week: UsagePoint[]
+  week_models: UsageModelPoint[]
   today: UsageSummary
   channel_stats: ChannelDayStat[]
   failures: RequestLog[]
   recent_failures: number
+}
+
+export interface UsageModelPoint {
+  date: string
+  model: string
+  requests: number
+  tokens: number
 }
 
 export interface SettingItem {

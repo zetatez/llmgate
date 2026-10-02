@@ -109,6 +109,7 @@ func queryLogs(a *app.App) gin.HandlerFunc {
 // dashboardPayload 仪表盘一次性数据。
 type dashboardPayload struct {
 	Week           []store.UsagePoint      `json:"week"`
+	WeekModels     []store.UsageModelPoint `json:"week_models"`
 	Today          store.UsageSummary      `json:"today"`
 	ChannelStats   []store.ChannelDayStats `json:"channel_stats"`
 	Failures       []*models.RequestLog    `json:"failures"` // 最近失败明细
@@ -118,6 +119,11 @@ type dashboardPayload struct {
 func usageDashboard(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		week, err := store.UsageByDay(a.DB, 7)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		weekModels, err := store.UsageModelByDay(a.DB, 7)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -149,7 +155,7 @@ func usageDashboard(a *app.App) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": dashboardPayload{
-			Week: week, Today: today, ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
+			Week: week, WeekModels: weekModels, Today: today, ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
 		}})
 	}
 }
