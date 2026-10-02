@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 	_ "time/tzdata" // 内嵌时区数据，容器无系统 tzdata 也能 LoadLocation
@@ -121,16 +122,30 @@ func main() {
 	}()
 
 	// 优雅停机：收到 SIGTERM/SIGINT 后不再接收新请求，等待在途请求（含长流式）自然结束，
-	// 而不是掐断。健康流靠各自「空闲超时」兜底（卡死的流最多空等一档超时），
-	// 因此等待是有限的，可安全地让它们自然产出并在 flush 后正常结束。
+	// 而不是掐断；健康流靠各自「空闲超时」兜底。grace 秒后仍未排空则强关（应小于 docker
+	// compose 的 stop_grace_period，避免被 docker 抢先 SIGKILL）。
+	grace := shutdownGraceSec()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	gateway.SetDrainContext(context.Background())
-	log.Printf("shutting down: stopping new connections; waiting for in-flight requests to finish naturally")
-	// 无强制时限：等待所有在途请求完成；长流会自然结束（空闲超时兜底），不会无限挂起。
-	if err := srv.Shutdown(context.Background()); err != nil {
-		log.Printf("shutdown: %v", err)
+	log.Printf("shutting down: stopping new connections; waiting for in-flight requests to finish naturally (grace %ds)", grace)
+	sctx, cancel := context.WithTimeout(context.Background(), time.Duration(grace)*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(sctx); err != nil {
+		log.Printf("shutdown: grace %ds exceeded (%v); force-closing remaining connections", grace, err)
+		_ = srv.Close()
 	}
 	log.Println("server stopped")
+}
+
+// shutdownGraceSec 停机等待秒数：默认 280（小于 compose 的 stop_grace_period 300s），
+// 可通过 LGM_SHUTDOWN_GRACE 覆盖。
+func shutdownGraceSec() int {
+	n := 280
+	if v := os.Getenv("LGM_SHUTDOWN_GRACE"); v != "" {
+		if x, err := strconv.Atoi(v); err == nil && x > 0 {
+			n = x
+		}
+	}
+	return n
 }

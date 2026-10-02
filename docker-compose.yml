@@ -20,4 +20,8 @@ services:
       - LGM_DB_PATH=/data/llmgate.db # 容器内 DB 路径固定指向挂载卷；.env 的 LGM_DB_PATH 仅用于本地 make dev-backend
     volumes:
       - ./data:/data
-    restart: unless-stopped
+    restart: always
+    # 停机宽限：给长流式足够的自然收尾时间，避免 docker 在默认 10s 后 SIGKILL 掐断在途流。
+    # 服务在流跑完后会正常退出（无需等满该时长）；仅当确实有长流时才等待其自然结束。
+    # 应大于应用内 LGM_SHUTDOWN_GRACE（默认 280s），否则会被 docker 抢先 SIGKILL。
+    stop_grace_period: 300s
