@@ -4,8 +4,10 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -222,7 +224,18 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 	logEntry.ErrorCode = oneLine(ferr.Error(), 200) // 单行：渠道 + 原因（如 channel opencode: upstream 403 ...）
 	finalizeLog(a, bus, logEntry)
 	code, msg := mapRouteError(ferr)
+	if retryAfter := retryAfterFor(code); retryAfter != "" {
+		c.Header("Retry-After", retryAfter)
+	}
 	c.JSON(code, gin.H{"error": gin.H{"message": oneLine(msg, 500), "type": "upstream_error"}})
+}
+
+// retryAfterFor 返回指定错误码应带上的 Retry-After 秒数；空串表示不重试提示。
+func retryAfterFor(code int) string {
+	if code == http.StatusServiceUnavailable {
+		return "5"
+	}
+	return ""
 }
 
 // handleStreamRoute SSE 流式代理：上游首个 data 事件前可透明故障转移（连接即死不外露）；
@@ -237,6 +250,9 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
 		finalizeLog(a, bus, logEntry)
 		code, msg := mapRouteError(ferr)
+		if ra := retryAfterFor(code); ra != "" {
+			c.Header("Retry-After", ra)
+		}
 		c.JSON(code, gin.H{"error": gin.H{"message": oneLine(msg, 500), "type": "upstream_error"}})
 		return
 	}
@@ -284,10 +300,20 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 		}
 	}
 	buf := make([]byte, 32<<10)
+	clientGone := false
 	for {
+		// 客户端已断开连接：立即停止读上游，避免在渠道上继续白烧额度/占用连接。
+		if c.Request.Context().Err() != nil {
+			clientGone = true
+			break
+		}
 		n, rerr := sr.Stream.Read(buf)
 		if n > 0 {
-			_, _ = c.Writer.Write(buf[:n])
+			if _, werr := c.Writer.Write(buf[:n]); werr != nil {
+				// 写给客户端失败（对端断开/重置）：同样立即停，别再拖上游。
+				clientGone = true
+				break
+			}
 			if usageBuf.Len() < 1<<20 {
 				usageBuf.Write(buf[:n])
 			}
@@ -299,7 +325,11 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 			break
 		}
 		if rerr != nil {
-			// 上游流中断：给客户端明确信号
+			if c.Request.Context().Err() != nil {
+				clientGone = true
+				break
+			}
+			// 上游流中断（客户仍在）：给客户端明确信号；已消耗的 token 照常计费。
 			logEntry.Status = "error"
 			logEntry.ErrorCode = "stream_interrupted"
 			_, _ = c.Writer.Write([]byte("data: {\"error\":{\"message\":\"upstream stream interrupted\",\"type\":\"stream_error\"}}\n\n"))
@@ -309,6 +339,9 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 			}
 			break
 		}
+	}
+	if clientGone {
+		log.Printf("gateway: sse client disconnected early for user %d (%s)", logEntry.UserID, logEntry.DisplayModel)
 	}
 	_ = sr.Stream.Close()
 	parseUsageFromSSE(usageBuf.Bytes(), logEntry)
@@ -366,10 +399,14 @@ func successOrError(code int) string {
 }
 
 func mapRouteError(err error) (int, string) {
-	if err == router.ErrNoCandidate {
+	switch {
+	case errors.Is(err, router.ErrNoCandidate):
 		return http.StatusNotFound, "no available channel for this model"
+	case errors.Is(err, router.ErrChannelBusy):
+		return http.StatusServiceUnavailable, "all channels are temporarily unavailable, please retry shortly"
+	default:
+		return http.StatusBadGateway, err.Error()
 	}
-	return http.StatusBadGateway, err.Error()
 }
 
 func contentType(res *router.Result) string {

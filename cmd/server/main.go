@@ -2,9 +2,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	_ "time/tzdata" // 内嵌时区数据，容器无系统 tzdata 也能 LoadLocation
 
@@ -101,7 +104,34 @@ func main() {
 	}
 
 	log.Printf("llmgate listening on %s (gateway prefix %s)", cfg.HTTPAddr, cfg.GatewayPrefix+"v1")
-	if err := r.Run(cfg.HTTPAddr); err != nil {
-		log.Fatalf("server: %v", err)
+
+	// 超时硬化：ReadHeaderTimeout 防 slowloris 占满连接；IdleTimeout 回收空闲连接。
+	// 注意不设 ReadTimeout/WriteTimeout——前者会掐断长请求体（大 prompt），
+	// 后者会掐断长 SSE 流式响应（我们已在适配器层用空闲超时控制，勿在此误杀）。
+	srv := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           r,
+		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server: %v", err)
+		}
+	}()
+
+	// 优雅停机：收到 SIGTERM/SIGINT 后停止接收新连接，给在途请求（含长流式）最多 grace 时间
+	// 自然结束；超时后强关连接，避免部署/重启硬杀导致客户端侧"无信号中断"。
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	const grace = 10 * time.Second
+	log.Printf("shutting down: draining in-flight requests (grace %s)", grace)
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("shutdown: drain timed out (%v); force-closing remaining connections", err)
+		_ = srv.Close()
+	}
+	log.Println("server stopped")
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -39,7 +40,7 @@ func (p *Puller) Run() {
 	for {
 		interval := p.intervalMin()
 		if interval > 0 {
-			p.SyncNow()
+			p.safeRun("model-sync", func() { p.SyncNow() })
 		}
 		d := time.Duration(interval) * time.Minute
 		if d < 0 {
@@ -67,18 +68,28 @@ func (p *Puller) RunBackground() {
 	defer probeTk.Stop()
 	defer cleanTk.Stop()
 
-	p.probeOnce()
-	p.cleanupOnce()
+	p.safeRun("probe-once", p.probeOnce)
+	p.safeRun("cleanup-once", p.cleanupOnce)
 	for {
 		select {
 		case <-probeTk.C:
-			p.probeOnce()
+			p.safeRun("probe-once", p.probeOnce)
 		case <-cleanTk.C:
-			p.cleanupOnce()
+			p.safeRun("cleanup-once", p.cleanupOnce)
 		case <-p.stop:
 			return
 		}
 	}
+}
+
+// safeRun 隔离单次后台任务 panic：仅中止当次，绝不让进程因后台任务异常而整体崩溃。
+func (p *Puller) safeRun(name string, fn func()) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("puller: panic in %s recovered: %v\n%s", name, rec, debug.Stack())
+		}
+	}()
+	fn()
 }
 
 // probeOnce 对"冷却已到期"的渠道做一次轻量探活，成功则恢复 healthy 并清内存熔断。

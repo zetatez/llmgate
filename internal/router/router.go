@@ -22,8 +22,12 @@ import (
 	"llmgate/internal/store"
 )
 
-// ErrNoCandidate 表示模型没有任何可用候选（未配置/渠道禁用/全冷却/全熔断）。
+// ErrNoCandidate 表示该模型未配置任何启用路由（"永久"不可用 → 404，客户端不应重试）。
 var ErrNoCandidate = errors.New("no available channel for this model")
+
+// ErrChannelBusy 表示该模型有路由但所有渠道当前都在冷却/熔断/拒权中
+// （临时性 → 503+Retry-After，客户端可自动退避重试实现无缝续接）。
+var ErrChannelBusy = errors.New("all channels are temporarily cooling down for this model, please retry shortly")
 
 // 熔断退避阶梯：2s → 4s → 8s（之后连续失败保持 8s 封顶）。
 var penaltyLadder = []time.Duration{
@@ -385,6 +389,10 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	maxNetworkAttempts := 5
 
 	for {
+		// 客户端已断开（上下文取消）：不要再消耗失败转移预算去试上游。
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("request cancelled: %w", err)
+		}
 		cand := r.pickByPriority(cands, excludedCh, displayModel)
 		if cand == nil {
 			break
@@ -511,7 +519,11 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	if networkAttempts > 0 {
 		return nil, lastErr
 	}
-	return nil, ErrNoCandidate
+	if len(cands) == 0 {
+		return nil, ErrNoCandidate
+	}
+	// 有候选但全被拒权/冷却排除：临时性，客户端应退避重试。
+	return nil, ErrChannelBusy
 }
 
 // StreamResult 是流式转发结果：Stream 为已连接的上游 SSE 流；
@@ -544,6 +556,10 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	maxNetworkAttempts := 5
 
 	for {
+		// 客户端已断开：停止消耗失败转移预算。
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("request cancelled: %w", err)
+		}
 		cand := r.pickByPriority(cands, excludedCh, displayModel)
 		if cand == nil {
 			break
@@ -660,7 +676,11 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	if networkAttempts > 0 {
 		return nil, lastErr
 	}
-	return nil, ErrNoCandidate
+	if len(cands) == 0 {
+		return nil, ErrNoCandidate
+	}
+	// 有候选但全被拒权/冷却排除：临时性，客户端应退避重试。
+	return nil, ErrChannelBusy
 }
 
 func truncate(s string, n int) string {
