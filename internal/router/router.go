@@ -33,6 +33,10 @@ var ErrChannelBusy = errors.New("all channels are temporarily cooling down for t
 // 同样是临时性 → 503+Retry-After，让客户端退避重试而不是立刻撞同一坏渠道。
 var ErrNetworkExhausted = errors.New("all channels failed due to network errors, please retry shortly")
 
+// protoUnsupportedMarker 上游 400 响应体中标识"模型不支持当前调用协议"的字段类型。
+// 属于确定性、模型级持久错误（如模型只支持 Responses/Claude 协议却被发到 chat/completions）。
+const protoUnsupportedMarker = "ModelProtocolUnsupported"
+
 // 熔断退避阶梯：2s → 4s → 8s（之后连续失败保持 8s 封顶）。
 var penaltyLadder = []time.Duration{
 	2 * time.Second,
@@ -391,6 +395,13 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	failedKeys := map[int64]bool{}
 	var lastErr error
 	lastNetworkErr := false // 最近一次失败是否为纯网络故障（未收到 HTTP 响应）
+	// 模型级"协议不支持"错误：确定性、永久性，透传给客户端停止其无谓重试
+	var protoBody []byte
+	var protoCtype string
+	var protoChannel models.Channel
+	var protoRoute models.ModelRoute
+	var protoKeyID int64
+	protoProvided := false
 	networkAttempts := 0
 	maxNetworkAttempts := 5
 
@@ -505,6 +516,22 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 				return nil, lastErr
 			}
 			continue
+		case code == http.StatusBadRequest && bytes.Contains(body, []byte(protoUnsupportedMarker)):
+			// 模型不支持当前调用协议（如只支持 Responses/Claude 而走 chat/completions）：
+			// 确定性、模型级持久错误。标记拒权以快速跳过，不误伤整条渠道；记录体供透传。
+			networkAttempts++
+			lastNetworkErr = false
+			r.pen.DenyModel(cand.Channel.ID, displayModel, 30*time.Minute)
+			r.recoverChannel(&cand.Channel)
+			excludedCh[cand.Channel.ID] = true
+			lastErr = fmt.Errorf("channel %s: model protocol unsupported (upstream 400)", cand.Channel.Name)
+			protoBody = body
+			protoCtype = resp.Headers["Content-Type"]
+			protoChannel = cand.Channel
+			protoRoute = cand.Route
+			protoKeyID = key.ID
+			protoProvided = true
+			continue
 		case code == http.StatusBadRequest || code == http.StatusNotFound:
 			// 模型在该渠道不可用 → 故障转移
 			networkAttempts++
@@ -529,6 +556,11 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		}
 	}
 
+	if protoProvided {
+		// 确定性协议错误：把上游 400 原样透传，客户端看到明确原因即停止无谓重试。
+		return &Result{StatusCode: http.StatusBadRequest, Body: protoBody, ContentType: protoCtype,
+			Channel: protoChannel, Route: protoRoute, KeyID: protoKeyID, Retries: networkAttempts}, nil
+	}
 	if networkAttempts > 0 {
 		if lastNetworkErr {
 			// 全部候选都死于纯网络故障（无任何 HTTP 响应）：临时性，客户端应退避重试。
@@ -570,6 +602,13 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	failedKeys := map[int64]bool{}
 	var lastErr error
 	lastNetworkErr := false // 最近一次失败是否为纯网络故障（未收到 HTTP 响应）
+	// 模型级"协议不支持"错误：确定性、永久性，透传给客户端停止其无谓重试
+	var protoBody []byte
+	var protoCtype string
+	var protoChannel models.Channel
+	var protoRoute models.ModelRoute
+	var protoKeyID int64
+	protoProvided := false
 	networkAttempts := 0
 	maxNetworkAttempts := 5
 
@@ -620,6 +659,20 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			bodyStr := truncate(string(se.Body), 300)
 			lastNetworkErr = false // 上游已响应：非纯网络故障
 			switch {
+			case code == http.StatusBadRequest && bytes.Contains(se.Body, []byte(protoUnsupportedMarker)):
+				// 模型不支持当前调用协议：确定性模型级错误。标记拒权快速跳过、不误伤渠道，记录体供透传。
+				networkAttempts++
+				r.pen.DenyModel(cand.Channel.ID, displayModel, 30*time.Minute)
+				r.recoverChannel(&cand.Channel)
+				excludedCh[cand.Channel.ID] = true
+				lastErr = fmt.Errorf("channel %s: model protocol unsupported (upstream 400)", cand.Channel.Name)
+				protoBody = se.Body
+				protoCtype = se.HeaderMap["Content-Type"]
+				protoChannel = cand.Channel
+				protoRoute = cand.Route
+				protoKeyID = key.ID
+				protoProvided = true
+				continue
 			case code == http.StatusTooManyRequests || code == http.StatusPaymentRequired || code == http.StatusForbidden:
 				networkAttempts++
 				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
@@ -694,6 +747,11 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
 	}
 
+	if protoProvided {
+		// 确定性协议错误：把上游 400 原样透传，客户端看到明确原因即停止无谓重试。
+		return &StreamResult{StatusCode: http.StatusBadRequest, ContentType: protoCtype, Passthrough: protoBody,
+			Channel: protoChannel, Route: protoRoute, KeyID: protoKeyID, Retries: networkAttempts}, nil
+	}
 	if networkAttempts > 0 {
 		if lastNetworkErr {
 			// 全部候选都死于纯网络故障（无任何 HTTP 响应）：临时性，客户端应退避重试。
