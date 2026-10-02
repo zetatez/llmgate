@@ -51,7 +51,8 @@ function renderChart() {
   for (const m of marks) totals.set(m.model, (totals.get(m.model) || 0) + m.tokens)
   const topModels = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([m]) => m)
 
-  // 组装每个模型的逐日 token（缺失补 0）
+  // 组装每个模型的逐日 token（缺失补 0）；以原始 token 数量堆叠，
+  // y 轴体现真实用量（不同日期的高低差异直观可见），而非归一化百分比。
   const seriesByModel = new Map<string, number[]>()
   for (const m of marks) {
     if (!topModels.includes(m.model)) continue
@@ -59,36 +60,35 @@ function renderChart() {
     const idx = days.indexOf(m.date)
     if (idx >= 0) seriesByModel.get(m.model)![idx] += m.tokens
   }
-  // 每天归一化为占比（0-100），让 yAxis 按百分比显示
-  const dayTotal = days.map((_, i) =>
-    topModels.reduce((s, m) => s + (seriesByModel.get(m)![i] || 0), 0),
-  )
-  const toPct = (i: number, v: number) => (dayTotal[i] > 0 ? (v / dayTotal[i]) * 100 : 0)
 
   chart = echarts.init(chartEl.value)
   chart.setOption({
     tooltip: {
       trigger: 'axis',
+      axisPointer: { type: 'shadow' },
       formatter(params: any[]) {
         const total = params.reduce((s: number, p: any) => s + (p.value || 0), 0)
         let html = params[0].axisValue + '<br/>'
         for (const p of params) {
-          const share = total > 0 ? (p.value / total).toFixed(1) + '%' : '0%'
-          html += `${p.marker}${p.seriesName}: ${humanNum(p.value)} token (${share})<br/>`
+          const share = total > 0 ? ' (' + ((p.value / total) * 100).toFixed(1) + '%)' : ''
+          html += `${p.marker}${p.seriesName}: ${humanNum(p.value)} token${share}<br/>`
         }
         html += `合计: ${humanNum(total)} token`
         return html
       },
     },
     legend: { type: 'scroll', bottom: 0 },
-    grid: { left: 50, right: 20, top: 30, bottom: 40 },
+    grid: { left: 60, right: 20, top: 30, bottom: 40 },
     xAxis: { type: 'category', data: days },
-    yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: (v: number) => humanNum(v) },
+    },
     series: topModels.map((m, i) => ({
       name: m,
       type: 'bar',
       stack: 'models',
-      data: days.map((_, j) => +(toPct(j, seriesByModel.get(m)![j] || 0)).toFixed(2)),
+      data: days.map((_, j) => seriesByModel.get(m)![j] || 0),
       itemStyle: { color: MODEL_COLORS[i % MODEL_COLORS.length] },
     })),
   })
@@ -147,7 +147,7 @@ onBeforeUnmount(() => {
     </el-row>
 
     <el-card shadow="never" class="mt">
-      <template #header>Usage Trend (Last 7 Days) · 按模型占比</template>
+      <template #header>Usage Trend (Last 7 Days) · 分模型 Token 用量</template>
       <div ref="chartEl" style="height: 300px"></div>
     </el-card>
 
