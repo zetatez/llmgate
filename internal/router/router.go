@@ -160,6 +160,19 @@ type Candidate struct {
 }
 
 // channelHeaders 解析渠道配置的额外请求头（JSON map），供附加到上游请求。
+// channelHeaderBlock 渠道 extra_headers 中禁止覆盖的敏感头（即使配置也忽略）。
+var channelHeaderBlock = map[string]bool{
+	"authorization":       true,
+	"proxy-authorization": true,
+	"x-api-key":           true,
+	"host":                true,
+	"cookie":              true,
+	"set-cookie":          true,
+	"content-length":      true,
+	"transfer-encoding":   true,
+	"connection":          true,
+}
+
 func channelHeaders(ch *models.Channel) map[string]string {
 	out := map[string]string{}
 	if ch == nil || ch.ExtraHeaders == "" {
@@ -170,9 +183,11 @@ func channelHeaders(ch *models.Channel) map[string]string {
 		return out
 	}
 	for k, v := range m {
-		if k != "" && v != "" {
-			out[strings.ToLower(k)] = v
+		lk := strings.ToLower(strings.TrimSpace(k))
+		if lk == "" || v == "" || channelHeaderBlock[lk] {
+			continue
 		}
+		out[lk] = v
 	}
 	return out
 }
@@ -354,6 +369,9 @@ func isQuotaExceeded(body string) bool {
 // 有效优先级 高→低 依次消费；高优先级被限流/额度用尽/失败时自动下沉到低优先级，
 // 并给失败渠道施加内存熔断（指数退避），避免每个请求都重复打失败的渠道。
 // 其余 4xx 透传；网络级失败/上游错误最多尝试 5 次。
+// maxUpstreamResp 非流式上游响应体上限（防异常大响应占内存）。
+const maxUpstreamResp = 64 << 20 // 64MB
+
 func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayModel, upstreamPath string, passHeaders map[string]string) (*Result, error) {
 	cands, err := r.Candidates(ctx, displayModel)
 	if err != nil {
@@ -402,11 +420,21 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			}
 			continue
 		}
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResp+1))
 		resp.Body.Close()
 		if err != nil {
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
+			r.penalizeChannel(&cand.Channel, 0)
+			excludedCh[cand.Channel.ID] = true
+			if networkAttempts >= maxNetworkAttempts {
+				return nil, lastErr
+			}
+			continue
+		}
+		if len(body) > maxUpstreamResp {
+			networkAttempts++
+			lastErr = fmt.Errorf("channel %s: upstream response too large", cand.Channel.Name)
 			r.penalizeChannel(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {

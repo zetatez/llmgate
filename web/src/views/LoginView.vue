@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { verifyAdminToken, adminTokenKey } from '../api/client'
+import { loginAdmin } from '../api/client'
 
 const router = useRouter()
 const route = useRoute()
@@ -16,12 +16,11 @@ async function onSubmit() {
   }
   loading.value = true
   try {
-    const ok = await verifyAdminToken(token.value.trim())
+    const ok = await loginAdmin(token.value.trim())
     if (!ok) {
       ElMessage.error('Invalid token')
       return
     }
-    localStorage.setItem(adminTokenKey, token.value.trim())
     ElMessage.success('Logged in')
     router.push(route.query.redirect ? String(route.query.redirect) : '/dashboard')
   } finally {

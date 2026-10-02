@@ -54,19 +54,33 @@ func New(cfg *config.Config, db *sql.DB) (*App, error) {
 		}
 	}
 
-	seed, err := a.GetSetting("encrypt_seed")
+	// 加密种子：优先 env，其次兼容读取旧库遗留值（不再写入数据库）。
+	// 若两者都没有，则自动生成一次并打印（请立即写入 .env 的 LGM_ENCRYPT_SEED，
+	// 否则重启后会生成新种子，既有加密数据将无法解密）。
+	legacySeed, err := a.GetSetting("encrypt_seed")
 	if err != nil {
 		return nil, fmt.Errorf("read encrypt_seed: %w", err)
 	}
-	if seed == "" {
-		seed = cfg.EncryptSeed
+	master := cfg.EncryptSeed
+	if master == "" {
+		if legacySeed != "" {
+			master = legacySeed
+			fmt.Println("[encrypt seed] 沿用数据库遗留的加密种子（新版本不再落库）；建议将 LGM_ENCRYPT_SEED 写入 .env，并从 settings 清除 encrypt_seed")
+		} else {
+			gen, gerr := GenSecret(32)
+			if gerr != nil {
+				return nil, gerr
+			}
+			master = gen
+			fmt.Println("==================================================")
+			fmt.Println("  首次启动：API Key 加密种子（不再落库，请立即写入 .env）")
+			fmt.Printf("  LGM_ENCRYPT_SEED=%s\n", master)
+			fmt.Println("==================================================")
+		}
 	}
-	mgr, persistSeed, err := secret.New(seed)
+	mgr, _, err := secret.New(master)
 	if err != nil {
 		return nil, fmt.Errorf("init secret: %w", err)
-	}
-	if err := a.SetSetting("encrypt_seed", persistSeed); err != nil {
-		return nil, err
 	}
 	a.Secret = mgr
 	return a, nil

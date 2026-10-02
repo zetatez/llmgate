@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { logoutAdmin } from '../api/client'
 import { useRoute, useRouter } from 'vue-router'
-import { adminTokenKey } from '../api/client'
+import { computed } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,8 +17,8 @@ const menus = [
 
 const active = computed(() => route.path)
 
-function logout() {
-  localStorage.removeItem(adminTokenKey)
+async function logout() {
+  await logoutAdmin()
   router.push('/login')
 }
 </script>

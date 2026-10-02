@@ -1,10 +1,11 @@
-// Package secret 提供 API Key 的 AES-256-GCM 加解密。
+// Package secret 提供 API Key 及用户令牌的 AES-256-GCM 加解密。
 package secret
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -15,26 +16,34 @@ type Manager struct {
 	aead cipher.AEAD
 }
 
-// New 从 32 字节 hex 种子创建 Manager；种子为空时自动生成随机种子。
-// 返回的实际种子 hex（应与输入一致），调用方将其持久化（settings 表）以便重启后仍能解密。
-func New(seedHex string) (*Manager, string, error) {
-	var seed []byte
-	if seedHex != "" {
-		b, err := hex.DecodeString(seedHex)
-		if err != nil {
-			return nil, "", errors.New("encrypt seed 必须是 hex 编码")
-		}
-		if len(b) != 32 {
-			return nil, "", errors.New("encrypt seed 必须是 32 字节")
-		}
-		seed = b
-	} else {
-		seed = make([]byte, 32)
-		if _, err := io.ReadFull(rand.Reader, seed); err != nil {
+// New 从 seed 创建 Manager；seed 为空时自动生成随机种子。
+// seed 支持两种形式：
+//   - 32 字节 hex：直接作为 AES-256 密钥（兼容既有密文，不改变行为）
+//   - 其它任意字符串：视为口令，经 SHA-256 派生 32 字节密钥（KDF）
+//
+// 返回 (Manager, 用于持久化的种子 hex)。调用方**不应把种子写入数据库**，
+// 否则"库失即全失"——建议由环境变量提供并在重启间保持一致。
+func New(seed string) (*Manager, string, error) {
+	var key []byte
+	var shown string
+	if seed == "" {
+		b := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, b); err != nil {
 			return nil, "", err
 		}
+		key = b
+		shown = hex.EncodeToString(b)
+	} else if b, err := hex.DecodeString(seed); err == nil && len(b) == 32 {
+		// 32 字节 hex：raw 密钥（兼容既有数据）
+		key = b
+		shown = seed
+	} else {
+		// 任意口令：SHA-256 派生（一次性 KDF）
+		sum := sha256.Sum256([]byte(seed))
+		key = sum[:]
+		shown = ""
 	}
-	block, err := aes.NewCipher(seed)
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, "", err
 	}
@@ -42,7 +51,7 @@ func New(seedHex string) (*Manager, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return &Manager{aead: aead}, hex.EncodeToString(seed), nil
+	return &Manager{aead: aead}, shown, nil
 }
 
 // Encrypt 加密明文，返回 hex(nonce || ciphertext)。

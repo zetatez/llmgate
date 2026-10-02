@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { verifySession } from '../api/client'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -24,10 +25,11 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
-  const token = localStorage.getItem('llmgate_admin_token')
-  if (to.name !== 'login' && !token) return { name: 'login' }
-  if (to.name === 'login' && token) return { name: 'dashboard' }
+// 会话凭据为 httpOnly Cookie，前端无法同步读取，改用 /ping 异步校验。
+router.beforeEach(async (to) => {
+  const ok = await verifySession()
+  if (to.name !== 'login' && !ok) return { name: 'login' }
+  if (to.name === 'login' && ok) return { name: 'dashboard' }
 })
 
 export default router

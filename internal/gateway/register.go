@@ -119,12 +119,21 @@ func handleListModels(a *app.App) gin.HandlerFunc {
 	}
 }
 
+// maxRequestBody OpenAI 网关请求体上限（防异常大请求占内存）。
+const maxRequestBody = 32 << 20 // 32MB
+
 // handleForward 读取请求体，按 stream 分流：非流式转发或 SSE 流式代理。
 func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamPath string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxRequestBody+1))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "read body failed"})
+			return
+		}
+		if len(body) > maxRequestBody {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": gin.H{"message": "request body too large", "type": "invalid_request_error"},
+			})
 			return
 		}
 		var meta struct {

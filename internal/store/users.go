@@ -106,8 +106,19 @@ func DeleteUser(db *sql.DB, id int64) error {
 	return nil
 }
 
-// AddUserQuota 累加用户已用额度（当日清零逻辑由外部按需处理）。
+// AddUserQuota 累加用户已用额度。设了上限时在事务性条件内累加，
+// 避免并发请求"先查后增"造成大幅超额（至多一粒超限）。
 func AddUserQuota(db *sql.DB, id int64, cost float64) error {
+	var limit float64
+	if err := db.QueryRow(`SELECT quota_limit FROM users WHERE id=?`, id).Scan(&limit); err != nil {
+		return err
+	}
+	if limit > 0 {
+		_, err := db.Exec(
+			`UPDATE users SET quota_used = quota_used + ? WHERE id=? AND quota_used + ? <= ?`,
+			cost, id, cost, limit)
+		return err
+	}
 	_, err := db.Exec(`UPDATE users SET quota_used = quota_used + ? WHERE id=?`, cost, id)
 	return err
 }
