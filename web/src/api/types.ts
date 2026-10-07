@@ -122,8 +122,16 @@ export interface UsageModelPoint {
 }
 
 export interface SettingItem {
+  classification: string
   key: string
-  value: string
+  val: string
+  description: string
+}
+
+/** 更新设置时的载荷：仅需 key/val（分类与描述由后端下发）。 */
+export interface SettingValue {
+  key: string
+  val: string
 }
 
 export interface ModelUsage {

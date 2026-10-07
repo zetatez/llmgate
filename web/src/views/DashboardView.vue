@@ -147,7 +147,7 @@ onBeforeUnmount(() => {
     </el-row>
 
     <el-card shadow="never" class="mt">
-      <template #header>Usage Trend (Last 7 Days) · 分模型 Token 用量</template>
+      <template #header>Usage Trend (Last 7 Days)</template>
       <div ref="chartEl" style="height: 300px"></div>
     </el-card>
 

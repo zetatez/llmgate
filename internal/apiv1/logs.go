@@ -166,56 +166,56 @@ func RegisterSettingRoutes(g *gin.RouterGroup, a *app.App) {
 	g.PUT("", updateSettings(a))
 }
 
-// SettingItem 允许修改的系统设置。
+// SettingItem 系统设置项：按 classification, key, val, description 顺序序列化。
 type SettingItem struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Classification string `json:"classification"`
+	Key            string `json:"key"`
+	Val            string `json:"val"`
+	Description    string `json:"description"`
 }
 
-var mutableSettings = map[string]bool{
-	"default_timeout_ms":    true,
-	"log_retain_days":       true,
-	"model_pricing":         true, // JSON: {"deepseek-chat": {"input":0.14,"output":0.28}}
-	"pull_interval_min":     true, // 自动拉取间隔（分钟），0 = 禁用
-	"pull_default_priority": true, // 自动拉取新建路由的默认优先级
-	"pull_default_weight":   true, // 自动拉取新建路由的默认权重
+// settingDef 设置目录中的一条：分类 / key / 描述 / 默认值 / 是否可改。
+type settingDef struct {
+	classification string
+	key            string
+	description    string
+	def            string // 未设置时透出的默认值
+	mutable        bool
 }
 
-// readOnlySettings 只读展示、不可修改的设置。
-var readOnlySettings = []string{"model_pull_last"}
+// settingsCatalog 内置设置目录：每项设置都有分类与描述，字段顺序即返回顺序。
+var settingsCatalog = []settingDef{
+	{classification: "基础", key: "default_timeout_ms", description: "渠道未单独设置超时时的默认请求超时（毫秒）", def: "60000", mutable: true},
+	{classification: "日志", key: "log_retain_days", description: "超过该天数的请求日志在启动时清理（0=禁用）", def: "30", mutable: true},
+	{classification: "计费", key: "model_pricing", description: "模型单价（USD/百万 tokens，JSON）；路由自定义单价优先于此处", def: "{}", mutable: true},
+	{classification: "自动拉取", key: "pull_interval_min", description: "自动拉取上游模型的间隔（分钟），0=禁用", def: "60", mutable: true},
+	{classification: "自动拉取", key: "pull_default_priority", description: "自动拉取新建路由的默认优先级（越小越优先）", def: "0", mutable: true},
+	{classification: "自动拉取", key: "pull_default_weight", description: "自动拉取新建路由的默认权重", def: "1", mutable: true},
+	{classification: "状态", key: "model_pull_last", description: "最近一次自动拉取的执行摘要（只读）", def: "", mutable: false},
+	{classification: "运行期", key: "gateway_prefix", description: "网关前缀（运行期配置，只读）", def: "/", mutable: false},
+}
 
 func getSettings(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		keys := make([]string, 0, len(mutableSettings)+len(readOnlySettings))
-		for k := range mutableSettings {
-			keys = append(keys, k)
-		}
-		keys = append(keys, readOnlySettings...)
-		out := []SettingItem{}
-		for _, k := range keys {
-			v, err := a.GetSetting(k)
-			if err != nil && err != sql.ErrNoRows {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if v == "" {
-				switch k {
-				case "default_timeout_ms":
-					v = "60000"
-				case "log_retain_days":
-					v = "30"
-				case "pull_interval_min":
-					v = "60"
-				case "pull_default_priority":
-					v = "0"
-				case "pull_default_weight":
-					v = "1"
+		out := make([]SettingItem, 0, len(settingsCatalog))
+		for _, d := range settingsCatalog {
+			item := SettingItem{Classification: d.classification, Key: d.key, Description: d.description}
+			if d.key == "gateway_prefix" {
+				// 网关前缀为运行期配置（LGM_GATEWAY_PREFIX），只读透出给前端拼 gateway base URL
+				item.Val = a.Cfg.GatewayPrefix
+			} else {
+				v, err := a.GetSetting(d.key)
+				if err != nil && err != sql.ErrNoRows {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
 				}
+				if v == "" {
+					v = d.def
+				}
+				item.Val = v
 			}
-			out = append(out, SettingItem{Key: k, Value: v})
+			out = append(out, item)
 		}
-		// 网关前缀为运行期配置（LGM_GATEWAY_PREFIX），只读透出给前端拼 gateway base URL
-		out = append(out, SettingItem{Key: "gateway_prefix", Value: a.Cfg.GatewayPrefix})
 		c.JSON(http.StatusOK, gin.H{"data": out})
 	}
 }
@@ -228,14 +228,20 @@ func updateSettings(a *app.App) gin.HandlerFunc {
 		if !decode(c, &b) {
 			return
 		}
+		mutable := make(map[string]bool, len(settingsCatalog))
+		for _, d := range settingsCatalog {
+			if d.mutable {
+				mutable[d.key] = true
+			}
+		}
 		for _, item := range b.Data {
-			if !mutableSettings[item.Key] {
+			if !mutable[item.Key] {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "不允许修改的配置: " + item.Key})
 				return
 			}
 		}
 		for _, item := range b.Data {
-			if err := a.SetSetting(item.Key, item.Value); err != nil {
+			if err := a.SetSetting(item.Key, item.Val); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}

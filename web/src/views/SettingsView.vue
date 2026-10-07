@@ -1,34 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { settingsApi } from '../api'
+import { settingsApi, type SettingItem } from '../api'
 
-const form = reactive<Record<string, string>>({
-  default_timeout_ms: '60000', log_retain_days: '30', model_pricing: '{}',
-  pull_interval_min: '60', pull_default_priority: '0', pull_default_weight: '1',
-  model_pull_last: '',
-})
+const form = reactive<Record<string, string>>({})
+const rows = ref<SettingItem[]>([])
 const loading = ref(false)
 const saving = ref(false)
 
-interface SettingDef {
-  key: string
-  label: string
+// 可控设置各自目前的数字/JSON 渲染参数（分类与描述由后端目录下发，不改写这里）。
+interface SettingMeta {
   type: 'number' | 'pricing'
   min?: number
   max?: number
   step?: number
-  help: string
 }
-
-const defs: SettingDef[] = [
-  { key: 'default_timeout_ms', label: 'Default timeout (ms)', type: 'number', min: 1000, step: 5000, help: 'Timeout used when a channel has no specific value' },
-  { key: 'log_retain_days', label: 'Log retention (days)', type: 'number', min: 1, max: 3650, step: 1, help: 'Logs older than this are purged at startup' },
-  { key: 'pull_interval_min', label: 'Auto-pull interval (min)', type: 'number', min: 0, step: 10, help: '0 = disabled. Runs immediately at startup, then on interval' },
-  { key: 'pull_default_priority', label: 'Default pull priority', type: 'number', min: -10, max: 10, step: 1, help: 'Priority of auto-created routes (lower = preferred)' },
-  { key: 'pull_default_weight', label: 'Default pull weight', type: 'number', min: 1, step: 1, help: 'Weight of auto-created routes' },
-  { key: 'model_pricing', label: 'Model pricing', type: 'pricing', help: 'Fallback price per model, USD per 1M tokens (JSON). Routes with custom pricing override this.' },
-]
+const meta: Record<string, SettingMeta> = {
+  default_timeout_ms: { type: 'number', min: 1000, step: 5000 },
+  log_retain_days: { type: 'number', min: 1, max: 3650, step: 1 },
+  pull_interval_min: { type: 'number', min: 0, step: 10 },
+  pull_default_priority: { type: 'number', min: -10, max: 10, step: 1 },
+  pull_default_weight: { type: 'number', min: 1, step: 1 },
+  model_pricing: { type: 'pricing' },
+}
 
 const lastRun = computed(() => {
   const raw = form.model_pull_last
@@ -68,22 +62,19 @@ function savePricing() {
 async function load() {
   loading.value = true
   try {
-    const items = await settingsApi.get()
-    for (const it of items) form[it.key] = it.value
+    rows.value = await settingsApi.get()
+    for (const it of rows.value) form[it.key] = it.val
   } finally { loading.value = false }
 }
 
 async function save() {
   saving.value = true
   try {
-    await settingsApi.update([
-      { key: 'default_timeout_ms', value: String(Number(form.default_timeout_ms) || 60000) },
-      { key: 'log_retain_days', value: String(Number(form.log_retain_days) || 30) },
-      { key: 'model_pricing', value: form.model_pricing },
-      { key: 'pull_interval_min', value: String(Math.max(0, Number(form.pull_interval_min) || 0)) },
-      { key: 'pull_default_priority', value: String(Number(form.pull_default_priority) || 0) },
-      { key: 'pull_default_weight', value: String(Math.max(1, Number(form.pull_default_weight) || 1)) },
-    ])
+    // 仅提交可改设置（有 meta 渲染类型者）；只读项跳过
+    const payload = rows.value
+      .filter(r => meta[r.key])
+      .map(r => ({ key: r.key, val: String(form[r.key]) }))
+    await settingsApi.update(payload)
     ElMessage.success('Saved')
     await load()
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to save') } finally { saving.value = false }
@@ -101,26 +92,27 @@ onMounted(load)
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="defs" size="small" border>
-      <el-table-column prop="label" label="Setting" width="220" />
+    <el-table v-loading="loading" :data="rows" size="small" border>
+      <el-table-column prop="classification" label="Classification" width="120" />
       <el-table-column prop="key" label="Key" width="190">
         <template #default="{ row }"><code class="key">{{ row.key }}</code></template>
       </el-table-column>
       <el-table-column label="Value" min-width="260">
         <template #default="{ row }">
           <el-input-number
-            v-if="row.type === 'number'"
+            v-if="meta[row.key]?.type === 'number'"
             :model-value="Number(form[row.key])"
-            :min="row.min" :max="row.max" :step="row.step ?? 1" style="width: 180px"
+            :min="meta[row.key].min" :max="meta[row.key].max" :step="meta[row.key].step ?? 1" style="width: 180px"
             @update:model-value="(v: number) => (form[row.key] = String(v))"
           />
-          <div v-else-if="row.type === 'pricing'" class="pricing-cell">
+          <div v-else-if="meta[row.key]?.type === 'pricing'" class="pricing-cell">
             <span class="pricing-preview">{{ pricingPreview() }}</span>
             <el-button size="small" @click="openPricingEdit">Edit JSON</el-button>
           </div>
+          <code v-else class="key">{{ form[row.key] }}</code>
         </template>
       </el-table-column>
-      <el-table-column prop="help" label="Description" min-width="240" />
+      <el-table-column prop="description" label="Description" min-width="280" />
     </el-table>
 
     <!-- Last auto-pull run (read-only) -->

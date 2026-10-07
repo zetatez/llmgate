@@ -14,7 +14,7 @@ const gatewayPrefix = ref('/')
 async function loadGatewayBase() {
   try {
     const items = await settingsApi.get()
-    const p = items.find((i) => i.key === 'gateway_prefix')?.value || '/'
+    const p = items.find((i) => i.key === 'gateway_prefix')?.val || '/'
     gatewayPrefix.value = p === '/' ? '' : p
     const origin = window.location.origin
     gatewayBase.value = `${origin}${gatewayPrefix.value}/v1`

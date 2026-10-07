@@ -852,14 +852,20 @@ func TestSettings(t *testing.T) {
 	decodeBody(t, w, &got)
 	m := map[string]string{}
 	for _, it := range got.Data {
-		m[it.Key] = it.Value
+		m[it.Key] = it.Val
 	}
 	if m["default_timeout_ms"] != "60000" || m["log_retain_days"] != "30" || m["gateway_prefix"] != "/" {
 		t.Fatalf("settings defaults wrong: %+v", m)
 	}
+	// 每项设置都要有分类与描述（字段顺序：classification, key, val, description）
+	for _, it := range got.Data {
+		if it.Classification == "" || it.Description == "" || it.Key == "" {
+			t.Fatalf("setting item missing classification/description/key: %+v", it)
+		}
+	}
 
 	// 更新合法配置
-	w = do(r, http.MethodPut, basePath+"/settings", `{"data":[{"key":"default_timeout_ms","value":"90000"},{"key":"log_retain_days","value":"15"}]}`, tok, "")
+	w = do(r, http.MethodPut, basePath+"/settings", `{"data":[{"key":"default_timeout_ms","val":"90000"},{"key":"log_retain_days","val":"15"}]}`, tok, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("update settings = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -867,13 +873,13 @@ func TestSettings(t *testing.T) {
 	w = do(r, http.MethodGet, basePath+"/settings", "", tok, "")
 	decodeBody(t, w, &got)
 	for _, it := range got.Data {
-		if it.Key == "default_timeout_ms" && it.Value != "90000" {
+		if it.Key == "default_timeout_ms" && it.Val != "90000" {
 			t.Fatalf("timeout setting not updated: %+v", it)
 		}
 	}
 
 	// 非法 key → 400
-	if w := do(r, http.MethodPut, basePath+"/settings", `{"data":[{"key":"admin_token_hash","value":"x"}]}`, tok, ""); w.Code != http.StatusBadRequest {
+	if w := do(r, http.MethodPut, basePath+"/settings", `{"data":[{"key":"admin_token_hash","val":"x"}]}`, tok, ""); w.Code != http.StatusBadRequest {
 		t.Fatalf("update readonly setting = %d, want 400", w.Code)
 	}
 	// 非法 body → 400

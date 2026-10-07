@@ -1,7 +1,7 @@
 import { adminApi } from './client'
 import type {
   Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute,
-  ModelUsage, RequestLog, SettingItem, UsageModelPoint, UsagePoint, UsageSummary, User, UserModelUsage,
+  ModelUsage, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User, UserModelUsage,
 } from './types'
 
 interface DataEnvelope<T> { data: T }
@@ -51,7 +51,7 @@ export const logsApi = {
 
 export const settingsApi = {
   get: () => adminApi.get<DataEnvelope<SettingItem[]>>('/settings').then(unwrap),
-  update: (items: SettingItem[]) => adminApi.put<DataEnvelope<string>>('/settings', { data: items }).then(unwrap),
+  update: (items: SettingValue[]) => adminApi.put<DataEnvelope<string>>('/settings', { data: items }).then(unwrap),
 }
 
 export interface SyncResult { at: number; created: number; skipped: number; removed: number; errored: number; cost_ms: number }
@@ -60,4 +60,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, RequestLog, SettingItem, UsageModelPoint, UsagePoint, UsageSummary, User, UserModelUsage }
+export type { Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User, UserModelUsage }
