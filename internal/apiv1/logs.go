@@ -185,14 +185,14 @@ type settingDef struct {
 
 // settingsCatalog 内置设置目录：每项设置都有分类与描述，字段顺序即返回顺序。
 var settingsCatalog = []settingDef{
-	{classification: "基础", key: "default_timeout_ms", description: "渠道未单独设置超时时的默认请求超时（毫秒）", def: "60000", mutable: true},
-	{classification: "日志", key: "log_retain_days", description: "超过该天数的请求日志在启动时清理（0=禁用）", def: "30", mutable: true},
-	{classification: "计费", key: "model_pricing", description: "模型单价（USD/百万 tokens，JSON）；路由自定义单价优先于此处", def: "{}", mutable: true},
-	{classification: "自动拉取", key: "pull_interval_min", description: "自动拉取上游模型的间隔（分钟），0=禁用", def: "60", mutable: true},
-	{classification: "自动拉取", key: "pull_default_priority", description: "自动拉取新建路由的默认优先级（越小越优先）", def: "0", mutable: true},
-	{classification: "自动拉取", key: "pull_default_weight", description: "自动拉取新建路由的默认权重", def: "1", mutable: true},
-	{classification: "状态", key: "model_pull_last", description: "最近一次自动拉取的执行摘要（只读）", def: "", mutable: false},
-	{classification: "运行期", key: "gateway_prefix", description: "网关前缀（运行期配置，只读）", def: "/", mutable: false},
+	{classification: "Basic", key: "default_timeout_ms", description: "默认请求超时（毫秒），用于渠道未单独设置超时时", def: "60000", mutable: true},
+	{classification: "Logging", key: "log_retain_days", description: "超过该天数的请求日志在启动时清理（0=禁用）", def: "30", mutable: true},
+	{classification: "Pricing", key: "model_pricing", description: "模型单价（USD/百万 tokens，JSON）；路由自定义单价优先于此处", def: "{}", mutable: true},
+	{classification: "Auto-pull", key: "pull_interval_min", description: "自动拉取上游模型的间隔（分钟），0=禁用", def: "60", mutable: true},
+	{classification: "Auto-pull", key: "pull_default_priority", description: "自动拉取新建路由的默认优先级（越小越优先）", def: "0", mutable: true},
+	{classification: "Auto-pull", key: "pull_default_weight", description: "自动拉取新建路由的默认权重", def: "1", mutable: true},
+	{classification: "Status", key: "model_pull_last", description: "最近一次自动拉取的执行摘要（只读）", def: "", mutable: false},
+	{classification: "Runtime", key: "gateway_prefix", description: "网关前缀（运行期配置，只读）", def: "/", mutable: false},
 }
 
 func getSettings(a *app.App) gin.HandlerFunc {
