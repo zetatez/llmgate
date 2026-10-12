@@ -128,9 +128,9 @@ function removeCustomRow(i: number) {
 
 async function saveCustomGroup() {
   const name = customDialog.name.trim()
-  if (!name) { ElMessage.warning('自定义路由名必填'); return }
+  if (!name) { ElMessage.warning('Custom route name is required'); return }
   const rows = customDialog.rows.filter((r) => r.channel_id > 0 && r.upstream_model.trim())
-  if (!rows.length) { ElMessage.warning('至少填一个「渠道 + 上游模型」'); return }
+  if (!rows.length) { ElMessage.warning('Add at least one "channel + upstream model"'); return }
   try {
     // 编辑模式：先删除旧名全部路由再重建
     if (customDialog.editing) {
@@ -147,10 +147,10 @@ async function saveCustomGroup() {
         price_output: row.price_custom ? (+row.price_output || 0) : null,
       })
     }
-    ElMessage.success(`已保存「${name}」，共 ${rows.length} 条上游映射`)
+    ElMessage.success(`Saved "${name}" with ${rows.length} upstream mapping(s)`)
     customDialog.visible = false
     load()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || '保存失败') }
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Save failed') }
 }
 
 function openCustomEdit(g: { display_name: string; routes: ModelRoute[] }) {
@@ -166,18 +166,18 @@ function openCustomEdit(g: { display_name: string; routes: ModelRoute[] }) {
 }
 
 async function deleteCustomMapping(r: ModelRoute) {
-  await ElMessageBox.confirm(`删除映射 ${r.channel_name} → ${r.upstream_model}？`, '删除映射', { type: 'warning' })
-  try { await modelRoutesApi.remove(r.id); ElMessage.success('已删除'); load() }
-  catch (e: any) { ElMessage.error(e?.response?.data?.error || '删除失败') }
+  await ElMessageBox.confirm(`Delete mapping ${r.channel_name} → ${r.upstream_model}?`, 'Delete mapping', { type: 'warning' })
+  try { await modelRoutesApi.remove(r.id); ElMessage.success('Deleted'); load() }
+  catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Delete failed') }
 }
 
 async function deleteCustomGroup(g: { display_name: string; routes: ModelRoute[] }) {
-  await ElMessageBox.confirm(`删除整个自定义路由「${g.display_name}」？将移除其全部 ${g.routes.length} 条映射。`, '删除自定义路由', { type: 'warning' })
+  await ElMessageBox.confirm(`Delete the whole custom route "${g.display_name}"? This removes all its ${g.routes.length} mapping(s).`, 'Delete custom route', { type: 'warning' })
   try {
     for (const r of g.routes) await modelRoutesApi.remove(r.id)
-    ElMessage.success('已删除')
+    ElMessage.success('Deleted')
     load()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || '删除失败') }
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Delete failed') }
 }
 
 async function load() {
@@ -329,7 +329,7 @@ onMounted(load)
       </el-table>
 
       <el-alert v-if="!filtered.length && !loading" class="mt" title="No matching routes. Model routes are synced automatically — adjust the interval in Settings." type="info" :closable="false" />
-      <el-alert v-if="statusFilter === 'inactive' && filtered.length && !loading" class="mt" title="这些模型暂无活跃渠道（渠道被停用/冷却，或路由被禁用）。启用对应的渠道或路由后即可恢复。" type="warning" :closable="false" />
+      <el-alert v-if="statusFilter === 'inactive' && filtered.length && !loading" class="mt" title="These models have no active channel (channel disabled/cooldown, or route disabled). Enable the corresponding channel or route to restore them." type="warning" :closable="false" />
     </el-card>
       </el-tab-pane>
 
@@ -338,8 +338,8 @@ onMounted(load)
         <el-card shadow="never">
           <template #header>
             <div class="head">
-              <span>自定义路由（一个对外名 → 多个渠道的上游模型）</span>
-              <el-button type="primary" size="small" @click="openCustomCreate">新增自定义路由</el-button>
+              <span>Custom Routes</span>
+              <el-button type="primary" size="small" @click="openCustomCreate">New Custom Route</el-button>
             </div>
           </template>
           <el-table v-loading="loading" :data="customGroups" size="small" row-key="display_name">
@@ -369,13 +369,13 @@ onMounted(load)
                 </el-table>
               </template>
             </el-table-column>
-            <el-table-column prop="display_name" label="对外名" min-width="160" />
-            <el-table-column label="映射 / 活跃" width="150">
+            <el-table-column prop="display_name" label="External name" min-width="160" />
+            <el-table-column label="Mappings / Active" width="150">
               <template #default="{ row }">
                 <el-tag :type="row.enabledCount > 0 ? 'success' : 'danger'" size="small">{{ row.enabledCount }}/{{ row.count }} active</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="默认上游" min-width="170" show-overflow-tooltip>
+            <el-table-column label="Default upstream" min-width="170" show-overflow-tooltip>
               <template #default="{ row }">
                 {{ row.routes[0]?.channel_name }} → {{ row.routes[0]?.upstream_model }}
               </template>
@@ -387,22 +387,22 @@ onMounted(load)
               </template>
             </el-table-column>
           </el-table>
-          <el-alert v-if="!customGroups.length && !loading" class="mt" title="还没有自定义路由。点右上角「新增自定义路由」，例如定义 “flash”：把 zenmux 的 deepseek-v4-flash 与 opencode 的 glm-5.3-flash 等作为它的多个上游。" type="info" :closable="false" />
-          <p class="tip-line">说明：多个上游会按优先级顺序 + 权重比例自动分配，某条不可用（限流/额度/过期）时自动切换到其它映射。路由名尽量避免与上游模型重名，防止被自动同步覆盖。</p>
+          <el-alert v-if="!customGroups.length && !loading" class="mt" title='No custom routes yet. Click "New Custom Route" in the top-right, e.g. define "flash" with deepseek-v4-flash from zenmux and glm-5.3-flash from opencode as its multiple upstreams.' type="info" :closable="false" />
+          <p class="tip-line">Multiple upstreams are assigned automatically by priority order + weight ratio; when one is unavailable (rate-limited / out of quota / expired), traffic switches to another mapping automatically. Avoid naming a route the same as an upstream model, so it won't be overwritten by auto-sync.</p>
         </el-card>
       </el-tab-pane>
     </el-tabs>
 
     <!-- 自定义路由：新增/编辑 -->
-    <el-dialog v-model="customDialog.visible" :title="customDialog.editing ? '编辑自定义路由' : '新增自定义路由'" width="640px">
+    <el-dialog v-model="customDialog.visible" :title="customDialog.editing ? 'Edit Custom Route' : 'New Custom Route'" width="640px">
       <el-form label-width="130px">
-        <el-form-item label="对外路由名" required>
-          <el-input v-model="customDialog.name" placeholder="如 flash / my-agent-model" />
+        <el-form-item label="External route name" required>
+          <el-input v-model="customDialog.name" placeholder="e.g. flash / my-agent-model" />
         </el-form-item>
-        <el-form-item label="上游映射（多行）">
+        <el-form-item label="Upstream mappings">
           <div v-for="(row, i) in customDialog.rows" :key="i" class="row-block">
             <div class="row-line">
-              <el-select v-model="row.channel_id" style="width: 170px" placeholder="渠道" @change="row.upstream_model = ''">
+              <el-select v-model="row.channel_id" style="width: 170px" placeholder="Channel" @change="row.upstream_model = ''">
                 <el-option v-for="ch in channels" :key="ch.id" :label="ch.name" :value="ch.id" />
               </el-select>
               <el-select
@@ -411,31 +411,31 @@ onMounted(load)
                 filterable
                 allow-create
                 default-first-option
-                placeholder="搜索上游模型或直接输入"
-                :no-data-text="'该渠道暂无已同步模型，可手动输入'"
+                placeholder="Search upstream model or type directly"
+                :no-data-text="'No synced models for this channel yet; type one manually'"
               >
                 <el-option v-for="m in upstreamOptions(row.channel_id)" :key="m" :label="m" :value="m" />
               </el-select>
-              <el-input-number v-model="row.priority" :min="-10" :max="10" title="优先级(小=先)" size="small" />
-              <el-input-number v-model="row.weight" :min="1" title="权重" size="small" />
+              <el-input-number v-model="row.priority" :min="-10" :max="10" title="Priority (lower = first)" size="small" />
+              <el-input-number v-model="row.weight" :min="1" title="Weight" size="small" />
               <el-switch v-model="row.enabled" :active-value="1" :inactive-value="0" />
-              <el-button v-if="customDialog.rows.length > 1" link type="danger" size="small" @click="removeCustomRow(i)">删</el-button>
+              <el-button v-if="customDialog.rows.length > 1" link type="danger" size="small" @click="removeCustomRow(i)">Del</el-button>
             </div>
             <div class="row-line price-line">
-              <el-checkbox v-model="row.price_custom" size="small">自定义单价($/百万tokens)</el-checkbox>
+              <el-checkbox v-model="row.price_custom" size="small">Custom price ($/1M tokens)</el-checkbox>
               <template v-if="row.price_custom">
-                <el-input-number v-model="row.price_input" :min="0" :precision="6" :step="0.05" size="small" placeholder="输入价" title="输入价 $/1M" />
-                <el-input-number v-model="row.price_output" :min="0" :precision="6" :step="0.1" size="small" placeholder="输出价" title="输出价 $/1M" />
+                <el-input-number v-model="row.price_input" :min="0" :precision="6" :step="0.05" size="small" placeholder="Input price" title="Input price $/1M" />
+                <el-input-number v-model="row.price_output" :min="0" :precision="6" :step="0.1" size="small" placeholder="Output price" title="Output price $/1M" />
               </template>
-              <span v-else class="tip">未开启时该映射按全局 model_pricing 计费</span>
+              <span v-else class="tip">When off, this mapping is billed by global model_pricing</span>
             </div>
           </div>
-          <el-button size="small" class="mt" @click="addCustomRow">+ 添加一条上游映射</el-button>
+          <el-button size="small" class="mt" @click="addCustomRow">+ Add an upstream mapping</el-button>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="customDialog.visible = false">取消</el-button>
-        <el-button type="primary" @click="saveCustomGroup">保存</el-button>
+        <el-button @click="customDialog.visible = false">Cancel</el-button>
+        <el-button type="primary" @click="saveCustomGroup">Save</el-button>
       </template>
     </el-dialog>
 
@@ -457,7 +457,7 @@ onMounted(load)
             allow-create
             default-first-option
             placeholder="Search upstream model or type directly"
-            :no-data-text="'该渠道暂无已同步模型，可手动输入'"
+            :no-data-text="'No synced models for this channel yet; type one manually'"
           >
             <el-option v-for="m in upstreamOptions(dialog.channel_id)" :key="m" :label="m" :value="m" />
           </el-select>
@@ -470,15 +470,15 @@ onMounted(load)
         <el-form-item label="Enabled">
           <el-switch v-model="dialog.enabled" :active-value="1" :inactive-value="0" />
         </el-form-item>
-        <el-form-item label="自定义单价">
+        <el-form-item label="Custom price">
           <el-switch v-model="dialog.custom_price" />
-          <span class="tip">开启按本路由单价计费；关闭回退全局 model_pricing</span>
+          <span class="tip">Billed at this route's price when on; falls back to global model_pricing when off</span>
         </el-form-item>
         <template v-if="dialog.custom_price">
-          <el-form-item label="输入价 $/1M">
+          <el-form-item label="Input price $/1M">
             <el-input-number v-model="dialog.price_input" :min="0" :precision="6" :step="0.05" style="width: 100%" />
           </el-form-item>
-          <el-form-item label="输出价 $/1M">
+          <el-form-item label="Output price $/1M">
             <el-input-number v-model="dialog.price_output" :min="0" :precision="6" :step="0.1" style="width: 100%" />
           </el-form-item>
         </template>

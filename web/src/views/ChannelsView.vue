@@ -57,11 +57,11 @@ async function submitChannel() {
     try {
       d.extra_headers = JSON.parse(channelDialog.headers)
       if (typeof d.extra_headers !== 'object' || Array.isArray(d.extra_headers) || Object.keys(d.extra_headers).length == 0) {
-        ElMessage.warning('Extra Headers 需为 JSON 对象（可留空）')
+        ElMessage.warning('Extra Headers must be a JSON object (may be empty)')
         return
       }
     } catch {
-      ElMessage.warning('Extra Headers 不是合法 JSON')
+      ElMessage.warning('Extra Headers is not valid JSON')
       return
     }
   }
@@ -302,7 +302,7 @@ onMounted(load)
         type="warning"
         :closable="false"
         class="mb"
-        title="该渠道已停用，其下所有 Key 当前均不参与路由"
+        title="This channel is disabled; none of its keys currently participate in routing"
       />
 
       <!-- 行式表格：一次载入全部，表头冻结，支持快速滚动与搜索 -->
@@ -330,7 +330,7 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="Effective" width="110" fixed="right">
           <template #default="{ row }">
-            <el-tooltip :content="row.effective_enabled ? 'Key 已启用且渠道启用，参与路由' : (selected?.enabled ? 'Key 被单独停用' : '渠道已停用，该 Key 当前不参与路由')">
+            <el-tooltip :content="row.effective_enabled ? 'Key enabled and channel enabled: participates in routing' : (selected?.enabled ? 'Key is individually disabled' : 'Channel disabled: this key does not currently participate in routing')">
               <el-tag :type="row.effective_enabled ? 'success' : 'info'" size="small">
                 {{ row.effective_enabled ? 'Active' : 'Inactive' }}
               </el-tag>
@@ -362,8 +362,8 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="Note"><el-input v-model="channelDialog.note" /></el-form-item>
         <el-form-item label="Extra Headers">
-          <el-input v-model="channelDialog.headers" type="textarea" :rows="3" class="code" placeholder='{"x-opencode-session":"你的 session"}' />
-          <div class="tip">JSON 对象：发给该渠道请求时附加的头（如 opencode 必需的 x-opencode-session），可留空</div>
+          <el-input v-model="channelDialog.headers" type="textarea" :rows="3" class="code" placeholder='{"x-opencode-session":"your session"}' />
+          <div class="tip">JSON object: extra headers attached to requests to this channel (e.g. x-opencode-session required by opencode); may be left empty</div>
         </el-form-item>
       </el-form>
       <template #footer>

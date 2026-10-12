@@ -73,7 +73,7 @@ function renderChart() {
           const share = total > 0 ? ' (' + ((p.value / total) * 100).toFixed(1) + '%)' : ''
           html += `${p.marker}${p.seriesName}: ${humanNum(p.value)} token${share}<br/>`
         }
-        html += `合计: ${humanNum(total)} token`
+        html += `Total: ${humanNum(total)} token`
         return html
       },
     },
