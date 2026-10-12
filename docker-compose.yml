@@ -2,7 +2,6 @@ services:
   llmgate:
     build:
       context: .
-      network: host
     network_mode: host
     environment:
       - LGM_ADMIN_TOKEN=${LGM_ADMIN_TOKEN:-}
