@@ -245,9 +245,9 @@ func TestForwardChatFailover500To200(t *testing.T) {
 	if size != 1 {
 		t.Fatalf("high-priority should only be hit once, got %d", size)
 	}
-	// 500 触发渠道冷却
-	if !rt.pen.ChPenalized(c1) {
-		t.Fatal("failed channel should be penalized")
+	// 单次 500 不应触发渠道冷却（避免一两次误判拉黑）；仅本次请求内故障转移
+	if rt.pen.ChPenalized(c1) {
+		t.Fatal("single failure should NOT penalize channel")
 	}
 	// 低优先级成功渠道不冷却
 	if rt.pen.ChPenalized(c2) {
@@ -262,12 +262,27 @@ func TestForwardChatQuota429(t *testing.T) {
 	r.route(chID, "m", "m", 0, 1)
 	r.key(chID, "k")
 	rt := r.router()
-	_, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
-	if err == nil {
+	// 单次失败不应立即拉黑渠道（避免误判）
+	if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
 		t.Fatal("expected error")
 	}
+	if rt.pen.ChPenalized(chID) {
+		t.Fatal("single quota failure must NOT cool the channel")
+	}
+	// 连续多次失败达阈值后才真正冷却
+	for i := 0; i < failThreshold-1; i++ {
+		if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
+			t.Fatal("expected error")
+		}
+	}
 	if !rt.pen.ChPenalized(chID) {
-		t.Fatal("quota-exceeded channel must be penalized")
+		t.Fatal("quota-exceeded channel must be penalized after repeated failures")
+	}
+	// DB 冷却也应被持久化
+	var until int64
+	_ = r.db.QueryRow(`SELECT cooldown_until FROM channels WHERE id=?`, chID).Scan(&until)
+	if until <= models.Now() {
+		t.Fatalf("cooldown_until should be persisted in DB, got %d", until)
 	}
 }
 
@@ -278,12 +293,19 @@ func TestForwardChat431RateLimit(t *testing.T) {
 	r.route(chID, "m", "m", 0, 1)
 	r.key(chID, "k")
 	rt := r.router()
-	_, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
-	if err == nil {
+	if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
 		t.Fatal("expected error")
 	}
+	if rt.pen.ChPenalized(chID) {
+		t.Fatal("single rate-limit failure must NOT cool the channel")
+	}
+	for i := 0; i < failThreshold-1; i++ {
+		if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
+			t.Fatal("expected error")
+		}
+	}
 	if !rt.pen.ChPenalized(chID) {
-		t.Fatal("rate-limited channel must be penalized")
+		t.Fatal("rate-limited channel must be penalized after repeated failures")
 	}
 }
 
@@ -294,13 +316,22 @@ func TestForwardChat403AccessDenied(t *testing.T) {
 	r.route(chID, "m", "m", 0, 1)
 	r.key(chID, "k")
 	rt := r.router()
-	_, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
-	if err == nil {
+	// 单次 403 不应立即模型级拒权（避免一两次误判）
+	if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
 		t.Fatal("expected error")
+	}
+	if rt.pen.ModelDenied(chID, "m") {
+		t.Fatal("single 403 must NOT deny model yet")
+	}
+	// 连续多次 403 达阈值后才模型级拒权
+	for i := 0; i < failThreshold-1; i++ {
+		if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
+			t.Fatal("expected error")
+		}
 	}
 	// 403 非额度 → 模型级拒权熔断（而非渠道冷却）
 	if !rt.pen.ModelDenied(chID, "m") {
-		t.Fatal("model should be denied on 403 access_denied")
+		t.Fatal("model should be denied after repeated 403 access_denied")
 	}
 	if rt.pen.ChPenalized(chID) {
 		t.Fatal("channel should not be cold down for model-level 403")
@@ -513,12 +544,22 @@ func TestForwardChatStreamDiedBeforeFirstEvent(t *testing.T) {
 	r.route(chID, "m", "m", 0, 1)
 	r.key(chID, "k")
 	rt := r.router()
-	_, err := rt.ForwardChatStream(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
-	if !errors.Is(err, ErrNetworkExhausted) {
-		t.Fatalf("expect ErrNetworkExhausted for dead stream, got %v", err)
+	// 单次"连接即死"不应立即冷却渠道（避免一两次误判）
+	_, firstErr := rt.ForwardChatStream(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
+	if !errors.Is(firstErr, ErrNetworkExhausted) {
+		t.Fatalf("expected ErrNetworkExhausted, got %v", firstErr)
+	}
+	if rt.pen.ChPenalized(chID) {
+		t.Fatal("single dead stream must not trigger channel cooldown")
+	}
+	// 连续多次达阈值后才真正冷却
+	for i := 0; i < failThreshold-1; i++ {
+		if _, err := rt.ForwardChatStream(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
+			t.Fatal("expected error")
+		}
 	}
 	if !rt.pen.ChPenalized(chID) {
-		t.Fatal("dead stream channel should be penalized")
+		t.Fatal("repeated dead stream should cool the channel")
 	}
 }
 

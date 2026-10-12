@@ -69,6 +69,8 @@ func main() {
 
 	// 共享熔断器：Router（网关）与 Puller（探活自愈）共用一个实例
 	pen := router.NewPenalizer()
+	// 用 settings 覆盖熔断参数（阈值/窗口/配额冷却），非法或空值回退默认
+	applyPenaltyTuning(a, pen)
 
 	// 定时自动拉取上游模型 + 冷却探活 + 日志清理
 	modelPuller := puller.New(a, pen)
@@ -146,6 +148,33 @@ func shutdownGraceSec() int {
 		if x, err := strconv.Atoi(v); err == nil && x > 0 {
 			n = x
 		}
+	}
+	return n
+}
+
+// applyPenaltyTuning 用 settings 里的熔断参数覆盖共享 Penalizer 的默认值。
+// 空/非法值回退默认；仅启动时应用一次（后台探活退避则每次探活热读）。
+func applyPenaltyTuning(a *app.App, pen *router.Penalizer) {
+	def := router.DefaultTuning()
+	t := router.Tuning{
+		FailThreshold: intSettingSec(a, "circuit_fail_threshold", def.FailThreshold),
+		FailWindow:    time.Duration(intSettingSec(a, "circuit_fail_window_s", int(def.FailWindow/time.Second))) * time.Second,
+		QuotaPenalty:  time.Duration(intSettingSec(a, "circuit_quota_cooldown_s", int(def.QuotaPenalty/time.Second))) * time.Second,
+	}
+	pen.ApplyTuning(t)
+	log.Printf("circuit-breaker tuning: fail_threshold=%d fail_window=%v quota_cooldown=%v",
+		t.FailThreshold, t.FailWindow, t.QuotaPenalty)
+}
+
+// intSettingSec 读取一个正整数 settings；空/非法/非正回退默认。
+func intSettingSec(a *app.App, key string, def int) int {
+	v, err := a.GetSetting(key)
+	if err != nil || v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
 	}
 	return n
 }

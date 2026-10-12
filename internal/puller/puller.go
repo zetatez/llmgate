@@ -22,6 +22,10 @@ import (
 
 const defaultIntervalMin = 60
 
+// probeBackoff 探活失败后施加的退避冷却：到期后探活才会再次尝试。
+// 既避免下一个 tick 立刻重打同一个欠费/挂掉的上游，又保证在退避到期后可尽快恢复。
+const probeBackoff = 30 * time.Second
+
 // Puller 定时任务执行体。
 type Puller struct {
 	a    *app.App
@@ -63,7 +67,7 @@ func (p *Puller) SyncNow() map[string]any {
 
 // RunBackground 后台任务：冷却渠道探活自愈（每 20s）+ 日志保留清理（每小时）。
 func (p *Puller) RunBackground() {
-	probeTk := time.NewTicker(20 * time.Second)
+	probeTk := time.NewTicker(15 * time.Second)
 	cleanTk := time.NewTicker(time.Hour)
 	defer probeTk.Stop()
 	defer cleanTk.Stop()
@@ -100,6 +104,11 @@ func (p *Puller) probeOnce() {
 		log.Printf("puller: list cooldown channels: %v", err)
 		return
 	}
+	// 探活失败后的退避时长可由 settings 调整（热生效）
+	backoff := time.Duration(intSetting(a, "circuit_probe_backoff_s", int(probeBackoff.Seconds()))) * time.Second
+	if backoff <= 0 {
+		backoff = probeBackoff
+	}
 	for _, ch := range due {
 		if ch.Enabled != 1 {
 			_ = store.SetChannelHealthy(a.DB, ch.ID)
@@ -121,6 +130,10 @@ func (p *Puller) probeOnce() {
 		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.HealthRequest(probeModel))
 		cancel()
 		if err != nil || resp == nil || resp.StatusCode >= 400 {
+			// 探活失败：施加一段退避冷却，避免下一个 tick 立刻再打同一个欠费/挂掉的上游；
+			// 退避到期后探活会再次尝试，既不过度打扰又保证可尽快恢复。
+			p.pen.PenaliseChan(ch.ID, backoff)
+			_ = store.SetChannelCooldown(a.DB, ch.ID, models.Now()+int64(backoff.Seconds()))
 			continue
 		}
 		resp.Body.Close()

@@ -193,6 +193,10 @@ var settingsCatalog = []settingDef{
 	{classification: "Auto-pull", key: "pull_default_weight", description: "自动拉取新建路由的默认权重", def: "1", mutable: true},
 	{classification: "Status", key: "model_pull_last", description: "最近一次自动拉取的执行摘要（只读）", def: "", mutable: false},
 	{classification: "Runtime", key: "gateway_prefix", description: "网关前缀（运行期配置，只读）", def: "/", mutable: false},
+	{classification: "Failover", key: "circuit_fail_threshold", description: "熔断：滑动窗口内连续失败多少次才真正冷却渠道/模型（抗抖动）", def: "6", mutable: true},
+	{classification: "Failover", key: "circuit_fail_window_s", description: "熔断：连续失败计数的滑动窗口（秒）", def: "30", mutable: true},
+	{classification: "Failover", key: "circuit_quota_cooldown_s", description: "熔断：额度用尽/欠费/过期时的冷却时长（秒）", def: "30", mutable: true},
+	{classification: "Failover", key: "circuit_probe_backoff_s", description: "探活：冷却渠道探测失败后的退避时长（秒）", def: "30", mutable: true},
 }
 
 func getSettings(a *app.App) gin.HandlerFunc {

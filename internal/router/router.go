@@ -44,7 +44,20 @@ var penaltyLadder = []time.Duration{
 	8 * time.Second,
 }
 
-const quotaPenalty = 8 * time.Second // 上游额度用尽/欠费等，按最大档冷却（8s）
+// quotaPenalty 上游额度用尽/欠费/过期的冷却时长。
+// 比普通限流更久：这类问题不易在 8s 内自愈，且避免探活每 tick 去重打一个已停付/欠费账户。
+const quotaPenalty = 30 * time.Second
+
+// failThreshold / failWindow：冷却采用"连续失败才拉黑"的渐进策略。
+// 仅在 failWindow 滑动窗口内连续失败达到 failThreshold 次，才真正把渠道/模型拉进冷却，
+// 避免一两次偶发失败（瞬时抖动、个别限流、残留缓存/文案误判）就把正常渠道/模型误判拉黑。
+//
+// 取值权衡：窗口 30s 内连续失败 6 次才冷却——对突发/间歇性故障足够鲁棒，
+// 普通限流瞬时命中一两下不会误伤；真正持续故障的渠道在 30s 内基本都会到 6 次触发冷却。
+const (
+	failThreshold = 6
+	failWindow    = 30 * time.Second
+)
 
 // Router 持有路由所需依赖。
 type Router struct {
@@ -53,23 +66,78 @@ type Router struct {
 	pen    *Penalizer
 }
 
-// penaltyState 单个目标（渠道或 Key）的熔断信息。
+// penaltyState 单个渠道的熔断信息。
+// fails 记录滑动窗口内连续失败次数；attempts 为实际冷却的退避阶梯推进记录。
 type penaltyState struct {
 	until    time.Time
+	fails    int
+	last     time.Time
 	attempts int
 }
 
-// Penalizer 内存态熔断器（并发安全）。单个，供 Router 与 puller 探活共用。
-type Penalizer struct {
-	mu  sync.RWMutex
-	ch  map[int64]penaltyState         // 渠道冷却（网络/5xx/429/额度）
-	key map[int64]time.Time            // Key 冷却（401/个Key限流）
-	mdl map[int64]map[string]time.Time // 模型级拒权（403 access_denied）：channel -> model -> until
+// modelState 单个模型在单渠道上的拒权熔断信息。
+type modelState struct {
+	until time.Time
+	fails int
+	last  time.Time
 }
 
-// NewPenalizer 创建熔断器。
+// Penalizer 内存态熔断器（并发安全）。单个，供 Router 与 puller 探活共用。
+// 熔断阈值/窗口/配额冷却均可在运行期通过 settings 覆盖（见 SetTuning）。
+type Penalizer struct {
+	mu            sync.RWMutex
+	ch            map[int64]penaltyState           // 渠道冷却（网络/5xx/429/额度）
+	key           map[int64]time.Time              // Key 冷却（401/个Key限流）
+	mdl           map[int64]map[string]*modelState // 模型级拒权（403 access_denied / 协议不支持）
+	failThreshold int                              // 连续失败阈值
+	failWindow    time.Duration                    // 连续失败计数的滑动窗口
+	quotaPenalty  time.Duration                    // 额度/欠费/过期冷却时长
+}
+
+// NewPenalizer 创建熔断器（使用默认熔断参数）。
 func NewPenalizer() *Penalizer {
-	return &Penalizer{ch: map[int64]penaltyState{}, key: map[int64]time.Time{}, mdl: map[int64]map[string]time.Time{}}
+	return &Penalizer{
+		ch:            map[int64]penaltyState{},
+		key:           map[int64]time.Time{},
+		mdl:           map[int64]map[string]*modelState{},
+		failThreshold: failThreshold,
+		failWindow:    failWindow,
+		quotaPenalty:  quotaPenalty,
+	}
+}
+
+// Tuning 熔断参数的运行期可调项。零值表示"沿用当前值"。
+type Tuning struct {
+	FailThreshold int
+	FailWindow    time.Duration
+	QuotaPenalty  time.Duration
+}
+
+// DefaultTuning 返回熔断参数的工厂默认值（供 main 读取 settings 前取基线）。
+func DefaultTuning() Tuning {
+	return Tuning{FailThreshold: failThreshold, FailWindow: failWindow, QuotaPenalty: quotaPenalty}
+}
+
+// ApplyTuning 用给定值覆盖熔断参数；各字段若为正才生效，零值保持当前不变。
+func (p *Penalizer) ApplyTuning(t Tuning) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if t.FailThreshold > 0 {
+		p.failThreshold = t.FailThreshold
+	}
+	if t.FailWindow > 0 {
+		p.failWindow = t.FailWindow
+	}
+	if t.QuotaPenalty > 0 {
+		p.quotaPenalty = t.QuotaPenalty
+	}
+}
+
+// QuotaPenalty 返回额度/欠费/过期的冷却时长（调用方转发时用于冷却判定）。
+func (p *Penalizer) QuotaPenalty() time.Duration {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.quotaPenalty
 }
 
 // ModelDenied 某模型在指定渠道是否被标记为"无权访问"。
@@ -77,23 +145,59 @@ func (p *Penalizer) ModelDenied(ch int64, model string) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if m, ok := p.mdl[ch]; ok {
-		if t, ok := m[model]; ok && time.Now().Before(t) {
+		if st, ok := m[model]; ok && time.Now().Before(st.until) {
 			return true
 		}
 	}
 	return false
 }
 
-// DenyModel 标记模型在渠道上拒权 d 时长（403 access_denied 快速熔断）。
+// FailModel 记录一次模型级失败；达连续失败阈值才真正标记拒权 d 时长。
+// 未达阈值时不写入拒权（避免一两次误判就把模型拉黑），只计入滑动窗口。
+func (p *Penalizer) FailModel(ch int64, model string, d time.Duration) {
+	if d <= 0 {
+		d = 10 * time.Minute
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	m := p.mdl[ch]
+	if m == nil {
+		m = map[string]*modelState{}
+		p.mdl[ch] = m
+	}
+	st := m[model]
+	if st == nil {
+		st = &modelState{}
+		m[model] = st
+	}
+	now := time.Now()
+	if st.last.IsZero() || now.Sub(st.last) > p.failWindow {
+		st.fails = 0
+	}
+	st.fails++
+	st.last = now
+	if st.fails < p.failThreshold {
+		st.until = time.Time{}
+		return
+	}
+	st.until = now.Add(d)
+}
+
+// DenyModel 直接标记模型在渠道上拒权 d 时长（确定性/高置信场景，如协议不支持）。不做阈值计数。
 func (p *Penalizer) DenyModel(ch int64, model string, d time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	m := p.mdl[ch]
 	if m == nil {
-		m = map[string]time.Time{}
+		m = map[string]*modelState{}
 		p.mdl[ch] = m
 	}
-	m[model] = time.Now().Add(d)
+	st := m[model]
+	if st == nil {
+		st = &modelState{}
+		m[model] = st
+	}
+	st.until = time.Now().Add(d)
 }
 
 // ClearModelDenied 成功调用后清除该模型在渠道上的拒权标记。
@@ -102,6 +206,9 @@ func (p *Penalizer) ClearModelDenied(ch int64, model string) {
 	defer p.mu.Unlock()
 	if m, ok := p.mdl[ch]; ok {
 		delete(m, model)
+		if len(m) == 0 {
+			delete(p.mdl, ch)
+		}
 	}
 }
 
@@ -113,16 +220,15 @@ func (p *Penalizer) ChPenalized(id int64) bool {
 	return ok && time.Now().Before(s.until)
 }
 
-// PenaliseChan 冷却渠道并按阶梯退避：2s → 4s → 8s（此后保持 8s），返回本次冷却时长。
-// forced>0 时直接按给定兜底时长。
+// PenaliseChan 直接冷却渠道（高置信场景/探活失败退避）。按阶梯推进：2s → 4s → 8s（封顶 8s）。
+// forced>0 时直接按给定兜底时长。ClearChan 后阶梯从头开始。
 func (p *Penalizer) PenaliseChan(id int64, forced time.Duration) time.Duration {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	s := p.ch[id]
-	s.attempts++
 	d := forced
 	if d <= 0 {
-		idx := s.attempts - 1
+		idx := s.attempts
 		if idx < 0 {
 			idx = 0
 		}
@@ -131,7 +237,43 @@ func (p *Penalizer) PenaliseChan(id int64, forced time.Duration) time.Duration {
 		}
 		d = penaltyLadder[idx]
 	}
+	s.attempts++
+	s.fails++
+	s.last = time.Now()
 	s.until = time.Now().Add(d)
+	p.ch[id] = s
+	return d
+}
+
+// FailChan 记录一次渠道失败：达连续失败阈值才真正冷却（按 forced 或指数阶梯）。
+// 未达阈值时不拉黑（返回 0），仅计入滑动窗口；本次请求仍会由调用方的 excludedCh 排除做故障转移。
+func (p *Penalizer) FailChan(id int64, forced time.Duration) time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	s := p.ch[id]
+	now := time.Now()
+	if s.last.IsZero() || now.Sub(s.last) > p.failWindow {
+		s.fails = 0
+		s.attempts = 0
+	}
+	s.fails++
+	s.last = now
+	if s.fails < p.failThreshold {
+		s.until = time.Time{}
+		p.ch[id] = s
+		return 0
+	}
+	d := forced
+	if d <= 0 {
+		if s.attempts >= len(penaltyLadder) {
+			d = penaltyLadder[len(penaltyLadder)-1]
+		} else {
+			d = penaltyLadder[s.attempts]
+		}
+		s.attempts++
+	}
+	s.until = now.Add(d)
+	s.fails = 0 // 拉黑后清空计数，下一段冷却按阶梯继续推进
 	p.ch[id] = s
 	return d
 }
@@ -252,10 +394,16 @@ func New(a *app.App, pen *Penalizer) *Router {
 	return &Router{db: a.DB, secret: a.Secret, pen: pen}
 }
 
-// penalizeChannel 冷却渠道（内存 + DB 持久化 cooldown，重启不丢）。
-func (r *Router) penalizeChannel(ch *models.Channel, forced time.Duration) {
-	d := r.pen.PenaliseChan(ch.ID, forced)
-	_ = store.SetChannelCooldown(r.db, ch.ID, models.Now()+int64(d.Seconds()))
+// recordChannelFail 记录一次渠道失败：达连续失败阈值才真正冷却（内存 + DB 持久化）。
+// 返回是否真正进入冷却。未达阈值时不拉黑渠道，仅计入滑动窗口；本次请求仍已被 excludedCh
+// 排除做故障转移，避免一两次偶发失败就把正常渠道误判拉黑。
+func (r *Router) recordChannelFail(ch *models.Channel, forced time.Duration) bool {
+	d := r.pen.FailChan(ch.ID, forced)
+	if d > 0 {
+		_ = store.SetChannelCooldown(r.db, ch.ID, models.Now()+int64(d.Seconds()))
+		return true
+	}
+	return false
 }
 
 // recoverChannel 渠道恢复（清内存熔断 + DB 恢复 healthy）。
@@ -370,7 +518,8 @@ func (r *Router) pickKey(channelID int64, failedKeys map[int64]bool) (*models.Ch
 // isQuotaExceeded 从上游错误体识别"额度/余额用尽"类错误（429/402/403 常见）。
 func isQuotaExceeded(body string) bool {
 	low := strings.ToLower(body)
-	for _, kw := range []string{"quota", "insufficient", "balance", "payment", "billing", "usage limit", "limit reached", "exceeded"} {
+	for _, kw := range []string{"quota", "insufficient", "balance", "payment", "billing", "usage limit",
+		"limit reached", "exceeded", "expired", "expiration", "past due", "credit", "overdue", "subscription"} {
 		if strings.Contains(low, kw) {
 			return true
 		}
@@ -439,7 +588,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			networkAttempts++
 			lastNetworkErr = true
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
-			r.penalizeChannel(&cand.Channel, 0)
+			r.recordChannelFail(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -453,7 +602,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			networkAttempts++
 			lastNetworkErr = true
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
-			r.penalizeChannel(&cand.Channel, 0)
+			r.recordChannelFail(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -463,7 +612,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		if len(body) > maxUpstreamResp {
 			networkAttempts++
 			lastErr = fmt.Errorf("channel %s: upstream response too large", cand.Channel.Name)
-			r.penalizeChannel(&cand.Channel, 0)
+			r.recordChannelFail(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -479,15 +628,15 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			lastNetworkErr = false // 上游已响应：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 			if isQuotaExceeded(bodyStr) {
-				r.penalizeChannel(&cand.Channel, quotaPenalty) // 额度用尽，8s 后自动再试
+				r.recordChannelFail(&cand.Channel, r.pen.QuotaPenalty()) // 额度用尽，8s 后自动再试
 			} else if code == http.StatusTooManyRequests {
-				r.penalizeChannel(&cand.Channel, 0) // 普通限流，指数退避
+				r.recordChannelFail(&cand.Channel, 0) // 普通限流，指数退避
 			} else {
 				// 非额度类 403/402（如 access_denied）：多为模型级权限。
 				// 不冷却 Key（避免误伤该渠道其它模型）；标记该模型在此渠道"拒权"，
 				// 后续请求快速跳过，不再浪费往返（10 分钟后自动再试）
 				if code == http.StatusForbidden || code == http.StatusPaymentRequired {
-					r.pen.DenyModel(cand.Channel.ID, displayModel, 10*time.Minute)
+					r.pen.FailModel(cand.Channel.ID, displayModel, 10*time.Minute)
 				}
 			}
 			excludedCh[cand.Channel.ID] = true
@@ -510,7 +659,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			networkAttempts++
 			lastNetworkErr = false // 上游已响应 5xx：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, truncate(string(body), 300))
-			r.penalizeChannel(&cand.Channel, 0)
+			r.recordChannelFail(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -647,7 +796,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				networkAttempts++
 				lastNetworkErr = true
 				lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
-				r.penalizeChannel(&cand.Channel, 0)
+				r.recordChannelFail(&cand.Channel, 0)
 				excludedCh[cand.Channel.ID] = true
 				if networkAttempts >= maxNetworkAttempts {
 					return nil, lastErr
@@ -677,12 +826,12 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				networkAttempts++
 				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 				if isQuotaExceeded(bodyStr) {
-					r.penalizeChannel(&cand.Channel, quotaPenalty)
+					r.recordChannelFail(&cand.Channel, r.pen.QuotaPenalty())
 				} else if code == http.StatusTooManyRequests {
-					r.penalizeChannel(&cand.Channel, 0)
+					r.recordChannelFail(&cand.Channel, 0)
 				} else {
 					// 非额度类 403/402（access_denied 等）：模型级权限，快速拒权熔断
-					r.pen.DenyModel(cand.Channel.ID, displayModel, 10*time.Minute)
+					r.pen.FailModel(cand.Channel.ID, displayModel, 10*time.Minute)
 				}
 				excludedCh[cand.Channel.ID] = true
 			case code == http.StatusUnauthorized:
@@ -694,7 +843,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				// 连接级/服务端故障：冷却整条渠道，指数退避
 				networkAttempts++
 				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
-				r.penalizeChannel(&cand.Channel, 0)
+				r.recordChannelFail(&cand.Channel, 0)
 				excludedCh[cand.Channel.ID] = true
 			case code == http.StatusBadRequest || code == http.StatusNotFound:
 				// 400/404 多为"该模型在此渠道不可用/不认此协议"，属模型级问题：
@@ -741,7 +890,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			networkAttempts++
 			lastNetworkErr = true
 			lastErr = fmt.Errorf("channel %s: stream died before first event: %v", cand.Channel.Name, firstErr)
-			r.penalizeChannel(&cand.Channel, 0)
+			r.recordChannelFail(&cand.Channel, 0)
 			excludedCh[cand.Channel.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
