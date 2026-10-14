@@ -54,17 +54,23 @@ async function submitChannel() {
     priority: +channelDialog.priority || 0, weight: +channelDialog.weight || 1, timeout_ms: +channelDialog.timeout_ms || 60000,
     enabled: channelDialog.enabled, note: channelDialog.note,
   }
-  if (channelDialog.headers.trim()) {
+  // Extra Headers：必须为 JSON 对象（允许空对象 {}）；留空视为清空
+  const headersText = channelDialog.headers.trim()
+  if (headersText) {
+    let parsed: unknown
     try {
-      d.extra_headers = JSON.parse(channelDialog.headers)
-      if (typeof d.extra_headers !== 'object' || Array.isArray(d.extra_headers) || Object.keys(d.extra_headers).length == 0) {
-        ElMessage.warning('Extra Headers must be a JSON object (may be empty)')
-        return
-      }
+      parsed = JSON.parse(headersText)
     } catch {
       ElMessage.warning('Extra Headers is not valid JSON')
       return
     }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      ElMessage.warning('Extra Headers must be a JSON object')
+      return
+    }
+    d.extra_headers = parsed
+  } else {
+    d.extra_headers = {}
   }
   const extraKeys = parseKeyLines(channelDialog.keys)
   if (extraKeys.length) d.keys = extraKeys
