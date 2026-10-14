@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { channelsApi, syncApi } from '../api'
-import type { Channel, ChannelKeyItem } from '../api'
+import { channelsApi, syncApi, usersApi } from '../api'
+import type { Channel, ChannelKeyItem, User } from '../api'
 
 // ---------- Channel list ----------
 const list = ref<Channel[]>([])
 const loading = ref(false)
 const selected = ref<Channel | null>(null)
+const users = ref<User[]>([])
 
 const channelDialog = reactive({ visible: false, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '' })
 
@@ -170,19 +171,19 @@ async function removeKey(k: ChannelKeyItem) {
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
 }
 
-// Edit account (name/remark, replace secret, enable, weight)
-const editKeyDialog = reactive({ visible: false, id: 0, name: '', remark: '', key: '', enabled: 1, weight: 1, busy: false })
+// Edit account (name/remark, replace secret, enable, weight, owner)
+const editKeyDialog = reactive({ visible: false, id: 0, name: '', remark: '', key: '', enabled: 1, weight: 1, user_id: 0, busy: false })
 
 function openEditKey(k: ChannelKeyItem) {
   Object.assign(editKeyDialog, {
-    visible: true, id: k.id, name: k.name, remark: k.remark, key: '', enabled: k.enabled, weight: k.weight, busy: false,
+    visible: true, id: k.id, name: k.name, remark: k.remark, key: '', enabled: k.enabled, weight: k.weight, user_id: k.user_id || 0, busy: false,
   })
 }
 
 async function submitEditKey() {
   editKeyDialog.busy = true
   try {
-    const d: any = { name: editKeyDialog.name, remark: editKeyDialog.remark, enabled: editKeyDialog.enabled, weight: +editKeyDialog.weight || 1 }
+    const d: any = { name: editKeyDialog.name, remark: editKeyDialog.remark, enabled: editKeyDialog.enabled, weight: +editKeyDialog.weight || 1, user_id: editKeyDialog.user_id || 0 }
     const newKey = editKeyDialog.key.trim()
     if (newKey) d.key = newKey
     await channelsApi.updateKey(editKeyDialog.id, d)
@@ -224,7 +225,14 @@ async function submitAdd() {
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to add') } finally { addDialog.busy = false }
 }
 
-onMounted(load)
+async function loadUsers() {
+  try { users.value = await usersApi.list() } catch { /* keep empty */ }
+}
+
+onMounted(() => {
+  load()
+  loadUsers()
+})
 </script>
 
 <template>
@@ -310,6 +318,12 @@ onMounted(load)
         <el-table-column type="index" label="#" width="45" />
         <el-table-column label="Name" min-width="130" show-overflow-tooltip>
           <template #default="{ row }"><b :class="{ dim: !row.name }">{{ row.name || 'Unnamed' }}</b></template>
+        </el-table-column>
+        <el-table-column label="Owner" width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag v-if="row.user_id" size="small" type="success">{{ row.owner_name || `#${row.user_id}` }}</el-tag>
+            <el-tag v-else size="small" type="info">Admin</el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="Remark" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.remark || '—' }}</template>
@@ -397,6 +411,12 @@ onMounted(load)
         <el-form-item label="Remark"><el-input v-model="editKeyDialog.remark" placeholder="e.g. expires end of year" /></el-form-item>
         <el-form-item label="Secret">
           <el-input v-model="editKeyDialog.key" type="password" show-password placeholder="Leave empty to keep the current secret" />
+        </el-form-item>
+        <el-form-item label="Owner">
+          <el-select v-model="editKeyDialog.user_id" style="width: 100%">
+            <el-option label="Admin / global (not used by users)" :value="0" />
+            <el-option v-for="u in users" :key="u.id" :label="`${u.name || u.username} (#${u.id})`" :value="u.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="Enabled">
           <el-switch v-model="editKeyDialog.enabled" :active-value="1" :inactive-value="0" />

@@ -58,6 +58,9 @@ func main() {
 	if err := store.Migrate(db); err != nil {
 		log.Fatalf("migrate db: %v", err)
 	}
+	if err := store.CleanupExpiredSessions(db); err != nil {
+		log.Printf("warn: cleanup expired sessions: %v", err)
+	}
 
 	a, err := app.New(cfg, db)
 	if err != nil {
@@ -91,6 +94,7 @@ func main() {
 	})
 
 	apiv1.Register(r.Group("/api/admin"), a, modelPuller.SyncNow)
+	apiv1.RegisterUserPortal(r.Group("/api/user"), a)
 	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus, pen)
 
 	// 生产构建（-tags embedweb）时托管前端静态资源；本地开发返回 nil 不影响运行

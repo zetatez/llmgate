@@ -478,11 +478,11 @@ func TestForwardChatNoKey(t *testing.T) {
 	runAdapter(t, statusErrAdapter("fc-nokey", 429, "x"))
 	chID := r.ch("nk", "http://stub-nk", "fc-nokey", 0, 1)
 	r.route(chID, "m", "m", 0, 1)
-	// 没有 Key
+	// 渠道没有任何属于该用户的 Key：该模型对用户不可用（无候选 → 404）
 	rt := r.router()
 	_, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
-	if !errors.Is(err, ErrChannelBusy) {
-		t.Fatalf("no-enabled-key channel is treated as unusable, got %v", err)
+	if !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("channel without user-owned key should yield ErrNoCandidate, got %v", err)
 	}
 }
 
@@ -711,8 +711,8 @@ func TestForwardChatStreamNoKey(t *testing.T) {
 	r.route(chID, "m", "m", 0, 1)
 	rt := r.router()
 	_, err := rt.ForwardChatStream(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
-	if !errors.Is(err, ErrChannelBusy) {
-		t.Fatalf("no-enabled-key stream channel treated as unusable, got %v", err)
+	if !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("stream channel without user-owned key should yield ErrNoCandidate, got %v", err)
 	}
 }
 

@@ -19,6 +19,8 @@ export interface Channel {
 export interface ChannelKeyItem {
   id: number
   channel_id: number
+  user_id: number
+  owner_name: string
   name: string
   source: string
   remark: string
@@ -50,12 +52,69 @@ export interface User {
   id: number
   name: string
   remark: string
-  token?: string
-  token_tail?: string
+  username: string
   quota_limit: number
   quota_used: number
   status: number
+  token_count: number
+  last_login_at: number
   created_at: number
+}
+
+/** 消费令牌（网关 sk-xxx）：一个用户可创建多个。 */
+export interface UserToken {
+  id: number
+  user_id?: number
+  name: string
+  /** 仅创建时返回一次的明文 */
+  token?: string
+  token_tail: string
+  enabled: number
+  last_used_at: number
+  created_at: number
+}
+
+/** 用户端：登录后的自身信息 */
+export interface PortalUser {
+  id: number
+  username: string
+  name: string
+  quota_limit: number
+  quota_used: number
+  status: number
+  last_login_at: number
+  gateway_prefix: string
+}
+
+/** 用户端：可录入 Key 的渠道 */
+export interface UserChannel {
+  id: number
+  name: string
+  adapter: string
+  base_url: string
+  my_keys: number
+}
+
+/** 用户端：本人录入的 API Key */
+export interface UserKey {
+  id: number
+  channel_id: number
+  channel_name: string
+  name: string
+  source: string
+  remark: string
+  masked: string
+  key_tail: string
+  enabled: number
+  last_used_at: number
+  created_at: number
+}
+
+/** 用户端：用量概览 */
+export interface UserOverview {
+  week: UsagePoint[]
+  today: UsageSummary
+  total: UsageSummary
 }
 
 export interface RequestLog {

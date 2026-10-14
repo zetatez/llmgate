@@ -63,7 +63,7 @@ func handleResponses(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.Han
 
 		userAny, _ := c.Get(ctxUserKey)
 		user := userAny.(*models.User)
-		rt := router.New(a, pen)
+		rt := router.New(a, pen).SetUser(user.ID)
 		logEntry := &models.RequestLog{
 			UserID:       user.ID,
 			DisplayModel: rb.Model,

@@ -2,18 +2,34 @@ package models
 
 import "time"
 
-// User 为轻量用户，每个用户持有一个独立令牌 sk-xxx。
+// User 为平台用户账号：可登录（username/password_hash），通过 user_tokens 消费网关。
+// token_hash/token_enc 为历史遗留字段（旧版单令牌模型），不再用于鉴权，仅保留列约束。
 type User struct {
-	ID         int64   `json:"id"`
-	Name       string  `json:"name"`
-	Remark     string  `json:"remark"`
-	TokenHash  string  `json:"-"` // 令牌哈希（鉴权用），不对外
-	TokenEnc   string  `json:"-"` // AES 加密的令牌（支持管理员回显/复制）
-	QuotaLimit float64 `json:"quota_limit"`
-	QuotaUsed  float64 `json:"quota_used"`
-	Status     int     `json:"status"` // 1 启用 / 0 禁用
-	CreatedAt  int64   `json:"created_at"`
-	UpdatedAt  int64   `json:"updated_at"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	Remark       string  `json:"remark"`
+	Username     string  `json:"username"` // 登录名（空 = 未分配，不能登录）
+	PasswordHash string  `json:"-"`        // bcrypt 哈希，不对外
+	TokenHash    string  `json:"-"`        // 遗留字段，不再用于鉴权
+	TokenEnc     string  `json:"-"`        // 遗留字段
+	QuotaLimit   float64 `json:"quota_limit"`
+	QuotaUsed    float64 `json:"quota_used"`
+	Status       int     `json:"status"` // 1 启用 / 0 禁用
+	LastLoginAt  int64   `json:"last_login_at"`
+	CreatedAt    int64   `json:"created_at"`
+	UpdatedAt    int64   `json:"updated_at"`
+}
+
+// UserToken 为一个用户可创建的网关消费令牌（sk-xxx）。一个用户可拥有多个。
+type UserToken struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"user_id"`
+	Name       string `json:"name"`
+	TokenHash  string `json:"-"` // 鉴权用哈希
+	TokenEnc   string `json:"-"` // AES 加密（支持回显/复制）
+	Enabled    int    `json:"enabled"`
+	LastUsedAt int64  `json:"last_used_at"`
+	CreatedAt  int64  `json:"created_at"`
 }
 
 // Channel 表示一个上游套餐（渠道）。
@@ -38,10 +54,11 @@ type Channel struct {
 type ChannelKey struct {
 	ID         int64  `json:"id"`
 	ChannelID  int64  `json:"channel_id"`
-	Name       string `json:"name"`   // Key 备注名，便于区分管理
-	Source     string `json:"source"` // 来源（如官网/中转/朋友）
-	Remark     string `json:"remark"` // 备注
-	APIKeyEnc  string `json:"-"`      // AES-GCM 加密后的 hex
+	UserID     int64  `json:"user_id"` // 归属用户；0 = 管理员/全局 Key
+	Name       string `json:"name"`    // Key 备注名，便于区分管理
+	Source     string `json:"source"`  // 来源（如官网/中转/朋友）
+	Remark     string `json:"remark"`  // 备注
+	APIKeyEnc  string `json:"-"`       // AES-GCM 加密后的 hex
 	Enabled    int    `json:"enabled"`
 	Weight     int    `json:"weight"`
 	LastUsedAt int64  `json:"last_used_at"`

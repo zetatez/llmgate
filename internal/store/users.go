@@ -7,11 +7,12 @@ import (
 	"llmgate/internal/models"
 )
 
-const userCols = `id, name, remark, token_hash, token_enc, quota_limit, quota_used, status, created_at, updated_at`
+const userCols = `id, name, remark, username, password_hash, token_hash, token_enc, quota_limit, quota_used, status, last_login_at, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*models.User, error) {
 	u := &models.User{}
-	err := row.Scan(&u.ID, &u.Name, &u.Remark, &u.TokenHash, &u.TokenEnc, &u.QuotaLimit, &u.QuotaUsed, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Name, &u.Remark, &u.Username, &u.PasswordHash, &u.TokenHash, &u.TokenEnc,
+		&u.QuotaLimit, &u.QuotaUsed, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -46,9 +47,22 @@ func GetUser(db *sql.DB, id int64) (*models.User, error) {
 	return u, err
 }
 
-// GetUserByTokenHash 按令牌哈希查找用户。
+// GetUserByTokenHash 按遗留令牌哈希查找用户（保留兼容；网关鉴权已改用 user_tokens）。
 func GetUserByTokenHash(db *sql.DB, hash string) (*models.User, error) {
 	row := db.QueryRow(`SELECT `+userCols+` FROM users WHERE token_hash=?`, hash)
+	u, err := scanUser(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return u, err
+}
+
+// GetUserByUsername 按登录名查找用户（登录用）。空名或不存在返回 nil。
+func GetUserByUsername(db *sql.DB, username string) (*models.User, error) {
+	if username == "" {
+		return nil, nil
+	}
+	row := db.QueryRow(`SELECT `+userCols+` FROM users WHERE username=?`, username)
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -59,20 +73,21 @@ func GetUserByTokenHash(db *sql.DB, hash string) (*models.User, error) {
 // CreateUser 创建用户，返回新 id。
 func CreateUser(db *sql.DB, u *models.User) (int64, error) {
 	res, err := db.Exec(`
-		INSERT INTO users (name, remark, token_hash, token_enc, quota_limit, quota_used, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-		u.Name, u.Remark, u.TokenHash, u.TokenEnc, u.QuotaLimit, u.Status, models.Now(), models.Now())
+		INSERT INTO users (name, remark, username, password_hash, token_hash, token_enc, quota_limit, quota_used, status, last_login_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		u.Name, u.Remark, u.Username, u.PasswordHash, u.TokenHash, u.TokenEnc,
+		u.QuotaLimit, u.Status, u.LastLoginAt, models.Now(), models.Now())
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-// UpdateUser 更新用户基本信息（name/remark/quota_limit/status）。
+// UpdateUser 更新用户基本信息（name/remark/username/password_hash/quota_limit/status）。
 func UpdateUser(db *sql.DB, u *models.User) error {
 	res, err := db.Exec(`
-		UPDATE users SET name=?, remark=?, quota_limit=?, status=?, updated_at=? WHERE id=?`,
-		u.Name, u.Remark, u.QuotaLimit, u.Status, models.Now(), u.ID)
+		UPDATE users SET name=?, remark=?, username=?, password_hash=?, quota_limit=?, status=?, updated_at=? WHERE id=?`,
+		u.Name, u.Remark, u.Username, u.PasswordHash, u.QuotaLimit, u.Status, models.Now(), u.ID)
 	if err != nil {
 		return err
 	}
@@ -82,7 +97,7 @@ func UpdateUser(db *sql.DB, u *models.User) error {
 	return nil
 }
 
-// SetUserToken 重置用户令牌（同时更新哈希与加密值）。
+// SetUserToken 重置用户名下的遗留令牌字段（兼容旧接口；新模型请用 user_tokens）。
 func SetUserToken(db *sql.DB, id int64, hash, encrypted string) error {
 	res, err := db.Exec(`UPDATE users SET token_hash=?, token_enc=?, updated_at=? WHERE id=?`, hash, encrypted, models.Now(), id)
 	if err != nil {
@@ -94,7 +109,13 @@ func SetUserToken(db *sql.DB, id int64, hash, encrypted string) error {
 	return nil
 }
 
-// DeleteUser 删除用户。
+// TouchUserLogin 记录最近登录时间。
+func TouchUserLogin(db *sql.DB, id int64) error {
+	_, err := db.Exec(`UPDATE users SET last_login_at=? WHERE id=?`, models.Now(), id)
+	return err
+}
+
+// DeleteUser 删除用户（user_tokens / user_sessions 级联删除）。
 func DeleteUser(db *sql.DB, id int64) error {
 	res, err := db.Exec(`DELETE FROM users WHERE id=?`, id)
 	if err != nil {

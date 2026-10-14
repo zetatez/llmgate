@@ -136,6 +136,20 @@ func (a *App) FirstEnabledKey(channelID int64) (string, error) {
 	return "", errors.New("渠道没有可用的 Key")
 }
 
+// NewGatewayToken 生成一个新的网关消费令牌：返回明文（sk-xxx，仅一次性展示）与加密串。
+func (a *App) NewGatewayToken() (plain, encrypted string, err error) {
+	token, err := GenSecret(24) // 48 hex chars
+	if err != nil {
+		return "", "", err
+	}
+	plain = "sk-" + token
+	enc, err := a.Secret.Encrypt(plain)
+	if err != nil {
+		return "", "", err
+	}
+	return plain, enc, nil
+}
+
 // KeyTail 返回密钥明文末 4 位（用于界面辨认该密钥），解密失败返回空串。
 func (a *App) KeyTail(enc string) string {
 	plain, err := a.Secret.Decrypt(enc)

@@ -123,10 +123,11 @@ func ListCooldownChannels(db *sql.DB, dueAt int64) ([]*models.Channel, error) {
 
 // ---------------- 渠道 Key 池 ----------------
 
-const keyCols = `id, channel_id, name, source, remark, api_key_enc, enabled, weight, last_used_at, created_at`
+const keyCols = `id, channel_id, user_id, name, source, remark, api_key_enc, enabled, weight, last_used_at, created_at`
 
-// KeyInput 新增 Key 时的输入（调用方已加密）。
+// KeyInput 新增 Key 时的输入（调用方已加密）。UserID=0 表示管理员/全局 Key。
 type KeyInput struct {
+	UserID    int64
 	Name      string
 	Source    string
 	Remark    string
@@ -135,7 +136,7 @@ type KeyInput struct {
 
 func scanKey(row interface{ Scan(...any) error }) (*models.ChannelKey, error) {
 	k := &models.ChannelKey{}
-	err := row.Scan(&k.ID, &k.ChannelID, &k.Name, &k.Source, &k.Remark, &k.APIKeyEnc, &k.Enabled, &k.Weight, &k.LastUsedAt, &k.CreatedAt)
+	err := row.Scan(&k.ID, &k.ChannelID, &k.UserID, &k.Name, &k.Source, &k.Remark, &k.APIKeyEnc, &k.Enabled, &k.Weight, &k.LastUsedAt, &k.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +145,21 @@ func scanKey(row interface{ Scan(...any) error }) (*models.ChannelKey, error) {
 
 // ListChannelKeys 返回渠道下全部 Key（含名称，不含明文）。
 func ListChannelKeys(db *sql.DB, channelID int64) ([]*models.ChannelKey, error) {
-	rows, err := db.Query(`SELECT `+keyCols+` FROM channel_keys WHERE channel_id=? ORDER BY id ASC`, channelID)
+	return queryKeys(db, `SELECT `+keyCols+` FROM channel_keys WHERE channel_id=? ORDER BY id ASC`, channelID)
+}
+
+// ListChannelKeysByUser 返回渠道下属于某用户的 Key（网关路由按归属过滤）。
+func ListChannelKeysByUser(db *sql.DB, channelID, userID int64) ([]*models.ChannelKey, error) {
+	return queryKeys(db, `SELECT `+keyCols+` FROM channel_keys WHERE channel_id=? AND user_id=? ORDER BY id ASC`, channelID, userID)
+}
+
+// ListKeysByUser 返回某用户名下的全部 Key（跨渠道，用户端展示/管理）。
+func ListKeysByUser(db *sql.DB, userID int64) ([]*models.ChannelKey, error) {
+	return queryKeys(db, `SELECT `+keyCols+` FROM channel_keys WHERE user_id=? ORDER BY channel_id ASC, id ASC`, userID)
+}
+
+func queryKeys(db *sql.DB, q string, args ...any) ([]*models.ChannelKey, error) {
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +185,8 @@ func AddChannelKeys(db *sql.DB, channelID int64, items []KeyInput) error {
 		return err
 	}
 	for _, it := range items {
-		if _, err := tx.Exec(`INSERT INTO channel_keys (channel_id, name, source, remark, api_key_enc, enabled, weight, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
-			channelID, it.Name, it.Source, it.Remark, it.Encrypted, models.Now()); err != nil {
+		if _, err := tx.Exec(`INSERT INTO channel_keys (channel_id, user_id, name, source, remark, api_key_enc, enabled, weight, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)`,
+			channelID, it.UserID, it.Name, it.Source, it.Remark, it.Encrypted, models.Now()); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -189,10 +204,10 @@ func GetChannelKey(db *sql.DB, id int64) (*models.ChannelKey, error) {
 	return k, err
 }
 
-// UpdateChannelKey 更新 Key 的名称、来源、备注、启用状态与权重。
+// UpdateChannelKey 更新 Key 的名称、来源、备注、启用状态、权重与归属用户。
 func UpdateChannelKey(db *sql.DB, k *models.ChannelKey) error {
-	res, err := db.Exec(`UPDATE channel_keys SET name=?, source=?, remark=?, enabled=?, weight=? WHERE id=?`,
-		k.Name, k.Source, k.Remark, k.Enabled, k.Weight, k.ID)
+	res, err := db.Exec(`UPDATE channel_keys SET name=?, source=?, remark=?, enabled=?, weight=?, user_id=? WHERE id=?`,
+		k.Name, k.Source, k.Remark, k.Enabled, k.Weight, k.UserID, k.ID)
 	if err != nil {
 		return err
 	}

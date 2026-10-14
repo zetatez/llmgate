@@ -297,9 +297,11 @@ var _ = truncateStr // 保留工具函数（后续错误摘要可能用到）
 type keyView struct {
 	ID               int64  `json:"id"`
 	ChannelID        int64  `json:"channel_id"`
-	Name             string `json:"name"`   // Key 名称（管理用）
-	Source           string `json:"source"` // 来源
-	Remark           string `json:"remark"` // 备注
+	UserID           int64  `json:"user_id"`    // 归属用户；0 = 管理员/全局
+	OwnerName        string `json:"owner_name"` // 归属用户名（0 时为空）
+	Name             string `json:"name"`       // Key 名称（管理用）
+	Source           string `json:"source"`     // 来源
+	Remark           string `json:"remark"`     // 备注
 	Masked           string `json:"masked"`
 	KeyTail          string `json:"key_tail"`          // 明文末 4 位（辨认用）
 	Enabled          int    `json:"enabled"`           // Key 自身状态（独立管理）
@@ -309,7 +311,7 @@ type keyView struct {
 }
 
 func toKeyView(a *app.App, k *models.ChannelKey) keyView {
-	return keyView{ID: k.ID, ChannelID: k.ChannelID, Name: k.Name, Source: k.Source, Remark: k.Remark,
+	return keyView{ID: k.ID, ChannelID: k.ChannelID, UserID: k.UserID, Name: k.Name, Source: k.Source, Remark: k.Remark,
 		Masked: "sk-****", KeyTail: a.KeyTail(k.APIKeyEnc), Enabled: k.Enabled, Weight: k.Weight, LastUsedAt: k.LastUsedAt}
 }
 
@@ -329,9 +331,11 @@ func listKeys(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+		owners := userNames(a)
 		out := make([]keyView, 0, len(keys))
 		for _, k := range keys {
 			v := toKeyView(a, k)
+			v.OwnerName = owners[k.UserID]
 			if channelEnabled == 1 && k.Enabled == 1 {
 				v.EffectiveEnabled = 1
 			}
@@ -339,6 +343,23 @@ func listKeys(a *app.App) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"data": out})
 	}
+}
+
+// userNames 返回 id -> 用户名（用于 Key 归属展示）。
+func userNames(a *app.App) map[int64]string {
+	m := map[int64]string{}
+	list, err := store.ListUsers(a.DB)
+	if err != nil {
+		return m
+	}
+	for _, u := range list {
+		name := u.Name
+		if name == "" {
+			name = u.Username
+		}
+		m[u.ID] = name
+	}
+	return m
 }
 
 // addKeysBody 兼容两种体：
@@ -438,6 +459,7 @@ func updateKey(a *app.App) gin.HandlerFunc {
 			Key     *string `json:"key"` // 提供即更换密钥
 			Enabled *int    `json:"enabled"`
 			Weight  *int    `json:"weight"`
+			UserID  *int64  `json:"user_id"` // 提供即变更归属（0 = 管理员/全局）
 		}
 		if !decode(c, &b) {
 			return
@@ -466,6 +488,18 @@ func updateKey(a *app.App) gin.HandlerFunc {
 		if b.Weight != nil && *b.Weight > 0 {
 			cur.Weight = *b.Weight
 		}
+		if b.UserID != nil {
+			if *b.UserID > 0 {
+				if owner, err := store.GetUser(a.DB, *b.UserID); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				} else if owner == nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "owner user not found"})
+					return
+				}
+			}
+			cur.UserID = *b.UserID
+		}
 		if err := store.UpdateChannelKey(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -482,7 +516,9 @@ func updateKey(a *app.App) gin.HandlerFunc {
 			}
 			cur.APIKeyEnc = enc
 		}
-		c.JSON(http.StatusOK, gin.H{"data": toKeyView(a, cur)})
+		v := toKeyView(a, cur)
+		v.OwnerName = userNames(a)[cur.UserID]
+		c.JSON(http.StatusOK, gin.H{"data": v})
 	}
 }
 

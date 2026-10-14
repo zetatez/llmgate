@@ -64,6 +64,13 @@ type Router struct {
 	db     *sql.DB
 	secret *secret.Manager
 	pen    *Penalizer
+	userID int64 // 请求方用户；0 = 管理员/全局（仅使用 user_id=0 的 Key）
+}
+
+// SetUser 指定本次路由的请求方用户（按归属过滤可用 Key）。返回自身便于链式调用。
+func (r *Router) SetUser(userID int64) *Router {
+	r.userID = userID
+	return r
 }
 
 // penaltyState 单个渠道的熔断信息。
@@ -413,6 +420,8 @@ func (r *Router) recoverChannel(ch *models.Channel) {
 }
 
 // Candidates 返回某模型可参与路由的候选（启用路由 + 启用渠道）。
+// 多租户 BYOK：仅保留"请求用户在该渠道至少有一个启用 Key"的候选，
+// 避免对用户没有任何可用 Key 的渠道做无谓尝试（用户对该模型表现为 404）。
 // 注意：不在此处排除冷却渠道——冷却/拒权由 pickByPriority 在"最后手段"阶段决定，
 // 以免模型的所有候选渠道都在冷却时误报"无可用渠道"。
 func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candidate, error) {
@@ -423,7 +432,8 @@ func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candida
 		FROM model_routes mr
 		JOIN channels ch ON ch.id = mr.channel_id
 		WHERE mr.display_name = ? AND mr.enabled = 1 AND ch.enabled = 1
-		ORDER BY mr.priority ASC, ch.priority ASC, mr.id ASC`, displayModel)
+			AND EXISTS (SELECT 1 FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.user_id = ? AND ck.enabled = 1)
+		ORDER BY mr.priority ASC, ch.priority ASC, mr.id ASC`, displayModel, r.userID)
 	if err != nil {
 		return nil, err
 	}
@@ -492,9 +502,11 @@ func (r *Router) pickBest(cands []Candidate, excludedCh map[int64]bool, displayM
 	})
 }
 
-// pickKey 从渠道启用 Key 中加权随机选一个（跳过熔断中的 Key）并解密。
+// pickKey 从"归属该用户"的渠道启用 Key 中加权随机选一个（跳过熔断中的 Key）并解密。
+// 多租户 BYOK：请求方只能使用自己录入的 Key（user_id = 请求用户），
+// 管理员/全局 Key（user_id=0）不参与普通用户路由。
 func (r *Router) pickKey(channelID int64, failedKeys map[int64]bool) (*models.ChannelKey, string, error) {
-	keys, err := store.ListChannelKeys(r.db, channelID)
+	keys, err := store.ListChannelKeysByUser(r.db, channelID, r.userID)
 	if err != nil {
 		return nil, "", err
 	}

@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -19,8 +21,69 @@ func TestMigrateIdempotent(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(1) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n < 8 {
-		t.Fatalf("expected >=8 applied migrations, got %d", n)
+	if n < 9 {
+		t.Fatalf("expected >=9 applied migrations, got %d", n)
+	}
+}
+
+func TestMigrateBackfillsLegacyTokens(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		t.Fatalf("create schema_migrations: %v", err)
+	}
+	// 只应用 1..8 的历史迁移，模拟升级前的旧库
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sql") && versionOf(e.Name()) <= 8 {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Slice(names, func(i, j int) bool { return versionOf(names[i]) < versionOf(names[j]) })
+	for _, name := range names {
+		sqlBytes, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(sqlBytes)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	// 旧式用户：只有 token_hash/token_enc
+	if _, err := db.Exec(`INSERT INTO users (name, token_hash, token_enc, status, created_at, updated_at)
+		VALUES ('old', 'legacyhash', 'legacyenc', 1, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// 升级到最新（直接应用 009，等价于 Migrate 恰好要跑的那一步）
+	sqlBytes, err := migrationsFS.ReadFile("migrations/009_multiuser.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(sqlBytes)); err != nil {
+		t.Fatalf("apply 009: %v", err)
+	}
+
+	// 旧令牌被回填进 user_tokens，升级后客户端继续可用
+	var h, enc string
+	if err := db.QueryRow(`SELECT token_hash, token_enc FROM user_tokens WHERE token_enc='legacyenc'`).Scan(&h, &enc); err != nil {
+		t.Fatalf("legacy token not backfilled: %v", err)
+	}
+	if h != "legacyhash" {
+		t.Fatalf("backfilled hash = %q, want legacyhash", h)
+	}
+	// ResolveUserToken 可解析回填令牌
+	u, tok, err := ResolveUserToken(db, "legacyhash")
+	if err != nil || u == nil || tok == nil || u.Name != "old" {
+		t.Fatalf("resolve backfilled: user=%+v token=%+v err=%v", u, tok, err)
 	}
 }
 

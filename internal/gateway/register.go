@@ -35,7 +35,7 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 
 const ctxUserKey = "llmgate.user"
 
-// gatewayAuth 校验 Bearer sk-xxx 令牌并检查额度。
+// gatewayAuth 校验 Bearer sk-xxx 令牌（user_tokens）并检查额度。
 func gatewayAuth(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerValue(c.GetHeader("Authorization"))
@@ -45,12 +45,12 @@ func gatewayAuth(a *app.App) gin.HandlerFunc {
 			})
 			return
 		}
-		user, err := store.GetUserByTokenHash(a.DB, app.HashToken(token))
+		user, utok, err := store.ResolveUserToken(a.DB, app.HashToken(token))
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "internal error", "type": "internal_error"}})
 			return
 		}
-		if user == nil || user.Status != 1 {
+		if user == nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "invalid or disabled token", "type": "unauthorized"},
 			})
@@ -61,6 +61,9 @@ func gatewayAuth(a *app.App) gin.HandlerFunc {
 				"error": gin.H{"message": "quota exceeded", "type": "quota_exceeded"},
 			})
 			return
+		}
+		if utok != nil {
+			_ = store.TouchUserToken(a.DB, utok.ID)
 		}
 		c.Set(ctxUserKey, user)
 		c.Next()
@@ -103,11 +106,14 @@ func buildPassHeaders(h http.Header) map[string]string {
 
 func handleListModels(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 只对外暴露真正可路由的模型：路由+渠道均启用（渠道停用则不可见，避免客户端选中后 404）
+		// 只对外暴露"该用户真正可路由"的模型：路由+渠道均启用，且用户在该渠道录入过启用 Key
+		userAny, _ := c.Get(ctxUserKey)
+		user := userAny.(*models.User)
 		rows, err := a.DB.Query(`
 			SELECT DISTINCT mr.display_name FROM model_routes mr
 			JOIN channels ch ON ch.id = mr.channel_id
-			WHERE mr.enabled = 1 AND ch.enabled = 1`)
+			WHERE mr.enabled = 1 AND ch.enabled = 1
+				AND EXISTS (SELECT 1 FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.user_id = ? AND ck.enabled = 1)`, user.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "query models failed"})
 			return
@@ -156,7 +162,7 @@ func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamP
 
 		userAny, _ := c.Get(ctxUserKey)
 		user := userAny.(*models.User)
-		rt := router.New(a, pen)
+		rt := router.New(a, pen).SetUser(user.ID)
 
 		logEntry := &models.RequestLog{
 			UserID:       user.ID,

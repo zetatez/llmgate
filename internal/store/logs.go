@@ -19,6 +19,7 @@ const insertLogCols = `user_id, display_model, channel_id, key_id, upstream_mode
 
 // LogFilter 请求日志查询条件。
 type LogFilter struct {
+	UserID       int64 // >0 时仅返回该用户的日志
 	DisplayModel string
 	Status       string
 	ChannelID    int64
@@ -53,6 +54,10 @@ func InsertLogs(db *sql.DB, logs []*models.RequestLog) error {
 func QueryLogs(db *sql.DB, f LogFilter) ([]*models.RequestLog, error) {
 	where := []string{"1=1"}
 	args := []any{}
+	if f.UserID > 0 {
+		where = append(where, "lg.user_id = ?")
+		args = append(args, f.UserID)
+	}
 	if f.DisplayModel != "" {
 		where = append(where, "lg.display_model = ?")
 		args = append(args, f.DisplayModel)

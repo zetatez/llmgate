@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,35 +11,41 @@ import (
 	"llmgate/internal/store"
 )
 
-// RegisterUserRoutes 挂载用户管理。
+// RegisterUserRoutes 挂载用户账号管理（管理员）。
 func RegisterUserRoutes(g *gin.RouterGroup, a *app.App) {
 	g.GET("", listUsers(a))
 	g.POST("", createUser(a))
 	g.PUT("/:id", updateUser(a))
 	g.DELETE("/:id", deleteUser(a))
-	g.GET("/:id/token", getUserToken(a))
-	g.POST("/:id/token", resetUserToken(a))
+
+	g.GET("/:id/tokens", adminListUserTokens(a))
+	g.POST("/:id/tokens", adminCreateUserToken(a))
+	g.DELETE("/:id/tokens/:tokenID", adminDeleteUserToken(a))
 }
 
 type userView struct {
-	ID         int64   `json:"id"`
-	Name       string  `json:"name"`
-	Remark     string  `json:"remark"`
-	Token      string  `json:"token"`      // 仅创建/重置时返回一次
-	TokenTail  string  `json:"token_tail"` // 令牌末4位（辨认）
-	QuotaLimit float64 `json:"quota_limit"`
-	QuotaUsed  float64 `json:"quota_used"`
-	Status     int     `json:"status"`
-	CreatedAt  int64   `json:"created_at"`
+	ID          int64   `json:"id"`
+	Name        string  `json:"name"`
+	Remark      string  `json:"remark"`
+	Username    string  `json:"username"`
+	QuotaLimit  float64 `json:"quota_limit"`
+	QuotaUsed   float64 `json:"quota_used"`
+	Status      int     `json:"status"`
+	TokenCount  int     `json:"token_count"`
+	LastLoginAt int64   `json:"last_login_at"`
+	CreatedAt   int64   `json:"created_at"`
 }
 
-func toUserView(a *app.App, u *models.User, rawToken string) userView {
-	v := userView{
-		ID: u.ID, Name: u.Name, Remark: u.Remark, Token: rawToken,
-		QuotaLimit: u.QuotaLimit, QuotaUsed: u.QuotaUsed, Status: u.Status, CreatedAt: u.CreatedAt,
+func toUserView(a *app.App, u *models.User) userView {
+	n := 0
+	if list, err := store.ListUserTokens(a.DB, u.ID); err == nil {
+		n = len(list)
 	}
-	v.TokenTail = a.TokenTail(u)
-	return v
+	return userView{
+		ID: u.ID, Name: u.Name, Remark: u.Remark, Username: u.Username,
+		QuotaLimit: u.QuotaLimit, QuotaUsed: u.QuotaUsed, Status: u.Status,
+		TokenCount: n, LastLoginAt: u.LastLoginAt, CreatedAt: u.CreatedAt,
+	}
 }
 
 func listUsers(a *app.App) gin.HandlerFunc {
@@ -50,7 +57,7 @@ func listUsers(a *app.App) gin.HandlerFunc {
 		}
 		out := make([]userView, 0, len(list))
 		for _, u := range list {
-			out = append(out, toUserView(a, u, ""))
+			out = append(out, toUserView(a, u))
 		}
 		c.JSON(http.StatusOK, gin.H{"data": out})
 	}
@@ -61,23 +68,34 @@ func createUser(a *app.App) gin.HandlerFunc {
 		var b struct {
 			Name       string  `json:"name"`
 			Remark     string  `json:"remark"`
+			Username   string  `json:"username"`
+			Password   string  `json:"password"`
 			QuotaLimit float64 `json:"quota_limit"`
 			Status     *int    `json:"status"`
 		}
 		if !decode(c, &b) {
 			return
 		}
-		if b.Name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name 必填"})
+		username := strings.TrimSpace(b.Username)
+		if username == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "username 必填"})
 			return
 		}
-		token, err := app.GenSecret(24) // 48 hex chars
-		if err != nil {
+		if len(b.Password) < 6 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "password 至少 6 位"})
+			return
+		}
+		if b.Name == "" {
+			b.Name = username
+		}
+		if existing, err := store.GetUserByUsername(a.DB, username); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		} else if existing != nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "username 已存在"})
+			return
 		}
-		plain := "sk-" + token
-		enc, err := a.Secret.Encrypt(plain)
+		pwHash, err := HashPassword(b.Password)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -86,9 +104,15 @@ func createUser(a *app.App) gin.HandlerFunc {
 		if b.Status != nil {
 			status = *b.Status
 		}
+		// 遗留字段 token_hash 为 NOT NULL UNIQUE：放一个不可用的占位哈希，鉴权已改用 user_tokens
+		placeholder, err := app.GenSecret(24)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		u := &models.User{
-			Name: b.Name, Remark: b.Remark, QuotaLimit: b.QuotaLimit,
-			TokenHash: app.HashToken(plain), TokenEnc: enc, Status: status,
+			Name: b.Name, Remark: b.Remark, Username: username, PasswordHash: pwHash,
+			TokenHash: app.HashToken("placeholder:" + placeholder), QuotaLimit: b.QuotaLimit, Status: status,
 		}
 		id, err := store.CreateUser(a.DB, u)
 		if err != nil {
@@ -96,7 +120,10 @@ func createUser(a *app.App) gin.HandlerFunc {
 			return
 		}
 		u.ID = id
-		c.JSON(http.StatusOK, gin.H{"data": toUserView(a, u, plain)})
+		if got, err := store.GetUser(a.DB, id); err == nil && got != nil {
+			u = got
+		}
+		c.JSON(http.StatusOK, gin.H{"data": toUserView(a, u)})
 	}
 }
 
@@ -107,8 +134,10 @@ func updateUser(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			Name       string   `json:"name"`
-			Remark     string   `json:"remark"`
+			Name       *string  `json:"name"`
+			Remark     *string  `json:"remark"`
+			Username   *string  `json:"username"`
+			Password   *string  `json:"password"`
 			QuotaLimit *float64 `json:"quota_limit"`
 			Status     *int     `json:"status"`
 		}
@@ -120,21 +149,63 @@ func updateUser(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
-		if b.Name != "" {
-			cur.Name = b.Name
+		if b.Name != nil {
+			cur.Name = *b.Name
 		}
-		cur.Remark = b.Remark
+		if b.Remark != nil {
+			cur.Remark = *b.Remark
+		}
 		if b.QuotaLimit != nil {
 			cur.QuotaLimit = *b.QuotaLimit
 		}
+		newUsername := strings.TrimSpace(cur.Username)
+		if b.Username != nil {
+			newUsername = strings.TrimSpace(*b.Username)
+			if newUsername == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "username 不能为空"})
+				return
+			}
+			if newUsername != cur.Username {
+				if existing, err := store.GetUserByUsername(a.DB, newUsername); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				} else if existing != nil && existing.ID != cur.ID {
+					c.JSON(http.StatusConflict, gin.H{"error": "username 已存在"})
+					return
+				}
+			}
+		}
+		cur.Username = newUsername
+		pwChanged := false
+		if b.Password != nil && *b.Password != "" {
+			if len(*b.Password) < 6 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "password 至少 6 位"})
+				return
+			}
+			hash, err := HashPassword(*b.Password)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			cur.PasswordHash = hash
+			pwChanged = true
+		}
+		disabled := false
 		if b.Status != nil {
+			if *b.Status != 1 && cur.Status == 1 {
+				disabled = true
+			}
 			cur.Status = *b.Status
 		}
 		if err := store.UpdateUser(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": toUserView(a, cur, "")})
+		// 改密或禁用后强制该用户下线
+		if pwChanged || disabled {
+			_ = store.DeleteUserSessionsForUser(a.DB, cur.ID)
+		}
+		c.JSON(http.StatusOK, gin.H{"data": toUserView(a, cur)})
 	}
 }
 
@@ -142,6 +213,11 @@ func deleteUser(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "id")
 		if !ok {
+			return
+		}
+		// 归属该用户的渠道 Key 一并移除（避免遗留无主数据）
+		if _, err := a.DB.Exec(`DELETE FROM channel_keys WHERE user_id=?`, id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if err := store.DeleteUser(a.DB, id); err != nil {
@@ -152,49 +228,99 @@ func deleteUser(a *app.App) gin.HandlerFunc {
 	}
 }
 
-func resetUserToken(a *app.App) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, ok := parseID(c, "id")
-		if !ok {
-			return
-		}
-		token, err := app.GenSecret(24)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		plain := "sk-" + token
-		enc, err := a.Secret.Encrypt(plain)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if err := store.SetUserToken(a.DB, id, app.HashToken(plain), enc); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"data": gin.H{"token": plain}})
-	}
+// ---- 管理员管理某用户的消费令牌 ----
+
+type adminTokenView struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"user_id"`
+	Name       string `json:"name"`
+	Token      string `json:"token,omitempty"` // 仅创建时返回一次
+	TokenTail  string `json:"token_tail"`
+	Enabled    int    `json:"enabled"`
+	LastUsedAt int64  `json:"last_used_at"`
+	CreatedAt  int64  `json:"created_at"`
 }
 
-// getUserToken 回显用户令牌（AES 解密），供管理员随时复制。
-// 旧格式用户已由迁移清理，不存在无 token_enc 的用户。
-func getUserToken(a *app.App) gin.HandlerFunc {
+func adminListUserTokens(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "id")
 		if !ok {
 			return
 		}
-		u, err := store.GetUser(a.DB, id)
-		if err != nil || u == nil {
+		if u, err := store.GetUser(a.DB, id); err != nil || u == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
-		plain, err := a.Secret.Decrypt(u.TokenEnc)
+		list, err := store.ListUserTokens(a.DB, id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "令牌解密失败：加密种子可能已更换"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": gin.H{"token": plain}})
+		out := make([]adminTokenView, 0, len(list))
+		for _, t := range list {
+			out = append(out, adminTokenView{ID: t.ID, UserID: t.UserID, Name: t.Name,
+				TokenTail: a.KeyTail(t.TokenEnc), Enabled: t.Enabled, LastUsedAt: t.LastUsedAt, CreatedAt: t.CreatedAt})
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+	}
+}
+
+func adminCreateUserToken(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c, "id")
+		if !ok {
+			return
+		}
+		if u, err := store.GetUser(a.DB, id); err != nil || u == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		var b struct {
+			Name string `json:"name"`
+		}
+		if !decode(c, &b) {
+			return
+		}
+		plain, enc, err := a.NewGatewayToken()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		t := &models.UserToken{UserID: id, Name: strings.TrimSpace(b.Name), TokenHash: app.HashToken(plain), TokenEnc: enc, Enabled: 1}
+		tid, err := store.CreateUserToken(a.DB, t)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		t.ID = tid
+		c.JSON(http.StatusOK, gin.H{"data": adminTokenView{ID: t.ID, UserID: t.UserID, Name: t.Name,
+			Token: plain, TokenTail: a.KeyTail(enc), Enabled: 1, CreatedAt: t.CreatedAt}})
+	}
+}
+
+func adminDeleteUserToken(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, ok := parseID(c, "id")
+		if !ok {
+			return
+		}
+		tokenID, ok := parseID(c, "tokenID")
+		if !ok {
+			return
+		}
+		t, err := store.GetUserToken(a.DB, tokenID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if t == nil || t.UserID != userID {
+			c.JSON(http.StatusNotFound, gin.H{"error": "token not found"})
+			return
+		}
+		if err := store.DeleteUserToken(a.DB, tokenID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": "deleted"})
 	}
 }

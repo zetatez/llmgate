@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { logsApi, settingsApi, usersApi } from '../api'
-import type { User, UserModelUsage } from '../api'
+import type { User, UserModelUsage, UserToken } from '../api'
 
 const list = ref<User[]>([])
 const loading = ref(false)
@@ -38,9 +38,11 @@ async function loadUsage() {
   } catch { usage.value = [] } finally { usageLoading.value = false }
 }
 
-const dialog = reactive({ visible: false, name: '', remark: '', quota_limit: 10 })
-const tokenDialog = reactive({ visible: false, token: '', title: 'Token' })
-const editDialog = reactive({ visible: false, id: 0, name: '', remark: '', quota_limit: 10, status: 1 })
+const dialog = reactive({ visible: false, username: '', password: '', name: '', remark: '', quota_limit: 10 })
+const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 10, status: 1 })
+
+// 令牌管理
+const tokenDialog = reactive({ visible: false, user: null as User | null, list: [] as UserToken[], name: '', reveal: '', loading: false })
 
 async function load() {
   loading.value = true
@@ -48,38 +50,17 @@ async function load() {
 }
 
 async function create() {
-  if (!dialog.name.trim()) { ElMessage.warning('Name is required'); return }
+  if (!dialog.username.trim()) { ElMessage.warning('Username is required'); return }
+  if (dialog.password.length < 6) { ElMessage.warning('Password must be at least 6 characters'); return }
   try {
-    const u = await usersApi.create({ name: dialog.name, remark: dialog.remark, quota_limit: +dialog.quota_limit || 0 })
+    await usersApi.create({
+      name: dialog.name, remark: dialog.remark, username: dialog.username.trim(),
+      password: dialog.password, quota_limit: +dialog.quota_limit || 0,
+    })
+    ElMessage.success('User created')
     dialog.visible = false
-    tokenDialog.token = u.token || ''
-    tokenDialog.title = 'Token'
-    tokenDialog.visible = true
     load()
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to create') }
-}
-
-// 内联复制用户令牌（不弹窗）
-async function copyUserToken(u: User) {
-  try {
-    const r = await usersApi.getToken(u.id)
-    await navigator.clipboard.writeText(r.token)
-    ElMessage.success(`Token copied${u.name ? ` (${u.name})` : ''}`)
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || 'Failed to load token')
-  }
-}
-
-async function resetToken(u: User) {
-  try {
-    await ElMessageBox.confirm(`Reset API key for "${u.name}"? The old key is invalidated and the new one is copied to your clipboard.`, 'Reset API Key', { type: 'warning' })
-  } catch { return }
-  try {
-    const r = await usersApi.resetToken(u.id)
-    await navigator.clipboard.writeText(r.token)
-    u.token_tail = r.token.slice(-4)
-    ElMessage.success('API key reset & copied')
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Reset failed') }
 }
 
 // 快捷启用/停用用户
@@ -93,15 +74,20 @@ async function toggleUserStatus(u: User) {
 }
 
 function openEdit(u: User) {
-  Object.assign(editDialog, { visible: true, id: u.id, name: u.name, remark: u.remark, quota_limit: u.quota_limit, status: u.status })
+  Object.assign(editDialog, { visible: true, id: u.id, username: u.username, password: '', name: u.name, remark: u.remark, quota_limit: u.quota_limit, status: u.status })
 }
 
 async function saveEdit() {
+  const payload: Record<string, unknown> = {
+    username: editDialog.username, name: editDialog.name, remark: editDialog.remark,
+    quota_limit: +editDialog.quota_limit || 0, status: editDialog.status,
+  }
+  if (editDialog.password) {
+    if (editDialog.password.length < 6) { ElMessage.warning('Password must be at least 6 characters'); return }
+    payload.password = editDialog.password
+  }
   try {
-    await usersApi.update(editDialog.id, {
-      name: editDialog.name, remark: editDialog.remark,
-      quota_limit: +editDialog.quota_limit || 0, status: editDialog.status,
-    })
+    await usersApi.update(editDialog.id, payload as any)
     ElMessage.success('Saved')
     editDialog.visible = false
     load()
@@ -109,7 +95,7 @@ async function saveEdit() {
 }
 
 async function remove(u: User) {
-  await ElMessageBox.confirm(`Delete user "${u.name}"? Their token will be invalidated immediately.`, 'Delete User', { type: 'warning' })
+  await ElMessageBox.confirm(`Delete user "${u.name || u.username}"? Their tokens and contributed API keys will be removed.`, 'Delete User', { type: 'warning' })
   try {
     await usersApi.remove(u.id)
     ElMessage.success('Deleted')
@@ -117,8 +103,45 @@ async function remove(u: User) {
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
 }
 
-function copyToken() {
-  navigator.clipboard?.writeText(tokenDialog.token)
+async function openTokens(u: User) {
+  tokenDialog.user = u
+  tokenDialog.name = ''
+  tokenDialog.reveal = ''
+  tokenDialog.visible = true
+  await loadTokens()
+}
+
+async function loadTokens() {
+  if (!tokenDialog.user) return
+  tokenDialog.loading = true
+  try { tokenDialog.list = await usersApi.tokens(tokenDialog.user.id) } finally { tokenDialog.loading = false }
+}
+
+async function createToken() {
+  if (!tokenDialog.user) return
+  try {
+    const t = await usersApi.createToken(tokenDialog.user.id, tokenDialog.name)
+    tokenDialog.reveal = t.token || ''
+    tokenDialog.name = ''
+    loadTokens()
+    load()
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to create token') }
+}
+
+async function removeToken(t: UserToken) {
+  if (!tokenDialog.user) return
+  try {
+    await ElMessageBox.confirm('Delete this token?', 'Delete Token', { type: 'warning' })
+  } catch { return }
+  try {
+    await usersApi.removeToken(tokenDialog.user.id, t.id)
+    loadTokens()
+    load()
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
+}
+
+function copyReveal() {
+  navigator.clipboard?.writeText(tokenDialog.reveal)
   ElMessage.success('Copied')
 }
 
@@ -142,23 +165,21 @@ onMounted(() => {
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>User Tokens</span>
+          <span>Users</span>
           <el-button type="primary" size="small" @click="dialog.visible = true">Add User</el-button>
         </div>
       </template>
       <el-table v-loading="loading" :data="list" size="small">
         <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="username" label="Username" width="130" />
         <el-table-column prop="name" label="Name" width="120" />
         <el-table-column prop="remark" label="Remark" min-width="100" show-overflow-tooltip />
-        <el-table-column label="API Key" min-width="200">
+        <el-table-column label="Tokens" width="90">
           <template #default="{ row }">
-            <div class="api-key">
-              <code class="key" :class="{ dim: !row.token_tail }">{{ row.token_tail ? `sk-****${row.token_tail}` : '(no token)' }}</code>
-              <el-button v-if="row.token_tail" link type="primary" size="small" @click="copyUserToken(row)">Copy</el-button>
-            </div>
+            <el-button link type="primary" size="small" @click="openTokens(row)">{{ row.token_count }} manage</el-button>
           </template>
         </el-table-column>
-        <el-table-column label="Quota ($)" width="140">
+        <el-table-column label="Quota ($)" width="150">
           <template #default="{ row }">
             <span>{{ row.quota_used.toFixed(4) }} / {{ row.quota_limit ? row.quota_limit : 'unlimited' }}</span>
           </template>
@@ -168,14 +189,14 @@ onMounted(() => {
             <el-switch :model-value="row.status === 1" @change="toggleUserStatus(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="220" fixed="right">
+        <el-table-column label="Actions" width="140" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">Edit</el-button>
-            <el-button link type="warning" size="small" @click="resetToken(row)">Reset</el-button>
             <el-button link type="danger" size="small" @click="remove(row)">Delete</el-button>
           </template>
         </el-table-column>
       </el-table>
+      <el-empty v-if="!loading && !list.length" description='No users yet. Click "Add User" to create an account.' />
     </el-card>
 
     <el-card shadow="never" class="mt">
@@ -204,9 +225,11 @@ onMounted(() => {
       <el-empty v-if="!usageLoading && !usage.length" description="No usage in the selected period" />
     </el-card>
 
-    <el-dialog v-model="dialog.visible" title="Add User" width="420px">
+    <el-dialog v-model="dialog.visible" title="Add User" width="440px">
       <el-form label-width="120px">
-        <el-form-item label="Name" required><el-input v-model="dialog.name" /></el-form-item>
+        <el-form-item label="Username" required><el-input v-model="dialog.username" /></el-form-item>
+        <el-form-item label="Password" required><el-input v-model="dialog.password" type="password" show-password /></el-form-item>
+        <el-form-item label="Name"><el-input v-model="dialog.name" placeholder="display name (optional)" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="dialog.remark" /></el-form-item>
         <el-form-item label="Quota limit ($)">
           <el-input-number v-model="dialog.quota_limit" :min="0" :precision="4" />
@@ -219,17 +242,10 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="tokenDialog.visible" :title="tokenDialog.title" width="500px">
-      <el-alert type="warning" title="Copy this token now. Anyone with it can use your gateway quota." :closable="false" class="mb" />
-      <el-input :model-value="tokenDialog.token" readonly>
-        <template #append>
-          <el-button @click="copyToken">Copy</el-button>
-        </template>
-      </el-input>
-    </el-dialog>
-
-    <el-dialog v-model="editDialog.visible" title="Edit User" width="420px">
+    <el-dialog v-model="editDialog.visible" title="Edit User" width="440px">
       <el-form label-width="120px">
+        <el-form-item label="Username"><el-input v-model="editDialog.username" /></el-form-item>
+        <el-form-item label="New Password"><el-input v-model="editDialog.password" type="password" show-password placeholder="leave empty to keep current" /></el-form-item>
         <el-form-item label="Name"><el-input v-model="editDialog.name" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="editDialog.remark" /></el-form-item>
         <el-form-item label="Quota limit ($)">
@@ -244,6 +260,41 @@ onMounted(() => {
         <el-button type="primary" @click="saveEdit">Save</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="tokenDialog.visible" :title="`Tokens — ${tokenDialog.user?.username || ''}`" width="560px">
+      <el-form :inline="true" class="token-add">
+        <el-form-item>
+          <el-input v-model="tokenDialog.name" placeholder="token name (optional)" style="width: 240px" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="createToken">Create Token</el-button>
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="tokenDialog.reveal" type="warning" :closable="false" class="mb">
+        <template #title>
+          Copy this token now (shown once):
+          <code class="base">{{ tokenDialog.reveal }}</code>
+          <el-button link type="primary" size="small" class="ml" @click="copyReveal">Copy</el-button>
+        </template>
+      </el-alert>
+      <el-table v-loading="tokenDialog.loading" :data="tokenDialog.list" size="small" max-height="320">
+        <el-table-column label="Name" min-width="120">
+          <template #default="{ row }">{{ row.name || 'Unnamed' }}</template>
+        </el-table-column>
+        <el-table-column label="Token" width="150">
+          <template #default="{ row }"><code class="key">sk-****{{ row.token_tail }}</code></template>
+        </el-table-column>
+        <el-table-column label="Last used" width="150">
+          <template #default="{ row }">{{ row.last_used_at ? new Date(row.last_used_at * 1000).toLocaleString() : 'never' }}</template>
+        </el-table-column>
+        <el-table-column label="Actions" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="danger" size="small" @click="removeToken(row)">Delete</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!tokenDialog.loading && !tokenDialog.list.length" description="No tokens" />
+    </el-dialog>
   </div>
 </template>
 
@@ -254,6 +305,6 @@ onMounted(() => {
 .mt { margin-top: 12px; }
 .ml { margin-left: 8px; }
 .base { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; color: #1677ff; }
-.api-key { display: flex; align-items: center; gap: 8px; }
-.api-key .key { font-size: 12px; color: #303133; background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.key { font-size: 12px; background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.token-add { margin-bottom: 4px; }
 </style>

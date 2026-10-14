@@ -40,10 +40,55 @@ export async function logoutAdmin(): Promise<void> {
   }
 }
 
-// 校验当前会话（Cookie）是否有效（登录页/路由守卫用）。
+// 校验当前管理员会话（Cookie）是否有效（登录页/路由守卫用）。
 export async function verifySession(): Promise<boolean> {
   try {
     const res = await fetch('/api/admin/ping', { credentials: 'same-origin' })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+// 用户端 API client：会话凭据同样是 httpOnly Cookie（与管理员端相互独立）。
+export const userApi = axios.create({
+  baseURL: '/api/user',
+  withCredentials: true,
+})
+
+userApi.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      window.location.href = '/login'
+    }
+    return Promise.reject(err)
+  },
+)
+
+// 登录：用户名 + 密码 → 建立用户端会话。
+export async function loginUser(username: string, password: string): Promise<boolean> {
+  try {
+    await axios.post('/api/user/login', { username, password }, { withCredentials: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// 登出：清除用户端会话 Cookie。
+export async function logoutUser(): Promise<void> {
+  try {
+    await axios.post('/api/user/logout', {}, { withCredentials: true })
+  } catch {
+    /* 忽略 */
+  }
+}
+
+// 校验当前用户端会话是否有效。
+export async function verifyUserSession(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/user/me', { credentials: 'same-origin' })
     return res.ok
   } catch {
     return false

@@ -56,6 +56,12 @@ func newTestEnv(t *testing.T, upstreamURL string) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 网关鉴权改用 user_tokens；为 testToken 建一条消费令牌
+	if _, err := store.CreateUserToken(db, &models.UserToken{
+		UserID: uid, Name: "test", TokenHash: app.HashToken(testToken), Enabled: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if upstreamURL != "" {
 		chID, err := store.CreateChannel(db, &models.Channel{
 			Name: "up", BaseURL: upstreamURL, Adapter: "openai", Priority: 0, Weight: 1,
@@ -70,7 +76,7 @@ func newTestEnv(t *testing.T, upstreamURL string) *testEnv {
 			t.Fatal(err)
 		}
 		enc, _ := a.Secret.Encrypt("sk-upstream")
-		if err := store.AddChannelKeys(db, chID, []store.KeyInput{{Encrypted: enc}}); err != nil {
+		if err := store.AddChannelKeys(db, chID, []store.KeyInput{{UserID: uid, Encrypted: enc}}); err != nil {
 			t.Fatal(err)
 		}
 	}
