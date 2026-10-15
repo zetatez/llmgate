@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -26,6 +27,9 @@ type Config struct {
 	TZ string
 	// Proxy 上游出站代理，如 socks5://127.0.0.1:7891 或 http://host:port；空=直连
 	Proxy string
+	// TrustedProxies 受信反向代理（CIDR/IP 列表）。留空=不信任任何代理（ClientIP 取 TCP 对端，
+	// 不采信 X-Forwarded-For，避免被伪造绕过登录限速）。反代部署时填写代理地址。
+	TrustedProxies []string
 }
 
 // Load 从环境变量读取配置；自动加载 ./.env（可选）。
@@ -42,6 +46,13 @@ func Load() (*Config, error) {
 		LogLevel:      getenv("LGM_LOG_LEVEL", "release"),
 		TZ:            getenv("LGM_TZ", "Asia/Shanghai"),
 		Proxy:         os.Getenv("LGM_PROXY"),
+	}
+	if raw := os.Getenv("LGM_TRUSTED_PROXIES"); raw != "" {
+		for _, p := range strings.Split(raw, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				cfg.TrustedProxies = append(cfg.TrustedProxies, p)
+			}
+		}
 	}
 	if cfg.GatewayPrefix != "/" && (cfg.GatewayPrefix == "" || cfg.GatewayPrefix[0] != '/') {
 		return nil, fmt.Errorf("LGM_GATEWAY_PREFIX 必须以 / 开头")

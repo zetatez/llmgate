@@ -88,6 +88,10 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
+	// 受信代理：留空=不信任 X-Forwarded-For（ClientIP 取 TCP 对端，防伪造绕过登录限速）。
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Fatalf("set trusted proxies: %v", err)
+	}
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})

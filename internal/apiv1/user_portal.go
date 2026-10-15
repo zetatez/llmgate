@@ -67,12 +67,12 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 
 // setUserSession 种下（或清除，maxAge<0 时）用户端 httpOnly 会话 Cookie。
 func setUserSession(c *gin.Context, token string, maxAge int) {
-	secure := c.Request.TLS != nil
+	secure := isSecureRequest(c)
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(userSessionCookie, token, maxAge, "/", "", secure, true)
 }
 
-// userLogin 校验用户名+密码并建立会话。
+// userLogin 校验用户名+密码并建立会话（带失败限速防爆破）。
 func userLogin(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var b struct {
@@ -83,15 +83,22 @@ func userLogin(a *app.App) gin.HandlerFunc {
 			return
 		}
 		username := strings.TrimSpace(b.Username)
+		key := "user|" + remoteKey(c) + "|" + strings.ToLower(username)
+		if !authLimiter.allow(key) {
+			tooManyLogins(c)
+			return
+		}
 		u, err := store.GetUserByUsername(a.DB, username)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if u == nil || u.Status != 1 || !CheckPassword(u.PasswordHash, b.Password) {
+			authLimiter.fail(key)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
 			return
 		}
+		authLimiter.reset(key)
 		token, err := app.GenSecret(32)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

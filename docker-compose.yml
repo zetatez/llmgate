@@ -12,6 +12,7 @@ services:
       - LGM_TZ=${LGM_TZ:-Asia/Shanghai}
       - TZ=${LGM_TZ:-Asia/Shanghai}
       - LGM_PROXY=${LGM_PROXY:-}
+      - LGM_TRUSTED_PROXIES=${LGM_TRUSTED_PROXIES:-}
       - LGM_DB_PATH=/data/llmgate.db
     volumes:
       - ./data:/data

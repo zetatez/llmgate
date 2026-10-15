@@ -43,20 +43,27 @@ func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any)
 
 // setAdminSession 种下（或清除，maxAge<0 时）httpOnly 会话 Cookie。
 func setAdminSession(c *gin.Context, token string, maxAge int) {
-	secure := c.Request.TLS != nil // 直接 TLS 判定；反代 TLS 场景可在边缘层改为总是 true
+	secure := isSecureRequest(c) // 直连 TLS 或反代 X-Forwarded-Proto=https
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(adminSessionCookie, token, maxAge, "/", "", secure, true)
 }
 
-// loginHandler 校验管理令牌并建立 httpOnly 会话。
+// loginHandler 校验管理令牌并建立 httpOnly 会话（带失败限速防爆破）。
 func loginHandler(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		key := "admin|" + remoteKey(c)
+		if !authLimiter.allow(key) {
+			tooManyLogins(c)
+			return
+		}
 		token := bearerToken(c.GetHeader("Authorization"))
 		hash, err := a.GetSetting("admin_token_hash")
 		if err != nil || hash == "" || token == "" || !a.VerifyToken(token, hash) {
+			authLimiter.fail(key)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid admin token"})
 			return
 		}
+		authLimiter.reset(key)
 		setAdminSession(c, token, 30*24*3600)
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "ok"}})
 	}

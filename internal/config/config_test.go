@@ -6,7 +6,7 @@ func unsetAll(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"LGM_HTTP_ADDR", "LGM_DB_PATH", "LGM_ADMIN_TOKEN", "LGM_ENCRYPT_SEED",
-		"LGM_GATEWAY_PREFIX", "LGM_LOG_LEVEL", "LGM_TZ", "LGM_PROXY",
+		"LGM_GATEWAY_PREFIX", "LGM_LOG_LEVEL", "LGM_TZ", "LGM_PROXY", "LGM_TRUSTED_PROXIES",
 	} {
 		t.Setenv(k, "")
 	}
@@ -35,6 +35,27 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.AdminToken != "" || cfg.EncryptSeed != "" || cfg.Proxy != "" {
 		t.Errorf("secrets/proxy should be empty, got %q/%q/%q", cfg.AdminToken, cfg.EncryptSeed, cfg.Proxy)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TrustedProxies default should be empty, got %v", cfg.TrustedProxies)
+	}
+}
+
+func TestLoadTrustedProxies(t *testing.T) {
+	unsetAll(t)
+	t.Setenv("LGM_TRUSTED_PROXIES", "10.0.0.1, 127.0.0.1/8 ,")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	want := []string{"10.0.0.1", "127.0.0.1/8"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("TrustedProxies = %v, want %v", cfg.TrustedProxies, want)
+	}
+	for i := range want {
+		if cfg.TrustedProxies[i] != want[i] {
+			t.Fatalf("TrustedProxies[%d] = %q, want %q", i, cfg.TrustedProxies[i], want[i])
+		}
 	}
 }
 
