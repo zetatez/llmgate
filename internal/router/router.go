@@ -462,9 +462,14 @@ func (r *Router) recordChannelFail(ch *models.Channel, forced time.Duration) boo
 }
 
 // recoverChannel 渠道恢复（清内存熔断 + DB 恢复 healthy）。
+// 成功即复位内存态连续失败计数/退避；仅当确实处于冷却（内存或 DB）时才写库，
+// 避免每次成功请求都产生一次无谓 UPDATE（单连接 SQLite 下尤为重要）。
 func (r *Router) recoverChannel(ch *models.Channel) {
+	penalized := r.pen.ChPenalized(ch.ID)
 	r.pen.ClearChan(ch.ID)
-	_ = store.SetChannelHealthy(r.db, ch.ID)
+	if penalized || ch.HealthState != "healthy" {
+		_ = store.SetChannelHealthy(r.db, ch.ID)
+	}
 }
 
 // Candidates 返回某模型可参与路由的候选（启用路由 + 启用渠道）。

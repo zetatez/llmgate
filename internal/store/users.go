@@ -7,12 +7,12 @@ import (
 	"llmgate/internal/models"
 )
 
-const userCols = `id, name, remark, username, password_hash, token_hash, token_enc, quota_limit, quota_used, status, last_login_at, created_at, updated_at`
+const userCols = `id, name, remark, username, password_hash, token_hash, token_enc, token_expires_at, token_last_used_at, quota_limit, quota_used, status, last_login_at, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*models.User, error) {
 	u := &models.User{}
 	err := row.Scan(&u.ID, &u.Name, &u.Remark, &u.Username, &u.PasswordHash, &u.TokenHash, &u.TokenEnc,
-		&u.QuotaLimit, &u.QuotaUsed, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
+		&u.TokenExpiresAt, &u.TokenLastUsed, &u.QuotaLimit, &u.QuotaUsed, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -47,9 +47,11 @@ func GetUser(db *sql.DB, id int64) (*models.User, error) {
 	return u, err
 }
 
-// GetUserByTokenHash 按遗留令牌哈希查找用户（保留兼容；网关鉴权已改用 user_tokens）。
+// GetUserByTokenHash 按消费令牌哈希查找启用且未过期的用户（网关鉴权）。
+// 无令牌（token_enc 空）或已过期的不返回。
 func GetUserByTokenHash(db *sql.DB, hash string) (*models.User, error) {
-	row := db.QueryRow(`SELECT `+userCols+` FROM users WHERE token_hash=?`, hash)
+	row := db.QueryRow(`SELECT `+userCols+` FROM users
+		WHERE token_hash=? AND token_enc != '' AND (token_expires_at = 0 OR token_expires_at > ?)`, hash, models.Now())
 	u, err := scanUser(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -73,9 +75,9 @@ func GetUserByUsername(db *sql.DB, username string) (*models.User, error) {
 // CreateUser 创建用户，返回新 id。
 func CreateUser(db *sql.DB, u *models.User) (int64, error) {
 	res, err := db.Exec(`
-		INSERT INTO users (name, remark, username, password_hash, token_hash, token_enc, quota_limit, quota_used, status, last_login_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-		u.Name, u.Remark, u.Username, u.PasswordHash, u.TokenHash, u.TokenEnc,
+		INSERT INTO users (name, remark, username, password_hash, token_hash, token_enc, token_expires_at, token_last_used_at, quota_limit, quota_used, status, last_login_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?)`,
+		u.Name, u.Remark, u.Username, u.PasswordHash, u.TokenHash, u.TokenEnc, u.TokenExpiresAt,
 		u.QuotaLimit, u.Status, u.LastLoginAt, models.Now(), models.Now())
 	if err != nil {
 		return 0, err
@@ -97,24 +99,6 @@ func UpdateUser(db *sql.DB, u *models.User) error {
 	return nil
 }
 
-// SetUserToken 重置用户名下的遗留令牌字段（兼容旧接口；新模型请用 user_tokens）。
-func SetUserToken(db *sql.DB, id int64, hash, encrypted string) error {
-	res, err := db.Exec(`UPDATE users SET token_hash=?, token_enc=?, updated_at=? WHERE id=?`, hash, encrypted, models.Now(), id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("user %d not found", id)
-	}
-	return nil
-}
-
-// TouchUserLogin 记录最近登录时间。
-func TouchUserLogin(db *sql.DB, id int64) error {
-	_, err := db.Exec(`UPDATE users SET last_login_at=? WHERE id=?`, models.Now(), id)
-	return err
-}
-
 // SetUserPassword 更新用户密码哈希（改密用）。
 func SetUserPassword(db *sql.DB, id int64, hash string) error {
 	res, err := db.Exec(`UPDATE users SET password_hash=?, updated_at=? WHERE id=?`, hash, models.Now(), id)
@@ -127,7 +111,32 @@ func SetUserPassword(db *sql.DB, id int64, hash string) error {
 	return nil
 }
 
-// DeleteUser 删除用户（user_tokens / user_sessions 级联删除）。
+// SetUserToken 设置/轮换用户的消费令牌（hash 鉴权、encrypted 回显、expiresAt 过期时间）。
+func SetUserToken(db *sql.DB, id int64, hash, encrypted string, expiresAt int64) error {
+	res, err := db.Exec(`UPDATE users SET token_hash=?, token_enc=?, token_expires_at=?, updated_at=? WHERE id=?`,
+		hash, encrypted, expiresAt, models.Now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user %d not found", id)
+	}
+	return nil
+}
+
+// TouchUserToken 更新令牌最近使用时间。
+func TouchUserToken(db *sql.DB, id int64) error {
+	_, err := db.Exec(`UPDATE users SET token_last_used_at=? WHERE id=?`, models.Now(), id)
+	return err
+}
+
+// TouchUserLogin 记录最近登录时间。
+func TouchUserLogin(db *sql.DB, id int64) error {
+	_, err := db.Exec(`UPDATE users SET last_login_at=? WHERE id=?`, models.Now(), id)
+	return err
+}
+
+// DeleteUser 删除用户（user_sessions 级联删除；其贡献的 channel_keys 由调用方清理）。
 func DeleteUser(db *sql.DB, id int64) error {
 	res, err := db.Exec(`DELETE FROM users WHERE id=?`, id)
 	if err != nil {

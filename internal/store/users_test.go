@@ -64,15 +64,15 @@ func TestUserCRUD(t *testing.T) {
 		t.Fatalf("updated user mismatch: %+v", up)
 	}
 
-	// 重置令牌。
-	if err := SetUserToken(db, id, "h2", "e2"); err != nil {
+	// 重置令牌（含过期时间）。
+	if err := SetUserToken(db, id, "h2", "e2", 12345); err != nil {
 		t.Fatalf("set user token: %v", err)
 	}
-	if err := SetUserToken(db, 99999, "h", "e"); err == nil {
+	if err := SetUserToken(db, 99999, "h", "e", 0); err == nil {
 		t.Fatal("expected error setting token on missing user")
 	}
 	ut, _ := GetUser(db, id)
-	if ut.TokenHash != "h2" || ut.TokenEnc != "e2" {
+	if ut.TokenHash != "h2" || ut.TokenEnc != "e2" || ut.TokenExpiresAt != 12345 {
 		t.Fatalf("token not reset: %+v", ut)
 	}
 

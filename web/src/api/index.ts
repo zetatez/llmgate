@@ -38,10 +38,11 @@ export const usersApi = {
   update: (id: number, d: Partial<User> & { password?: string }) => adminApi.put<DataEnvelope<User>>(`/users/${id}`, d).then(unwrap),
   remove: (id: number) => adminApi.delete(`/users/${id}`),
   overview: (id: number) => adminApi.get<DataEnvelope<AdminUserDetail>>(`/users/${id}/overview`).then(unwrap),
-  tokens: (id: number) => adminApi.get<DataEnvelope<UserToken[]>>(`/users/${id}/tokens`).then(unwrap),
-  createToken: (id: number, name: string, expiresInDays?: number) =>
-    adminApi.post<DataEnvelope<UserToken>>(`/users/${id}/tokens`, { name, expires_in_days: expiresInDays ?? 0 }).then(unwrap),
-  removeToken: (id: number, tokenId: number) => adminApi.delete(`/users/${id}/tokens/${tokenId}`),
+  token: (id: number) => adminApi.get<DataEnvelope<UserToken>>(`/users/${id}/token`).then(unwrap),
+  upsertToken: (id: number, d: { name?: string; expires_in_days?: number }) =>
+    adminApi.put<DataEnvelope<UserToken>>(`/users/${id}/token`, d).then(unwrap),
+  rotateToken: (id: number) => adminApi.post<DataEnvelope<UserToken>>(`/users/${id}/token/rotate`, {}).then(unwrap),
+  removeToken: (id: number) => adminApi.delete(`/users/${id}/token`),
 }
 
 export const portalApi = {
@@ -59,12 +60,11 @@ export const portalApi = {
   changePassword: (currentPassword: string, newPassword: string) =>
     userApi.put<DataEnvelope<string>>('/password', { current_password: currentPassword, new_password: newPassword }).then(unwrap),
   logoutAll: () => userApi.post<DataEnvelope<string>>('/logout-all', {}).then(unwrap),
-  tokens: () => userApi.get<DataEnvelope<UserToken[]>>('/tokens').then(unwrap),
-  createToken: (name: string, expiresInDays?: number) =>
-    userApi.post<DataEnvelope<UserToken>>('/tokens', { name, expires_in_days: expiresInDays ?? 0 }).then(unwrap),
-  updateToken: (id: number, d: { name?: string; enabled?: number; expires_in_days?: number }) =>
-    userApi.put<DataEnvelope<UserToken>>(`/tokens/${id}`, d).then(unwrap),
-  removeToken: (id: number) => userApi.delete(`/tokens/${id}`),
+  token: () => userApi.get<DataEnvelope<UserToken>>('/token').then(unwrap),
+  upsertToken: (d: { name?: string; expires_in_days?: number }) =>
+    userApi.put<DataEnvelope<UserToken>>('/token', d).then(unwrap),
+  rotateToken: () => userApi.post<DataEnvelope<UserToken>>('/token/rotate', {}).then(unwrap),
+  removeToken: () => userApi.delete('/token'),
   logs: (params: { limit?: number; offset?: number } = {}) =>
     userApi.get<DataEnvelope<RequestLog[]>>('/logs', { params }).then(unwrap),
   logsCount: () => userApi.get<DataEnvelope<number>>('/logs/count').then(unwrap),

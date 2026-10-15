@@ -50,16 +50,11 @@ func newTestEnv(t *testing.T, upstreamURL string) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tokenEnc, _ := a.Secret.Encrypt(testToken)
 	uid, err := store.CreateUser(db, &models.User{
-		Name: "tester", TokenHash: app.HashToken(testToken), QuotaLimit: 0, QuotaUsed: 0, Status: 1,
+		Name: "tester", TokenHash: app.HashToken(testToken), TokenEnc: tokenEnc, QuotaLimit: 0, QuotaUsed: 0, Status: 1,
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	// 网关鉴权改用 user_tokens；为 testToken 建一条消费令牌
-	if _, err := store.CreateUserToken(db, &models.UserToken{
-		UserID: uid, Name: "test", TokenHash: app.HashToken(testToken), Enabled: 1,
-	}); err != nil {
 		t.Fatal(err)
 	}
 	if upstreamURL != "" {

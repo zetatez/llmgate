@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { logsApi, settingsApi, usersApi } from '../api'
-import type { AdminUserDetail, User, UserModelUsage, UserToken } from '../api'
+import type { AdminUserDetail, User, UserModelUsage } from '../api'
 
 const list = ref<User[]>([])
 const loading = ref(false)
@@ -40,9 +40,6 @@ async function loadUsage() {
 
 const dialog = reactive({ visible: false, username: '', password: '', name: '', remark: '', quota_limit: 10 })
 const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 10, status: 1 })
-
-// 令牌管理
-const tokenDialog = reactive({ visible: false, user: null as User | null, list: [] as UserToken[], name: '', days: 0, reveal: '', loading: false })
 
 async function load() {
   loading.value = true
@@ -103,31 +100,55 @@ async function remove(u: User) {
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
 }
 
-async function openTokens(u: User) {
-  tokenDialog.user = u
-  tokenDialog.name = ''
-  tokenDialog.days = 0
-  tokenDialog.reveal = ''
-  tokenDialog.visible = true
-  await loadTokens()
-}
-
-async function loadTokens() {
-  if (!tokenDialog.user) return
-  tokenDialog.loading = true
-  try { tokenDialog.list = await usersApi.tokens(tokenDialog.user.id) } finally { tokenDialog.loading = false }
-}
-
-async function createToken() {
-  if (!tokenDialog.user) return
+// 令牌操作（一人一个，直接在用户行内操作）
+async function createUserToken(u: User) {
   try {
-    const t = await usersApi.createToken(tokenDialog.user.id, tokenDialog.name, tokenDialog.days)
-    tokenDialog.reveal = t.token || ''
-    tokenDialog.name = ''
-    loadTokens()
+    const t = await usersApi.upsertToken(u.id, { expires_in_days: 0 })
+    if (t.token) {
+      await navigator.clipboard?.writeText(t.token)
+      ElMessage.success('Token created & copied')
+    } else {
+      ElMessage.success('Token created')
+    }
     load()
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to create token') }
 }
+
+async function copyUserToken(u: User) {
+  try {
+    const t = await usersApi.token(u.id)
+    if (t.token) {
+      await navigator.clipboard?.writeText(t.token)
+      ElMessage.success('Token copied')
+    } else {
+      ElMessage.warning('No token')
+    }
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to load token') }
+}
+
+async function rotateUserToken(u: User) {
+  try {
+    await ElMessageBox.confirm('Regenerate this token? The old token stops working immediately.', 'Regenerate Token', { type: 'warning' })
+  } catch { return }
+  try {
+    const t = await usersApi.rotateToken(u.id)
+    if (t.token) await navigator.clipboard?.writeText(t.token)
+    ElMessage.success('Token regenerated & copied')
+    load()
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to regenerate') }
+}
+
+async function revokeUserToken(u: User) {
+  try {
+    await ElMessageBox.confirm('Revoke this token? Clients using it lose access immediately.', 'Revoke Token', { type: 'warning' })
+  } catch { return }
+  try {
+    await usersApi.removeToken(u.id)
+    ElMessage.success('Token revoked')
+    load()
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to revoke') }
+}
+
 
 // 用户详情（Key / 令牌 / 用量）
 const details = reactive({ visible: false, loading: false, data: null as AdminUserDetail | null })
@@ -148,23 +169,6 @@ async function openDetails(u: User) {
 
 function money(v?: number) {
   return (v ?? 0).toFixed(4)
-}
-
-async function removeToken(t: UserToken) {
-  if (!tokenDialog.user) return
-  try {
-    await ElMessageBox.confirm('Delete this token?', 'Delete Token', { type: 'warning' })
-  } catch { return }
-  try {
-    await usersApi.removeToken(tokenDialog.user.id, t.id)
-    loadTokens()
-    load()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
-}
-
-function copyReveal() {
-  navigator.clipboard?.writeText(tokenDialog.reveal)
-  ElMessage.success('Copied')
 }
 
 onMounted(() => {
@@ -196,9 +200,16 @@ onMounted(() => {
         <el-table-column prop="username" label="Username" width="130" />
         <el-table-column prop="name" label="Name" width="120" />
         <el-table-column prop="remark" label="Remark" min-width="100" show-overflow-tooltip />
-        <el-table-column label="Tokens" width="90">
+        <el-table-column label="Token" min-width="260">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openTokens(row)">{{ row.token_count }} manage</el-button>
+            <template v-if="row.has_token">
+              <code class="key">sk-****{{ row.token_tail }}</code>
+              <el-button link type="primary" size="small" @click="copyUserToken(row)">Copy</el-button>
+              <el-button link type="warning" size="small" @click="rotateUserToken(row)">Regenerate</el-button>
+              <el-button link type="danger" size="small" @click="revokeUserToken(row)">Revoke</el-button>
+              <div class="tip">expires: {{ row.token_expires_at ? new Date(row.token_expires_at * 1000).toLocaleString() : 'never' }}</div>
+            </template>
+            <el-button v-else link type="primary" size="small" @click="createUserToken(row)">Create</el-button>
           </template>
         </el-table-column>
         <el-table-column label="Quota ($)" width="150">
@@ -284,52 +295,6 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="tokenDialog.visible" :title="`Tokens — ${tokenDialog.user?.username || ''}`" width="560px">
-      <el-form :inline="true" class="token-add">
-        <el-form-item>
-          <el-input v-model="tokenDialog.name" placeholder="token name (optional)" style="width: 200px" />
-        </el-form-item>
-        <el-form-item>
-          <el-select v-model="tokenDialog.days" style="width: 130px">
-            <el-option label="Never" :value="0" />
-            <el-option label="7 days" :value="7" />
-            <el-option label="30 days" :value="30" />
-            <el-option label="90 days" :value="90" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="createToken">Create Token</el-button>
-        </el-form-item>
-      </el-form>
-      <el-alert v-if="tokenDialog.reveal" type="warning" :closable="false" class="mb">
-        <template #title>
-          Copy this token now (shown once):
-          <code class="base">{{ tokenDialog.reveal }}</code>
-          <el-button link type="primary" size="small" class="ml" @click="copyReveal">Copy</el-button>
-        </template>
-      </el-alert>
-      <el-table v-loading="tokenDialog.loading" :data="tokenDialog.list" size="small" max-height="320">
-        <el-table-column label="Name" min-width="110">
-          <template #default="{ row }">{{ row.name || 'Unnamed' }}</template>
-        </el-table-column>
-        <el-table-column label="Token" width="140">
-          <template #default="{ row }"><code class="key">sk-****{{ row.token_tail }}</code></template>
-        </el-table-column>
-        <el-table-column label="Last used" width="150">
-          <template #default="{ row }">{{ row.last_used_at ? new Date(row.last_used_at * 1000).toLocaleString() : 'never' }}</template>
-        </el-table-column>
-        <el-table-column label="Expires" width="150">
-          <template #default="{ row }">{{ row.expires_at ? new Date(row.expires_at * 1000).toLocaleString() : 'never' }}</template>
-        </el-table-column>
-        <el-table-column label="Actions" width="90" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="danger" size="small" @click="removeToken(row)">Delete</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!tokenDialog.loading && !tokenDialog.list.length" description="No tokens" />
-    </el-dialog>
-
     <el-dialog v-model="details.visible" :title="`User · ${details.data?.user.username || ''}`" width="760px">
       <div v-loading="details.loading">
         <template v-if="details.data">
@@ -357,14 +322,15 @@ onMounted(() => {
               </el-table>
               <el-empty v-if="!details.data.keys.length" description="No keys" />
             </el-tab-pane>
-            <el-tab-pane :label="`Tokens (${details.data.tokens.length})`">
-              <el-table :data="details.data.tokens" size="small" max-height="260">
-                <el-table-column label="Name" min-width="100"><template #default="{ row }">{{ row.name || 'Unnamed' }}</template></el-table-column>
-                <el-table-column label="Token" width="130"><template #default="{ row }"><code class="key">sk-****{{ row.token_tail }}</code></template></el-table-column>
-                <el-table-column label="Expires" width="150"><template #default="{ row }">{{ row.expires_at ? new Date(row.expires_at * 1000).toLocaleString() : 'never' }}</template></el-table-column>
-                <el-table-column label="Last used" width="150"><template #default="{ row }">{{ row.last_used_at ? new Date(row.last_used_at * 1000).toLocaleString() : 'never' }}</template></el-table-column>
-              </el-table>
-              <el-empty v-if="!details.data.tokens.length" description="No tokens" />
+            <el-tab-pane label="Token">
+              <template v-if="details.data.token.has_token">
+                <el-descriptions :column="1" border size="small">
+                  <el-descriptions-item label="Token"><code class="key">sk-****{{ details.data.token.token_tail }}</code></el-descriptions-item>
+                  <el-descriptions-item label="Expires">{{ details.data.token.expires_at ? new Date(details.data.token.expires_at * 1000).toLocaleString() : 'never' }}</el-descriptions-item>
+                  <el-descriptions-item label="Last used">{{ details.data.token.last_used_at ? new Date(details.data.token.last_used_at * 1000).toLocaleString() : 'never' }}</el-descriptions-item>
+                </el-descriptions>
+              </template>
+              <el-empty v-else description="No token" />
             </el-tab-pane>
             <el-tab-pane label="Usage by model (30d)">
               <el-table :data="details.data.by_model" size="small" max-height="260">
@@ -390,5 +356,8 @@ onMounted(() => {
 .ml { margin-left: 8px; }
 .base { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; color: #1677ff; }
 .key { font-size: 12px; background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.token { display: inline-flex; align-items: center; gap: 8px; }
+.token code { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.token-form { margin-top: 8px; }
 .token-add { margin-bottom: 4px; }
 </style>

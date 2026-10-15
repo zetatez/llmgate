@@ -225,51 +225,71 @@ func TestUserPortalTokens(t *testing.T) {
 	aCookie := userLoginCookie(t, r, "alice", "secret1")
 	bCookie := userLoginCookie(t, r, "bob", "secret1")
 
-	// 创建令牌 → 一次性明文
-	w := doCookie(r, http.MethodPost, "/api/user/tokens", `{"name":"app"}`, aCookie)
+	// 初始无令牌
+	w := doCookie(r, http.MethodGet, "/api/user/token", "", aCookie)
+	var gt struct {
+		Data tokenView `json:"data"`
+	}
+	decodeBody(t, w, &gt)
+	if gt.Data.HasToken {
+		t.Fatalf("alice should have no token initially, got %+v", gt.Data)
+	}
+
+	// 创建/更新（PUT）→ 返回明文
+	w = doCookie(r, http.MethodPut, "/api/user/token", `{"expires_in_days":7}`, aCookie)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create token = %d, body=%s", w.Code, w.Body.String())
 	}
 	var created struct {
-		Data userTokenView `json:"data"`
+		Data tokenView `json:"data"`
 	}
 	decodeBody(t, w, &created)
-	if !strings.HasPrefix(created.Data.Token, "sk-") || created.Data.TokenTail != created.Data.Token[len(created.Data.Token)-4:] {
+	if !created.Data.HasToken || !strings.HasPrefix(created.Data.Token, "sk-") || created.Data.TokenTail != created.Data.Token[len(created.Data.Token)-4:] {
 		t.Fatalf("create token payload = %+v", created.Data)
 	}
-	tokID := created.Data.ID
-
-	// A 列表可见，B 列表为空
-	type tokList struct {
-		Data []userTokenView `json:"data"`
-	}
-	wa := doCookie(r, http.MethodGet, "/api/user/tokens", "", aCookie)
-	var ta tokList
-	decodeBody(t, wa, &ta)
-	if len(ta.Data) != 1 || ta.Data[0].Name != "app" {
-		t.Fatalf("alice tokens = %+v", ta.Data)
-	}
-	wb := doCookie(r, http.MethodGet, "/api/user/tokens", "", bCookie)
-	var tb tokList
-	decodeBody(t, wb, &tb)
-	if len(tb.Data) != 0 {
-		t.Fatalf("bob tokens should be empty, got %+v", tb.Data)
+	if created.Data.ExpiresAt == 0 {
+		t.Fatal("expiry should be set")
 	}
 
-	// B 不能删 A 的令牌 → 404
-	if w := doCookie(r, http.MethodDelete, fmt.Sprintf("/api/user/tokens/%d", tokID), "", bCookie); w.Code != http.StatusNotFound {
-		t.Fatalf("bob delete alice token = %d, want 404", w.Code)
+	// 再次 PUT 不轮换密钥
+	w = doCookie(r, http.MethodPut, "/api/user/token", `{"expires_in_days":30}`, aCookie)
+	var upd struct {
+		Data tokenView `json:"data"`
 	}
-	// A 可改名称与启用状态
-	if w := doCookie(r, http.MethodPut, fmt.Sprintf("/api/user/tokens/%d", tokID), `{"name":"renamed"}`, aCookie); w.Code != http.StatusOK {
-		t.Fatalf("rename token = %d, body=%s", w.Code, w.Body.String())
+	decodeBody(t, w, &upd)
+	if upd.Data.Token != created.Data.Token || upd.Data.ExpiresAt == 0 {
+		t.Fatalf("upsert should keep secret: %+v", upd.Data)
 	}
-	if w := doCookie(r, http.MethodPut, fmt.Sprintf("/api/user/tokens/%d", tokID), `{"enabled":0}`, aCookie); w.Code != http.StatusOK {
-		t.Fatalf("update token = %d, body=%s", w.Code, w.Body.String())
+
+	// B 无令牌
+	wb := doCookie(r, http.MethodGet, "/api/user/token", "", bCookie)
+	decodeBody(t, wb, &gt)
+	if gt.Data.HasToken {
+		t.Fatalf("bob should have no token, got %+v", gt.Data)
 	}
-	// A 可删除
-	if w := doCookie(r, http.MethodDelete, fmt.Sprintf("/api/user/tokens/%d", tokID), "", aCookie); w.Code != http.StatusOK {
+
+	// 轮换：密钥变化
+	w = doCookie(r, http.MethodPost, "/api/user/token/rotate", "", aCookie)
+	var rot struct {
+		Data tokenView `json:"data"`
+	}
+	decodeBody(t, w, &rot)
+	if rot.Data.Token == created.Data.Token {
+		t.Fatal("rotate should change the secret")
+	}
+
+	// B 删除自己的令牌是幂等的（本来就没有）→ 200
+	if w := doCookie(r, http.MethodDelete, "/api/user/token", "", bCookie); w.Code != http.StatusOK {
+		t.Fatalf("bob delete own (none) = %d", w.Code)
+	}
+	// A 可吊销
+	if w := doCookie(r, http.MethodDelete, "/api/user/token", "", aCookie); w.Code != http.StatusOK {
 		t.Fatalf("delete token = %d, body=%s", w.Code, w.Body.String())
+	}
+	w = doCookie(r, http.MethodGet, "/api/user/token", "", aCookie)
+	decodeBody(t, w, &gt)
+	if gt.Data.HasToken {
+		t.Fatalf("alice token should be gone, got %+v", gt.Data)
 	}
 }
 
@@ -388,29 +408,42 @@ func TestAdminUserTokenEndpoints(t *testing.T) {
 		t.Fatalf("empty username update = %d, want 400", w.Code)
 	}
 
-	// 管理员为用户创建令牌 → 一次性明文
-	w := do(r, http.MethodPost, basePath+"/users/"+fmt.Sprint(uid)+"/tokens", `{"name":"a"}`, testAdminToken, "")
+	// 管理员为用户创建令牌（一人一个，返回明文）
+	w := do(r, http.MethodPut, basePath+"/users/"+fmt.Sprint(uid)+"/token", `{"expires_in_days":30}`, testAdminToken, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("admin create token = %d, body=%s", w.Code, w.Body.String())
 	}
 	var cr struct {
-		Data adminTokenView `json:"data"`
+		Data tokenView `json:"data"`
 	}
 	decodeBody(t, w, &cr)
-	if !strings.HasPrefix(cr.Data.Token, "sk-") {
+	if !cr.Data.HasToken || !strings.HasPrefix(cr.Data.Token, "sk-") {
 		t.Fatalf("admin create token payload = %+v", cr.Data)
 	}
-
-	// 删除时用户不匹配 → 404
-	if w := do(r, http.MethodDelete, basePath+"/users/"+fmt.Sprint(uid2)+"/tokens/"+fmt.Sprint(cr.Data.ID), "", testAdminToken, ""); w.Code != http.StatusNotFound {
-		t.Fatalf("mismatched token delete = %d, want 404", w.Code)
+	// 其它用户没有令牌（隔离）
+	w = do(r, http.MethodGet, basePath+"/users/"+fmt.Sprint(uid2)+"/token", "", testAdminToken, "")
+	var gt struct {
+		Data tokenView `json:"data"`
 	}
-	// 不存在用户创建令牌 → 404
-	if w := do(r, http.MethodPost, basePath+"/users/9999/tokens", `{}`, testAdminToken, ""); w.Code != http.StatusNotFound {
+	decodeBody(t, w, &gt)
+	if gt.Data.HasToken {
+		t.Fatalf("bob should have no token, got %+v", gt.Data)
+	}
+	// 不存在用户 → 404
+	if w := do(r, http.MethodPut, basePath+"/users/9999/token", `{}`, testAdminToken, ""); w.Code != http.StatusNotFound {
 		t.Fatalf("token for missing user = %d, want 404", w.Code)
 	}
-	// 正确删除 → 200
-	if w := do(r, http.MethodDelete, basePath+"/users/"+fmt.Sprint(uid)+"/tokens/"+fmt.Sprint(cr.Data.ID), "", testAdminToken, ""); w.Code != http.StatusOK {
+	// 轮换 → 200，密钥变化
+	w = do(r, http.MethodPost, basePath+"/users/"+fmt.Sprint(uid)+"/token/rotate", "", testAdminToken, "")
+	var rot struct {
+		Data tokenView `json:"data"`
+	}
+	decodeBody(t, w, &rot)
+	if rot.Data.Token == cr.Data.Token {
+		t.Fatal("rotate should change the secret")
+	}
+	// 吊销 → 200
+	if w := do(r, http.MethodDelete, basePath+"/users/"+fmt.Sprint(uid)+"/token", "", testAdminToken, ""); w.Code != http.StatusOK {
 		t.Fatalf("admin delete token = %d, body=%s", w.Code, w.Body.String())
 	}
 }

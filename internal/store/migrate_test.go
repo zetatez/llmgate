@@ -63,8 +63,8 @@ func TestMigrateBackfillsLegacyTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 升级到最新（应用 009/010，等价于 Migrate 恰好要跑的那几步）
-	for _, name := range []string{"009_multiuser.sql", "010_sessions.sql"} {
+	// 升级到最新（应用 009/010/011，等价于 Migrate 恰好要跑的那几步）
+	for _, name := range []string{"009_multiuser.sql", "010_sessions.sql", "011_token_in_users.sql"} {
 		sqlBytes, err := migrationsFS.ReadFile("migrations/" + name)
 		if err != nil {
 			t.Fatal(err)
@@ -75,17 +75,18 @@ func TestMigrateBackfillsLegacyTokens(t *testing.T) {
 	}
 
 	// 旧令牌被回填进 user_tokens，升级后客户端继续可用
+	// 011 后令牌回到 users 表：直接查 users
 	var h, enc string
-	if err := db.QueryRow(`SELECT token_hash, token_enc FROM user_tokens WHERE token_enc='legacyenc'`).Scan(&h, &enc); err != nil {
-		t.Fatalf("legacy token not backfilled: %v", err)
+	if err := db.QueryRow(`SELECT token_hash, token_enc FROM users WHERE name='old'`).Scan(&h, &enc); err != nil {
+		t.Fatalf("legacy token not moved to users: %v", err)
 	}
-	if h != "legacyhash" {
-		t.Fatalf("backfilled hash = %q, want legacyhash", h)
+	if h != "legacyhash" || enc != "legacyenc" {
+		t.Fatalf("token after migration = %q/%q, want legacyhash/legacyenc", h, enc)
 	}
-	// ResolveUserToken 可解析回填令牌
-	u, tok, err := ResolveUserToken(db, "legacyhash")
-	if err != nil || u == nil || tok == nil || u.Name != "old" {
-		t.Fatalf("resolve backfilled: user=%+v token=%+v err=%v", u, tok, err)
+	// GetUserByTokenHash 可解析迁移后的令牌
+	u, err := GetUserByTokenHash(db, "legacyhash")
+	if err != nil || u == nil || u.Name != "old" {
+		t.Fatalf("resolve migrated token: user=%+v err=%v", u, err)
 	}
 }
 

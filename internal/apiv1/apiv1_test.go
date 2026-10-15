@@ -281,8 +281,8 @@ func TestUsersCRUD(t *testing.T) {
 	if created.Data.Username != "alice" || created.Data.Status != 1 {
 		t.Fatalf("create user result = %+v", created.Data)
 	}
-	if created.Data.TokenCount != 0 {
-		t.Fatalf("new user should have no token, got %d", created.Data.TokenCount)
+	if created.Data.HasToken {
+		t.Fatalf("new user should have no token, got %+v", created.Data)
 	}
 	uid := created.Data.ID
 
@@ -320,35 +320,53 @@ func TestUsersCRUD(t *testing.T) {
 		t.Fatalf("update bad id = %d, want 400", w.Code)
 	}
 
-	// 消费令牌：列表为空 → 创建（一次性明文）→ 删除
-	w = do(r, http.MethodGet, basePath+"/users/"+fmt.Sprint(uid)+"/tokens", "", tok, "")
+	// 唯一消费令牌：初始无 → 创建（明文）→ GET 同一条 → 轮换 → 吊销
+	w = do(r, http.MethodGet, basePath+"/users/"+fmt.Sprint(uid)+"/token", "", tok, "")
 	if w.Code != http.StatusOK {
-		t.Fatalf("list tokens = %d, body=%s", w.Code, w.Body.String())
+		t.Fatalf("get token = %d, body=%s", w.Code, w.Body.String())
 	}
-	var tl struct {
-		Data []adminTokenView `json:"data"`
+	var gt struct {
+		Data tokenView `json:"data"`
 	}
-	decodeBody(t, w, &tl)
-	if len(tl.Data) != 0 {
-		t.Fatalf("expected no tokens, got %d", len(tl.Data))
+	decodeBody(t, w, &gt)
+	if gt.Data.HasToken {
+		t.Fatalf("expected no token initially, got %+v", gt.Data)
 	}
-	w = do(r, http.MethodPost, basePath+"/users/"+fmt.Sprint(uid)+"/tokens", `{"name":"app"}`, tok, "")
+	w = do(r, http.MethodPut, basePath+"/users/"+fmt.Sprint(uid)+"/token", `{"expires_in_days":30}`, tok, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("create token = %d, body=%s", w.Code, w.Body.String())
 	}
 	var nt struct {
-		Data adminTokenView `json:"data"`
+		Data tokenView `json:"data"`
 	}
 	decodeBody(t, w, &nt)
-	if !strings.HasPrefix(nt.Data.Token, "sk-") || nt.Data.TokenTail != nt.Data.Token[len(nt.Data.Token)-4:] {
+	if !nt.Data.HasToken || !strings.HasPrefix(nt.Data.Token, "sk-") || nt.Data.TokenTail != nt.Data.Token[len(nt.Data.Token)-4:] {
 		t.Fatalf("create token result = %+v", nt.Data)
 	}
-	// 不存在用户的令牌列表 → 404
-	if w := do(r, http.MethodGet, basePath+"/users/9999/tokens", "", tok, ""); w.Code != http.StatusNotFound {
-		t.Fatalf("list tokens missing user = %d, want 404", w.Code)
+	if nt.Data.ExpiresAt == 0 {
+		t.Fatal("expiry should be set")
 	}
-	// 删除令牌
-	if w := do(r, http.MethodDelete, basePath+"/users/"+fmt.Sprint(uid)+"/tokens/"+fmt.Sprint(nt.Data.ID), "", tok, ""); w.Code != http.StatusOK {
+	// GET 返回同一条令牌
+	w = do(r, http.MethodGet, basePath+"/users/"+fmt.Sprint(uid)+"/token", "", tok, "")
+	decodeBody(t, w, &gt)
+	if gt.Data.Token != nt.Data.Token {
+		t.Fatalf("get token mismatch: %+v", gt.Data)
+	}
+	// 轮换密钥
+	w = do(r, http.MethodPost, basePath+"/users/"+fmt.Sprint(uid)+"/token/rotate", "", tok, "")
+	var rot struct {
+		Data tokenView `json:"data"`
+	}
+	decodeBody(t, w, &rot)
+	if rot.Data.Token == nt.Data.Token {
+		t.Fatal("rotate should change the secret")
+	}
+	// 不存在用户 → 404
+	if w := do(r, http.MethodGet, basePath+"/users/9999/token", "", tok, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("token missing user = %d, want 404", w.Code)
+	}
+	// 吊销
+	if w := do(r, http.MethodDelete, basePath+"/users/"+fmt.Sprint(uid)+"/token", "", tok, ""); w.Code != http.StatusOK {
 		t.Fatalf("delete token = %d, body=%s", w.Code, w.Body.String())
 	}
 

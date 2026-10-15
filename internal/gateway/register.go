@@ -45,12 +45,12 @@ func gatewayAuth(a *app.App) gin.HandlerFunc {
 			})
 			return
 		}
-		user, utok, err := store.ResolveUserToken(a.DB, app.HashToken(token))
+		user, err := store.GetUserByTokenHash(a.DB, app.HashToken(token))
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "internal error", "type": "internal_error"}})
 			return
 		}
-		if user == nil {
+		if user == nil || user.Status != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "invalid or disabled token", "type": "unauthorized"},
 			})
@@ -62,9 +62,7 @@ func gatewayAuth(a *app.App) gin.HandlerFunc {
 			})
 			return
 		}
-		if utok != nil {
-			touchUserToken(a.DB, utok.ID)
-		}
+		touchUserToken(a.DB, user.ID)
 		c.Set(ctxUserKey, user)
 		c.Next()
 	}

@@ -44,7 +44,7 @@ curl -o /dev/null -w '%{http_code}\n' http://<服务器IP>:3210/   # → 200（�
 4. **Users**：创建用户账号（用户名 + 密码）
 5. 用户打开同一地址，登录页选 **User**，用账号登录后：
    - 在 **My API Keys** 录入自己的上游 API Key（选择渠道）
-   - 在 **My Tokens** 创建 `sk-xxx` 消费令牌
+   - 在 **My Tokens** 创建自己的 `sk-` 消费令牌（每人一个，可设置过期/随时轮换）
 6. 在任意 OpenAI 兼容客户端中配置：
    - **Base URL**: `http://<服务器IP>:3210/v1`
    - **API Key**: 该用户创建的 `sk-xxx`

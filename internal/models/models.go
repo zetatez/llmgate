@@ -2,35 +2,24 @@ package models
 
 import "time"
 
-// User 为平台用户账号：可登录（username/password_hash），通过 user_tokens 消费网关。
-// token_hash/token_enc 为历史遗留字段（旧版单令牌模型），不再用于鉴权，仅保留列约束。
+// User 为平台用户账号：可登录（username/password_hash），并持有一个网关消费令牌。
+// 令牌直接存于本表（token_hash 鉴权 / token_enc 加密回显），一人一个。
 type User struct {
-	ID           int64   `json:"id"`
-	Name         string  `json:"name"`
-	Remark       string  `json:"remark"`
-	Username     string  `json:"username"` // 登录名（空 = 未分配，不能登录）
-	PasswordHash string  `json:"-"`        // bcrypt 哈希，不对外
-	TokenHash    string  `json:"-"`        // 遗留字段，不再用于鉴权
-	TokenEnc     string  `json:"-"`        // 遗留字段
-	QuotaLimit   float64 `json:"quota_limit"`
-	QuotaUsed    float64 `json:"quota_used"`
-	Status       int     `json:"status"` // 1 启用 / 0 禁用
-	LastLoginAt  int64   `json:"last_login_at"`
-	CreatedAt    int64   `json:"created_at"`
-	UpdatedAt    int64   `json:"updated_at"`
-}
-
-// UserToken 为一个用户可创建的网关消费令牌（sk-xxx）。一个用户可拥有多个。
-type UserToken struct {
-	ID         int64  `json:"id"`
-	UserID     int64  `json:"user_id"`
-	Name       string `json:"name"`
-	TokenHash  string `json:"-"` // 鉴权用哈希
-	TokenEnc   string `json:"-"` // AES 加密（支持回显/复制）
-	Enabled    int    `json:"enabled"`
-	ExpiresAt  int64  `json:"expires_at"` // 过期时间（unix 秒），0 = 永不过期
-	LastUsedAt int64  `json:"last_used_at"`
-	CreatedAt  int64  `json:"created_at"`
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	Remark         string  `json:"remark"`
+	Username       string  `json:"username"` // 登录名（空 = 未分配，不能登录）
+	PasswordHash   string  `json:"-"`        // bcrypt 哈希，不对外
+	TokenHash      string  `json:"-"`        // 消费令牌哈希（鉴权用）
+	TokenEnc       string  `json:"-"`        // AES 加密的令牌（支持回显）
+	TokenExpiresAt int64   `json:"-"`        // 令牌过期时间（unix 秒），0 = 永不过期
+	TokenLastUsed  int64   `json:"-"`        // 令牌最近使用时间
+	QuotaLimit     float64 `json:"quota_limit"`
+	QuotaUsed      float64 `json:"quota_used"`
+	Status         int     `json:"status"` // 1 启用 / 0 禁用
+	LastLoginAt    int64   `json:"last_login_at"`
+	CreatedAt      int64   `json:"created_at"`
+	UpdatedAt      int64   `json:"updated_at"`
 }
 
 // Channel 表示一个上游套餐（渠道）。

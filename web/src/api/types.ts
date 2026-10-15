@@ -56,23 +56,22 @@ export interface User {
   quota_limit: number
   quota_used: number
   status: number
-  token_count: number
+  has_token: boolean
+  token_tail: string
+  token_expires_at: number
+  token_last_used_at: number
   last_login_at: number
   created_at: number
 }
 
-/** 消费令牌（网关 sk-xxx）：一个用户可创建多个。 */
+/** 消费令牌（网关 sk-xxx）：直接存在 users 表内，一人一个。 */
 export interface UserToken {
-  id: number
-  user_id?: number
-  name: string
-  /** 仅创建时返回一次的明文 */
+  /** 明文（可随时回显）；无令牌时为空 */
   token?: string
   token_tail: string
-  enabled: number
+  has_token: boolean
   expires_at: number
   last_used_at: number
-  created_at: number
 }
 
 /** 用户端：登录后的自身信息 */
@@ -122,7 +121,7 @@ export interface UserOverview {
 export interface AdminUserDetail {
   user: User
   keys: UserKey[]
-  tokens: UserToken[]
+  token: UserToken
   today: UsageSummary
   total: UsageSummary
   by_model: ModelUsage[]

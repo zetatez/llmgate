@@ -18,34 +18,35 @@ func RegisterUserRoutes(g *gin.RouterGroup, a *app.App) {
 	g.PUT("/:id", updateUser(a))
 	g.DELETE("/:id", deleteUser(a))
 
-	g.GET("/:id/tokens", adminListUserTokens(a))
-	g.POST("/:id/tokens", adminCreateUserToken(a))
-	g.DELETE("/:id/tokens/:tokenID", adminDeleteUserToken(a))
+	g.GET("/:id/token", adminGetUserToken(a))
+	g.PUT("/:id/token", adminUpsertUserToken(a))
+	g.POST("/:id/token/rotate", adminRotateUserToken(a))
+	g.DELETE("/:id/token", adminDeleteUserToken(a))
 	g.GET("/:id/overview", adminUserOverview(a))
 }
 
 type userView struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	Remark      string  `json:"remark"`
-	Username    string  `json:"username"`
-	QuotaLimit  float64 `json:"quota_limit"`
-	QuotaUsed   float64 `json:"quota_used"`
-	Status      int     `json:"status"`
-	TokenCount  int     `json:"token_count"`
-	LastLoginAt int64   `json:"last_login_at"`
-	CreatedAt   int64   `json:"created_at"`
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	Remark         string  `json:"remark"`
+	Username       string  `json:"username"`
+	QuotaLimit     float64 `json:"quota_limit"`
+	QuotaUsed      float64 `json:"quota_used"`
+	Status         int     `json:"status"`
+	HasToken       bool    `json:"has_token"`
+	TokenTail      string  `json:"token_tail"`
+	TokenExpiresAt int64   `json:"token_expires_at"`
+	TokenLastUsed  int64   `json:"token_last_used_at"`
+	LastLoginAt    int64   `json:"last_login_at"`
+	CreatedAt      int64   `json:"created_at"`
 }
 
 func toUserView(a *app.App, u *models.User) userView {
-	n := 0
-	if list, err := store.ListUserTokens(a.DB, u.ID); err == nil {
-		n = len(list)
-	}
 	return userView{
 		ID: u.ID, Name: u.Name, Remark: u.Remark, Username: u.Username,
 		QuotaLimit: u.QuotaLimit, QuotaUsed: u.QuotaUsed, Status: u.Status,
-		TokenCount: n, LastLoginAt: u.LastLoginAt, CreatedAt: u.CreatedAt,
+		HasToken: u.TokenEnc != "", TokenTail: a.KeyTail(u.TokenEnc), TokenExpiresAt: u.TokenExpiresAt, TokenLastUsed: u.TokenLastUsed,
+		LastLoginAt: u.LastLoginAt, CreatedAt: u.CreatedAt,
 	}
 }
 
@@ -264,23 +265,13 @@ func adminUserOverview(a *app.App) gin.HandlerFunc {
 				LastUsedAt: k.LastUsedAt, CreatedAt: k.CreatedAt,
 			})
 		}
-		tokens, err := store.ListUserTokens(a.DB, id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		tokenViews := make([]adminTokenView, 0, len(tokens))
-		for _, t := range tokens {
-			tokenViews = append(tokenViews, adminTokenView{ID: t.ID, UserID: t.UserID, Name: t.Name,
-				TokenTail: a.KeyTail(t.TokenEnc), Enabled: t.Enabled, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt, CreatedAt: t.CreatedAt})
-		}
 		today, _ := store.UserUsageSummary(a.DB, id, dayStartOffset(0))
 		total, _ := store.UserUsageSummary(a.DB, id, 0)
 		byModel, _ := store.UserUsageByModel(a.DB, id, dayStartOffset(29), 0)
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{
 			"user":     toUserView(a, u),
 			"keys":     keyViews,
-			"tokens":   tokenViews,
+			"token":    tokenViewOf(a, u, tokenPlain(a, u.TokenEnc)),
 			"today":    today,
 			"total":    total,
 			"by_model": byModel,
@@ -288,102 +279,133 @@ func adminUserOverview(a *app.App) gin.HandlerFunc {
 	}
 }
 
-// ---- 管理员管理某用户的消费令牌 ----
+// ---- 令牌视图（users 表内，一人一 token） ----
 
-type adminTokenView struct {
-	ID         int64  `json:"id"`
-	UserID     int64  `json:"user_id"`
-	Name       string `json:"name"`
-	Token      string `json:"token,omitempty"` // 仅创建时返回一次
+// tokenView 是用户唯一消费令牌的对外视图。
+type tokenView struct {
+	Token      string `json:"token,omitempty"` // 明文（可随时回显）
 	TokenTail  string `json:"token_tail"`
-	Enabled    int    `json:"enabled"`
+	HasToken   bool   `json:"has_token"`
 	ExpiresAt  int64  `json:"expires_at"`
 	LastUsedAt int64  `json:"last_used_at"`
-	CreatedAt  int64  `json:"created_at"`
 }
 
-func adminListUserTokens(a *app.App) gin.HandlerFunc {
+func tokenViewOf(a *app.App, u *models.User, plain string) tokenView {
+	return tokenView{Token: plain, TokenTail: a.KeyTail(u.TokenEnc), HasToken: u.TokenEnc != "", ExpiresAt: u.TokenExpiresAt, LastUsedAt: u.TokenLastUsed}
+}
+
+func adminGetUserToken(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "id")
 		if !ok {
 			return
 		}
-		if u, err := store.GetUser(a.DB, id); err != nil || u == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
-			return
-		}
-		list, err := store.ListUserTokens(a.DB, id)
+		u, err := store.GetUser(a.DB, id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		out := make([]adminTokenView, 0, len(list))
-		for _, t := range list {
-			out = append(out, adminTokenView{ID: t.ID, UserID: t.UserID, Name: t.Name,
-				TokenTail: a.KeyTail(t.TokenEnc), Enabled: t.Enabled, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt, CreatedAt: t.CreatedAt})
+		if u == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": out})
+		c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, tokenPlain(a, u.TokenEnc))})
 	}
 }
 
-func adminCreateUserToken(a *app.App) gin.HandlerFunc {
+// adminUpsertUserToken 创建或更新某用户令牌（不轮换密钥）。
+func adminUpsertUserToken(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "id")
 		if !ok {
 			return
 		}
-		if u, err := store.GetUser(a.DB, id); err != nil || u == nil {
+		u, err := store.GetUser(a.DB, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if u == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
 		var b struct {
-			Name          string `json:"name"`
-			ExpiresInDays *int   `json:"expires_in_days"`
+			ExpiresInDays *int `json:"expires_in_days"`
 		}
 		if !decode(c, &b) {
 			return
 		}
-		expiresAt := int64(0)
-		if b.ExpiresInDays != nil && *b.ExpiresInDays > 0 {
-			expiresAt = models.Now() + int64(*b.ExpiresInDays)*86400
+		if u.TokenEnc == "" {
+			plain, enc, err := a.NewGatewayToken()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			exp := resolveExpiry(b.ExpiresInDays, 0)
+			if err := store.SetUserToken(a.DB, id, app.HashToken(plain), enc, exp); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			u.TokenEnc, u.TokenExpiresAt = enc, exp
+			c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, plain)})
+			return
+		}
+		exp := resolveExpiry(b.ExpiresInDays, u.TokenExpiresAt)
+		if err := store.SetUserToken(a.DB, id, u.TokenHash, u.TokenEnc, exp); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		u.TokenExpiresAt = exp
+		c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, tokenPlain(a, u.TokenEnc))})
+	}
+}
+
+// adminRotateUserToken 轮换某用户令牌密钥，返回新明文。
+func adminRotateUserToken(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c, "id")
+		if !ok {
+			return
+		}
+		u, err := store.GetUser(a.DB, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if u == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
 		}
 		plain, enc, err := a.NewGatewayToken()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		t := &models.UserToken{UserID: id, Name: strings.TrimSpace(b.Name), TokenHash: app.HashToken(plain), TokenEnc: enc, Enabled: 1, ExpiresAt: expiresAt}
-		tid, err := store.CreateUserToken(a.DB, t)
-		if err != nil {
+		if err := store.SetUserToken(a.DB, id, app.HashToken(plain), enc, u.TokenExpiresAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		t.ID = tid
-		c.JSON(http.StatusOK, gin.H{"data": adminTokenView{ID: t.ID, UserID: t.UserID, Name: t.Name,
-			Token: plain, TokenTail: a.KeyTail(enc), Enabled: 1, ExpiresAt: expiresAt, CreatedAt: t.CreatedAt}})
+		u.TokenEnc = enc
+		c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, plain)})
 	}
 }
 
 func adminDeleteUserToken(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, ok := parseID(c, "id")
+		id, ok := parseID(c, "id")
 		if !ok {
 			return
 		}
-		tokenID, ok := parseID(c, "tokenID")
-		if !ok {
+		if u, err := store.GetUser(a.DB, id); err != nil || u == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
-		t, err := store.GetUserToken(a.DB, tokenID)
+		placeholder, err := app.GenSecret(24)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if t == nil || t.UserID != userID {
-			c.JSON(http.StatusNotFound, gin.H{"error": "token not found"})
-			return
-		}
-		if err := store.DeleteUserToken(a.DB, tokenID); err != nil {
+		if err := store.SetUserToken(a.DB, id, app.HashToken("revoked:"+placeholder), "", 0); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

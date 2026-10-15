@@ -49,7 +49,14 @@ func New(cfg *config.Config, db *sql.DB) (*App, error) {
 		}
 	}
 	if token != "" {
-		if err := a.SetSetting("admin_token_hash", HashToken(token)); err != nil {
+		newHash := HashToken(token)
+		if hash != "" && hash != newHash {
+			// 管理令牌被轮换：吊销全部既有管理员会话，避免旧令牌泄露后旧会话仍继续可用
+			if err := store.DeleteAllAdminSessions(db); err != nil {
+				return nil, fmt.Errorf("revoke admin sessions: %w", err)
+			}
+		}
+		if err := a.SetSetting("admin_token_hash", newHash); err != nil {
 			return nil, err
 		}
 	}

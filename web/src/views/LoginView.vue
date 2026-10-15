@@ -16,7 +16,9 @@ const loading = ref(false)
 
 function redirectTo(fallback: string) {
   const r = route.query.redirect
-  router.push(r ? String(r) : fallback)
+  // 仅接受站内路径，防止 ?redirect=//evil.com 之类被用作开放重定向
+  const target = typeof r === 'string' && r.startsWith('/') && !r.startsWith('//') ? r : fallback
+  router.push(target)
 }
 
 async function onAdminSubmit() {

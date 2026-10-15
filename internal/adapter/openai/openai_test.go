@@ -377,6 +377,17 @@ func socks5TestProxy(t *testing.T, handler http.HandlerFunc) string {
 				io.CopyN(io.Discard, r, 2) // 端口
 				// 成功后直接以 HTTP 服务器身份回复。
 				c.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+				// 先读完客户端 HTTP 请求头，再回响应——否则响应可能早于请求到达，
+				// 触发 net/http transport 的 "unsolicited response on idle channel"（-race 下偶发）。
+				for {
+					line, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if line == "\r\n" || line == "\n" {
+						break
+					}
+				}
 				handler(&httpResponseWriter{c: c}, &http.Request{Method: "GET"})
 			}(conn)
 		}

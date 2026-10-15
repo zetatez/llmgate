@@ -92,6 +92,43 @@ func TestSetGetSetting(t *testing.T) {
 	}
 }
 
+func TestAdminTokenRotationRevokesSessions(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	seed := "rotation-seed"
+	if _, err := New(&config.Config{AdminToken: "token-A", EncryptSeed: seed}, db); err != nil {
+		t.Fatalf("first New: %v", err)
+	}
+	if err := store.CreateAdminSession(db, HashToken("session-x"), models.Now()+3600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := store.AdminSessionValid(db, HashToken("session-x")); !ok {
+		t.Fatal("session should exist")
+	}
+
+	// 相同令牌重启 → 会话保留
+	if _, err := New(&config.Config{AdminToken: "token-A", EncryptSeed: seed}, db); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := store.AdminSessionValid(db, HashToken("session-x")); !ok {
+		t.Fatal("same token should keep existing sessions")
+	}
+
+	// 轮换令牌 → 全部管理员会话被吊销
+	if _, err := New(&config.Config{AdminToken: "token-B", EncryptSeed: seed}, db); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := store.AdminSessionValid(db, HashToken("session-x")); ok {
+		t.Fatal("rotating the admin token must revoke existing admin sessions")
+	}
+}
+
 func TestFirstEnabledKey(t *testing.T) {
 	a := newApp(t, &config.Config{})
 	chID, err := store.CreateChannel(a.DB, &models.Channel{Name: "c", BaseURL: "http://x", Adapter: "openai", Weight: 1, TimeoutMS: 1000, Enabled: 1})

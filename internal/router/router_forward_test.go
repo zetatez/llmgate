@@ -366,6 +366,43 @@ func TestForwardChat400FailoverRecover(t *testing.T) {
 	}
 }
 
+// TestForwardChatSuccessClearsPersistedCooldown 验证成功后同时清除内存与 DB 冷却。
+func TestForwardChatSuccessClearsPersistedCooldown(t *testing.T) {
+	r := newTB(t)
+	runAdapter(t, &wireAdapter{
+		name: "fc-recover",
+		do: func(_ adapter.BaseChannel, _ string, _ *adapter.Request) (*adapter.Response, error) {
+			return resp(200, `{"ok":1}`, "application/json"), nil
+		},
+		stream: func(_ adapter.BaseChannel, _ string, _ *adapter.Request) (io.ReadCloser, error) {
+			return nil, errors.New("n/a")
+		},
+	})
+	chID := r.ch("rec", "http://stub-rec", "fc-recover", 0, 1)
+	r.route(chID, "m", "m", 0, 1)
+	r.key(chID, "k")
+
+	// 预置 DB 与内存冷却
+	if err := store.SetChannelCooldown(r.db, chID, models.Now()+3600); err != nil {
+		t.Fatal(err)
+	}
+	rt := r.router()
+	rt.pen.PenaliseChan(chID, time.Hour)
+
+	res, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil)
+	if err != nil || res == nil || res.StatusCode != 200 {
+		t.Fatalf("forward: res=%+v err=%v", res, err)
+	}
+	var until int64
+	_ = r.db.QueryRow(`SELECT cooldown_until FROM channels WHERE id=?`, chID).Scan(&until)
+	if until != 0 {
+		t.Fatalf("DB cooldown should be cleared after success, got %d", until)
+	}
+	if rt.pen.ChPenalized(chID) {
+		t.Fatal("in-memory penalty should be cleared after success")
+	}
+}
+
 func TestForwardChatOther4xxPassthrough(t *testing.T) {
 	r := newTB(t)
 	runAdapter(t, statusErrAdapter("fc-422", 422, `{"error":"unprocessable"}`))

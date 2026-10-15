@@ -73,27 +73,19 @@ llmgate/
 
 ## 5. 数据模型（SQLite）
 
-### users（用户账号）
- | 字段          | 类型   | 说明                                                        |
- | ---           | ---    | ---                                                         |
- | id            | int    | PK                                                          |
- | name / remark | string | 显示名/备注                                                 |
- | username      | string | 登录名（非空时唯一；由管理员创建）                          |
- | password_hash | string | bcrypt 密码哈希（不对外）                                   |
- | quota_limit   | float  | 额度上限（按估算成本美元计），0 = 不限                      |
- | quota_used    | float  | 已用额度（累计）                                            |
- | status        | int    | 启用/禁用                                                   |
+### users（用户账号，含唯一消费令牌）
+ | 字段                         | 类型   | 说明                                                        |
+ | ---                          | ---    | ---                                                         |
+ | id                           | int    | PK                                                          |
+ | name / remark                | string | 显示名/备注                                                 |
+ | username / password_hash     | string | 登录名（非空唯一）/ bcrypt 密码哈希                         |
+ | token_hash / token_enc       | string | 网关消费令牌（sha256 鉴权 / AES 密文回显）——**一人一 token** |
+ | token_expires_at             | int    | 令牌过期时间（0 = 永不过期）                                |
+ | token_last_used_at           | int    | 令牌最近使用时间                                            |
+ | quota_limit / quota_used     | float  | 额度上限 / 已用（0 = 不限）                                 |
+ | status / last_login_at       | int    | 启用禁用 / 最近登录                                         |
 
-> `token_hash`/`token_enc` 为旧版单令牌遗留列，不再用于鉴权（消费令牌改由 `user_tokens` 承载）。
-
-### user_tokens（用户的网关消费令牌，一人可多个）
- | 字段                      | 类型   | 说明                                     |
- | ---                       | ---    | ---                                      |
- | id / user_id              | int    | PK / FK → users                          |
- | name                      | string | 令牌备注名                               |
- | token_hash / token_enc    | string | 鉴权哈希 / AES 密文（支持回显末4位）     |
- | enabled / expires_at      | int    | 启用状态 / 过期时间（0 = 永不过期）      |
- | last_used_at / created_at | time   | 最近使用 / 创建时间                      |
+> 消费令牌直接存于 users 表（无独立表）；`token_enc=''` 表示尚未创建令牌。
 
 ### user_sessions / admin_sessions（登录会话，库内只存哈希）
  | 字段                    | 类型   | 说明                                        |
@@ -197,7 +189,7 @@ llmgate/
  | POST | `/v1/embeddings`       | 向量化                           |
  | GET  | `/v1/models`           | 返回所有 enabled 的对外模型名    |
 
-鉴权：`Authorization: Bearer sk-xxx`（对 `user_tokens.token_hash` 校验，解析出归属用户）；
+鉴权：`Authorization: Bearer sk-xxx`（对 `users.token_hash` 校验，解析出归属用户）；
 额度超额返回 403；Key 归属该用户（未录入任何 Key 的模型对该用户表现为 404）。
 
 ### 用户端 `/api/user/*`（用户名 + 密码登录，httpOnly 会话）
@@ -208,7 +200,8 @@ llmgate/
  | GET     | `/api/user/channels`        | 可录入 Key 的渠道（含本人 Key 数）       |
  | CRUD    | `/api/user/keys`            | 本人 API Key（仅自己的可见/可改）        |
  | POST    | `/api/user/keys/:id/test`   | 用本人 Key 测试上游连通性                |
- | CRUD    | `/api/user/tokens`          | 本人消费令牌（可设过期时间）             |
+ | GET/PUT/DELETE | `/api/user/token`     | 本人唯一消费令牌（创建/改过期/吊销）      |
+ | POST    | `/api/user/token/rotate`    | 轮换令牌密钥（旧令牌立即失效）            |
  | PUT     | `/api/user/password`        | 自助改密码（注销其它设备）               |
  | POST    | `/api/user/logout-all`      | 注销全部设备                             |
  | GET     | `/api/user/logs` `logs/count` | 本人请求日志（分页）                   |
@@ -236,7 +229,7 @@ llmgate/
  | 仪表盘   | 今日调用量/费用/Token 卡片，近 7/30 天趋势图（ECharts），渠道健康状态，最近失败列表 |
  | 渠道管理 | 渠道表格 + 新增/编辑弹窗（BaseURL、优先级、权重、Key 池批量添加）、测试连接、启停；Key 可指派 Owner |
  | 模型路由 | 对外模型名视图，展开显示映射的各渠道与权重，编辑映射                                |
- | 用户管理 | 用户列表（用户名/密码）、令牌管理、额度设置；**用户详情**（Key/令牌/用量）          |
+ | 用户管理 | 用户列表（用户名/密码）；令牌直接显示在用户行（创建/复制/轮换/吊销）；**用户详情**（Key/令牌/用量） |
  | 请求日志 | 表格 + 时间/模型/状态筛选 + 分页                                                    |
  | 系统设置 | 默认超时、日志保留天数、熔断/拉取参数等                                             |
 
@@ -245,7 +238,7 @@ llmgate/
  | ---         | ---                                                               |
  | Overview    | 配额与用量概览（今日/累计/近 7 天）                               |
  | My API Keys | 录入/管理自己的上游 Key（单选或批量），测试连通性，仅本人可见     |
- | My Tokens   | 创建/吊销自己的 `sk-` 消费令牌（可设过期），查看网关 Base URL     |
+ | My Tokens   | 本人唯一 `sk-` 消费令牌：创建/设过期/轮换/吊销，查看网关 Base URL       |
  | My Requests | 本人请求日志（分页）                                              |
  | 顶栏        | 自助改密码、注销全部设备、登出                                    |
 

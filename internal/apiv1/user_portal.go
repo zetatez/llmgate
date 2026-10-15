@@ -63,10 +63,10 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 	authed.DELETE("/keys/:id", userDeleteKey(a))
 	authed.POST("/keys/:id/test", userTestKey(a))
 
-	authed.GET("/tokens", userListTokens(a))
-	authed.POST("/tokens", userCreateToken(a))
-	authed.PUT("/tokens/:id", userUpdateToken(a))
-	authed.DELETE("/tokens/:id", userDeleteToken(a))
+	authed.GET("/token", userGetToken(a))
+	authed.PUT("/token", userUpsertToken(a))
+	authed.POST("/token/rotate", userRotateToken(a))
+	authed.DELETE("/token", userDeleteToken(a))
 
 	authed.GET("/logs", userLogs(a))
 	authed.GET("/logs/count", userLogsCount(a))
@@ -510,132 +510,99 @@ func userTestKey(a *app.App) gin.HandlerFunc {
 	}
 }
 
-// ---------------- 消费令牌 ----------------
+// ---------------- 消费令牌（users 表内，一人一 token） ----------------
 
-type userTokenView struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Token      string `json:"token,omitempty"` // 仅创建时返回一次
-	TokenTail  string `json:"token_tail"`
-	Enabled    int    `json:"enabled"`
-	ExpiresAt  int64  `json:"expires_at"`
-	LastUsedAt int64  `json:"last_used_at"`
-	CreatedAt  int64  `json:"created_at"`
+// tokenPlain 解密令牌明文（供用户在界面上随时复制自己的令牌）。
+func tokenPlain(a *app.App, enc string) string {
+	p, err := a.Secret.Decrypt(enc)
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
-func toUserTokenView(a *app.App, t *models.UserToken, plain string) userTokenView {
-	return userTokenView{ID: t.ID, Name: t.Name, Token: plain, TokenTail: a.KeyTail(t.TokenEnc),
-		Enabled: t.Enabled, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt, CreatedAt: t.CreatedAt}
+// resolveExpiry 依 expires_in_days 计算过期时间：nil=不变(keep)，>0=now+N天，<=0=永不过期。
+func resolveExpiry(in *int, keep int64) int64 {
+	if in == nil {
+		return keep
+	}
+	if *in > 0 {
+		return models.Now() + int64(*in)*86400
+	}
+	return 0
 }
 
-func userListTokens(a *app.App) gin.HandlerFunc {
+// userGetToken 返回本人的消费令牌。
+func userGetToken(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
-		list, err := store.ListUserTokens(a.DB, u.ID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		out := make([]userTokenView, 0, len(list))
-		for _, t := range list {
-			out = append(out, toUserTokenView(a, t, ""))
-		}
-		c.JSON(http.StatusOK, gin.H{"data": out})
+		c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, tokenPlain(a, u.TokenEnc))})
 	}
 }
 
-func userCreateToken(a *app.App) gin.HandlerFunc {
+// userUpsertToken 创建或更新本人令牌（不轮换密钥）：无则创建，有则仅更新过期时间。
+func userUpsertToken(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
 		var b struct {
-			Name          string `json:"name"`
-			ExpiresInDays *int   `json:"expires_in_days"` // 0/缺省 = 永不过期
+			ExpiresInDays *int `json:"expires_in_days"`
 		}
 		if !decode(c, &b) {
 			return
 		}
-		expiresAt := int64(0)
-		if b.ExpiresInDays != nil && *b.ExpiresInDays > 0 {
-			expiresAt = models.Now() + int64(*b.ExpiresInDays)*86400
+		if u.TokenEnc == "" {
+			plain, enc, err := a.NewGatewayToken()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			exp := resolveExpiry(b.ExpiresInDays, 0)
+			if err := store.SetUserToken(a.DB, u.ID, app.HashToken(plain), enc, exp); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			u.TokenEnc, u.TokenExpiresAt = enc, exp
+			c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, plain)})
+			return
 		}
+		exp := resolveExpiry(b.ExpiresInDays, u.TokenExpiresAt)
+		if err := store.SetUserToken(a.DB, u.ID, u.TokenHash, u.TokenEnc, exp); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		u.TokenExpiresAt = exp
+		c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, tokenPlain(a, u.TokenEnc))})
+	}
+}
+
+// userRotateToken 轮换本人令牌密钥（保留过期时间），返回新明文。
+func userRotateToken(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := currentUser(c)
 		plain, enc, err := a.NewGatewayToken()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		t := &models.UserToken{UserID: u.ID, Name: strings.TrimSpace(b.Name), TokenHash: app.HashToken(plain), TokenEnc: enc, Enabled: 1, ExpiresAt: expiresAt}
-		id, err := store.CreateUserToken(a.DB, t)
-		if err != nil {
+		if err := store.SetUserToken(a.DB, u.ID, app.HashToken(plain), enc, u.TokenExpiresAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		t.ID = id
-		c.JSON(http.StatusOK, gin.H{"data": toUserTokenView(a, t, plain)})
+		u.TokenEnc = enc
+		c.JSON(http.StatusOK, gin.H{"data": tokenViewOf(a, u, plain)})
 	}
 }
 
-func userUpdateToken(a *app.App) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, ok := parseID(c, "id")
-		if !ok {
-			return
-		}
-		u := currentUser(c)
-		cur, err := store.GetUserToken(a.DB, id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if cur == nil || cur.UserID != u.ID {
-			c.JSON(http.StatusNotFound, gin.H{"error": "token not found"})
-			return
-		}
-		var b struct {
-			Name          *string `json:"name"`
-			Enabled       *int    `json:"enabled"`
-			ExpiresInDays *int    `json:"expires_in_days"` // 0 = 永不过期；缺省 = 不变
-		}
-		if !decode(c, &b) {
-			return
-		}
-		if b.Name != nil {
-			cur.Name = *b.Name
-		}
-		if b.Enabled != nil {
-			cur.Enabled = *b.Enabled
-		}
-		if b.ExpiresInDays != nil {
-			if *b.ExpiresInDays > 0 {
-				cur.ExpiresAt = models.Now() + int64(*b.ExpiresInDays)*86400
-			} else {
-				cur.ExpiresAt = 0
-			}
-		}
-		if err := store.UpdateUserToken(a.DB, cur); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"data": toUserTokenView(a, cur, "")})
-	}
-}
-
+// userDeleteToken 吊销本人令牌。
 func userDeleteToken(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, ok := parseID(c, "id")
-		if !ok {
-			return
-		}
 		u := currentUser(c)
-		cur, err := store.GetUserToken(a.DB, id)
+		placeholder, err := app.GenSecret(24)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if cur == nil || cur.UserID != u.ID {
-			c.JSON(http.StatusNotFound, gin.H{"error": "token not found"})
-			return
-		}
-		if err := store.DeleteUserToken(a.DB, id); err != nil {
+		if err := store.SetUserToken(a.DB, u.ID, app.HashToken("revoked:"+placeholder), "", 0); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

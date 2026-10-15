@@ -205,6 +205,7 @@ func GetChannelKey(db *sql.DB, id int64) (*models.ChannelKey, error) {
 }
 
 // UpdateChannelKey 更新 Key 的名称、来源、备注、启用状态、权重与归属用户。
+// 注意：会一并写入 UserID，调用方须先读取完整记录再修改（局部结构体会把归属置 0）。
 func UpdateChannelKey(db *sql.DB, k *models.ChannelKey) error {
 	res, err := db.Exec(`UPDATE channel_keys SET name=?, source=?, remark=?, enabled=?, weight=?, user_id=? WHERE id=?`,
 		k.Name, k.Source, k.Remark, k.Enabled, k.Weight, k.UserID, k.ID)
