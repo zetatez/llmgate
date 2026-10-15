@@ -38,12 +38,17 @@ async function loadUsage() {
   } catch { usage.value = [] } finally { usageLoading.value = false }
 }
 
-const dialog = reactive({ visible: false, username: '', password: '', name: '', remark: '', quota_limit: 10 })
-const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 10, status: 1 })
+const dialog = reactive({ visible: false, username: '', password: '', name: '', remark: '', quota_limit: 0 })
+const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 0, status: 1 })
 
 async function load() {
   loading.value = true
   try { list.value = await usersApi.list() } finally { loading.value = false }
+}
+
+// 打开新增用户弹窗（默认不限额度：0 = 无限）
+function openCreateUser() {
+  Object.assign(dialog, { visible: true, username: '', password: '', name: '', remark: '', quota_limit: 0 })
 }
 
 async function create() {
@@ -192,7 +197,7 @@ onMounted(() => {
       <template #header>
         <div class="head">
           <span>Users</span>
-          <el-button type="primary" size="small" @click="dialog.visible = true">Add User</el-button>
+          <el-button type="primary" size="small" @click="openCreateUser">Add User</el-button>
         </div>
       </template>
       <el-table v-loading="loading" :data="list" size="small">
