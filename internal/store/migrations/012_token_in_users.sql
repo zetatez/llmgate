@@ -1,4 +1,4 @@
--- 011: 消费令牌回归 users 表（一人一 token，随用户行直接管理）
+-- 012: 消费令牌回归 users 表（一人一 token，随用户行直接管理）
 --
 -- 之前把令牌拆到 user_tokens（支持多 token）；现收敛为"每人一个"，直接放回 users：
 --   - users 增加 token_expires_at / token_last_used_at
