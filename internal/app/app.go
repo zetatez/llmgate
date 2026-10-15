@@ -118,20 +118,31 @@ func (a *App) GetSetting(key string) (string, error) {
 	return v, err
 }
 
-// FirstEnabledKey 返回渠道第一个启用 Key 的明文（连通性测试/拉取模型共用）。
+// FirstEnabledKey 返回渠道第一个启用 Key 的明文（连通性测试/拉取模型/探活共用）。
+// 优先全局 Key（user_id=0，管理员录入），避免后台任务占用用户录入的私有付费 Key；
+// 无全局 Key 时回退到任意启用 Key，保持功能可用。
 func (a *App) FirstEnabledKey(channelID int64) (string, error) {
 	keys, err := store.ListChannelKeys(a.DB, channelID)
 	if err != nil {
 		return "", err
 	}
-	for _, k := range keys {
-		if k.Enabled != 1 {
-			continue
+	pick := func(globalOnly bool) (string, bool) {
+		for _, k := range keys {
+			if k.Enabled != 1 || (globalOnly && k.UserID != 0) {
+				continue
+			}
+			plain, err := a.Secret.Decrypt(k.APIKeyEnc)
+			if err == nil && plain != "" {
+				return plain, true
+			}
 		}
-		plain, err := a.Secret.Decrypt(k.APIKeyEnc)
-		if err == nil && plain != "" {
-			return plain, nil
-		}
+		return "", false
+	}
+	if plain, ok := pick(true); ok {
+		return plain, nil
+	}
+	if plain, ok := pick(false); ok {
+		return plain, nil
 	}
 	return "", errors.New("渠道没有可用的 Key")
 }

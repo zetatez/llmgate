@@ -121,7 +121,11 @@ func (b *tb) key(chID int64, plain string) int64 {
 	if err := store.AddChannelKeys(b.db, chID, []store.KeyInput{{Encrypted: enc}}); err != nil {
 		b.t.Fatal(err)
 	}
-	return 1
+	var id int64
+	if err := b.db.QueryRow(`SELECT MAX(id) FROM channel_keys`).Scan(&id); err != nil {
+		b.t.Fatal(err)
+	}
+	return id
 }
 
 func (b *tb) router() *Router {
@@ -260,29 +264,23 @@ func TestForwardChatQuota429(t *testing.T) {
 	runAdapter(t, statusErrAdapter("fc-quota", 429, "insufficient_quota"))
 	chID := r.ch("quota", "http://stub-quota", "fc-quota", 0, 1)
 	r.route(chID, "m", "m", 0, 1)
-	r.key(chID, "k")
+	keyID := r.key(chID, "k")
 	rt := r.router()
-	// 单次失败不应立即拉黑渠道（避免误判）
+	// 额度用尽：按 Key 冷却，不冷却整条渠道（多租户下不拖累同渠道其他用户）
 	if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
 		t.Fatal("expected error")
 	}
+	if !rt.pen.KeyPenalized(keyID) {
+		t.Fatal("quota-exceeded key should be penalized")
+	}
 	if rt.pen.ChPenalized(chID) {
-		t.Fatal("single quota failure must NOT cool the channel")
+		t.Fatal("quota failure must NOT cool the shared channel")
 	}
-	// 连续多次失败达阈值后才真正冷却
-	for i := 0; i < failThreshold-1; i++ {
-		if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
-			t.Fatal("expected error")
-		}
-	}
-	if !rt.pen.ChPenalized(chID) {
-		t.Fatal("quota-exceeded channel must be penalized after repeated failures")
-	}
-	// DB 冷却也应被持久化
+	// 不应写入渠道冷却到 DB
 	var until int64
 	_ = r.db.QueryRow(`SELECT cooldown_until FROM channels WHERE id=?`, chID).Scan(&until)
-	if until <= models.Now() {
-		t.Fatalf("cooldown_until should be persisted in DB, got %d", until)
+	if until != 0 {
+		t.Fatalf("channel cooldown_until should stay 0, got %d", until)
 	}
 }
 
@@ -291,21 +289,16 @@ func TestForwardChat431RateLimit(t *testing.T) {
 	runAdapter(t, statusErrAdapter("fc-429", 429, "rate limit"))
 	chID := r.ch("rl", "http://stub-rl", "fc-429", 0, 1)
 	r.route(chID, "m", "m", 0, 1)
-	r.key(chID, "k")
+	keyID := r.key(chID, "k")
 	rt := r.router()
 	if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
 		t.Fatal("expected error")
 	}
+	if !rt.pen.KeyPenalized(keyID) {
+		t.Fatal("rate-limited key should be penalized")
+	}
 	if rt.pen.ChPenalized(chID) {
-		t.Fatal("single rate-limit failure must NOT cool the channel")
-	}
-	for i := 0; i < failThreshold-1; i++ {
-		if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
-			t.Fatal("expected error")
-		}
-	}
-	if !rt.pen.ChPenalized(chID) {
-		t.Fatal("rate-limited channel must be penalized after repeated failures")
+		t.Fatal("rate limit must NOT cool the shared channel")
 	}
 }
 
@@ -314,27 +307,27 @@ func TestForwardChat403AccessDenied(t *testing.T) {
 	runAdapter(t, statusErrAdapter("fc-403", 403, "access_denied"))
 	chID := r.ch("deny", "http://stub-deny", "fc-403", 0, 1)
 	r.route(chID, "m", "m", 0, 1)
-	r.key(chID, "k")
+	keyID := r.key(chID, "k")
 	rt := r.router()
-	// 单次 403 不应立即模型级拒权（避免一两次误判）
+	// 单次 403 不应立即拒权（避免一两次误判）
 	if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
 		t.Fatal("expected error")
 	}
-	if rt.pen.ModelDenied(chID, "m") {
+	if rt.pen.ModelDeniedKey(keyID, "m") {
 		t.Fatal("single 403 must NOT deny model yet")
 	}
-	// 连续多次 403 达阈值后才模型级拒权
+	// 连续多次 403 达阈值后才对"该 Key"拒权
 	for i := 0; i < failThreshold-1; i++ {
 		if _, err := rt.ForwardChat(context.Background(), []byte(`{"model":"m"}`), "m", "/p", nil); err == nil {
 			t.Fatal("expected error")
 		}
 	}
-	// 403 非额度 → 模型级拒权熔断（而非渠道冷却）
-	if !rt.pen.ModelDenied(chID, "m") {
-		t.Fatal("model should be denied after repeated 403 access_denied")
+	// 403 非额度 → Key 级模型拒权（按 Key 隔离，不影响同渠道其他用户）
+	if !rt.pen.ModelDeniedKey(keyID, "m") {
+		t.Fatal("model should be denied for this key after repeated 403 access_denied")
 	}
 	if rt.pen.ChPenalized(chID) {
-		t.Fatal("channel should not be cold down for model-level 403")
+		t.Fatal("channel should not be cooled for key-level 403")
 	}
 }
 

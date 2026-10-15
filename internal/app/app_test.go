@@ -119,6 +119,35 @@ func TestFirstEnabledKey(t *testing.T) {
 	}
 }
 
+func TestFirstEnabledKeyPrefersGlobal(t *testing.T) {
+	a := newApp(t, &config.Config{})
+	chID, err := store.CreateChannel(a.DB, &models.Channel{Name: "c", BaseURL: "http://x", Adapter: "openai", Weight: 1, TimeoutMS: 1000, Enabled: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encUser, _ := a.Secret.Encrypt("user-key")
+	encGlobal, _ := a.Secret.Encrypt("global-key")
+	// 先插入用户私有 Key（user_id=7），再插入全局 Key（user_id=0）：应优先全局
+	if err := store.AddChannelKeys(a.DB, chID, []store.KeyInput{
+		{UserID: 7, Encrypted: encUser},
+		{UserID: 0, Encrypted: encGlobal},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	k, err := a.FirstEnabledKey(chID)
+	if err != nil || k != "global-key" {
+		t.Fatalf("FirstEnabledKey should prefer global key, got %q err %v", k, err)
+	}
+	// 仅有用户私有 Key 时回退（保持功能可用）
+	ch2, _ := store.CreateChannel(a.DB, &models.Channel{Name: "c2", BaseURL: "http://x", Adapter: "openai", Weight: 1, TimeoutMS: 1000, Enabled: 1})
+	if err := store.AddChannelKeys(a.DB, ch2, []store.KeyInput{{UserID: 7, Encrypted: encUser}}); err != nil {
+		t.Fatal(err)
+	}
+	if k, err := a.FirstEnabledKey(ch2); err != nil || k != "user-key" {
+		t.Fatalf("FirstEnabledKey should fall back to user key, got %q err %v", k, err)
+	}
+}
+
 func TestKeyTailAndTokenTail(t *testing.T) {
 	a := newApp(t, &config.Config{})
 	enc, _ := a.Secret.Encrypt("sk-abcdefgh1234")

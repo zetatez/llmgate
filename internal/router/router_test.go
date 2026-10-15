@@ -74,6 +74,33 @@ func TestModelDenied(t *testing.T) {
 	}
 }
 
+func TestModelDeniedKey(t *testing.T) {
+	p := NewPenalizer()
+	// 未达阈值不拒权
+	for i := 0; i < failThreshold-1; i++ {
+		p.FailModelKey(11, "gpt-x", time.Minute)
+	}
+	if p.ModelDeniedKey(11, "gpt-x") {
+		t.Fatal("should not deny before threshold")
+	}
+	p.FailModelKey(11, "gpt-x", time.Minute)
+	if !p.ModelDeniedKey(11, "gpt-x") {
+		t.Fatal("should deny key's model after threshold")
+	}
+	// Key 维度隔离：其它 Key / 其它模型不受影响
+	if p.ModelDeniedKey(11, "other-model") || p.ModelDeniedKey(12, "gpt-x") {
+		t.Fatal("other key/model must not be denied")
+	}
+	// 与渠道维度互不影响
+	if p.ModelDenied(11, "gpt-x") {
+		t.Fatal("channel-scoped denial must be independent from key-scoped")
+	}
+	p.ClearModelDeniedKey(11, "gpt-x")
+	if p.ModelDeniedKey(11, "gpt-x") {
+		t.Fatal("denied flag should be cleared")
+	}
+}
+
 func TestCandidateLess(t *testing.T) {
 	a := mkCandidate(1, 1, 1, 5, 1) // routePrio 5, chPrio 1
 	b := mkCandidate(2, 0, 1, 5, 1) // routePrio 5, chPrio 0
