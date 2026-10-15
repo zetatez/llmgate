@@ -133,14 +133,14 @@ async function copyUserToken(u: User) {
 
 async function rotateUserToken(u: User) {
   try {
-    await ElMessageBox.confirm('Regenerate this token? The old token stops working immediately.', 'Regenerate Token', { type: 'warning' })
+    await ElMessageBox.confirm('Renew this token? The old token stops working immediately.', 'Renew Token', { type: 'warning' })
   } catch { return }
   try {
     const t = await usersApi.rotateToken(u.id)
     if (t.token) await navigator.clipboard?.writeText(t.token)
-    ElMessage.success('Token regenerated & copied')
+    ElMessage.success('Token renewed & copied')
     load()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to regenerate') }
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to renew') }
 }
 
 async function revokeUserToken(u: User) {
@@ -213,7 +213,7 @@ onMounted(() => {
                   <code class="key">sk-****{{ row.token_tail }}</code>
                 </el-tooltip>
                 <el-button link type="primary" size="small" @click="copyUserToken(row)">Copy</el-button>
-                <el-button link type="warning" size="small" @click="rotateUserToken(row)">Regenerate</el-button>
+                <el-button link type="warning" size="small" @click="rotateUserToken(row)">Renew</el-button>
                 <el-button link type="danger" size="small" @click="revokeUserToken(row)">Revoke</el-button>
               </template>
               <el-button v-else link type="primary" size="small" @click="createUserToken(row)">Create</el-button>

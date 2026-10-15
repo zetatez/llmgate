@@ -60,15 +60,15 @@ async function save() {
 
 async function rotate() {
   try {
-    await ElMessageBox.confirm('Regenerate the token? The current token stops working immediately.', 'Regenerate Token', { type: 'warning' })
+    await ElMessageBox.confirm('Renew the token? The current token stops working immediately.', 'Renew Token', { type: 'warning' })
   } catch { return }
   busy.value = true
   try {
     token.value = await portalApi.rotateToken()
     reveal.value = true
-    ElMessage.success('Token regenerated')
+    ElMessage.success('Token renewed')
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || 'Failed to regenerate')
+    ElMessage.error(e?.response?.data?.error || 'Failed to renew')
   } finally {
     busy.value = false
   }
@@ -148,7 +148,7 @@ onMounted(load)
           </el-form-item>
           <el-form-item>
             <el-button :loading="busy" @click="save">Save</el-button>
-            <el-button type="warning" :loading="busy" @click="rotate">Regenerate</el-button>
+            <el-button type="warning" :loading="busy" @click="rotate">Renew</el-button>
             <el-button type="danger" :loading="busy" @click="revoke">Revoke</el-button>
           </el-form-item>
         </el-form>
