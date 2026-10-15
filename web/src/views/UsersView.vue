@@ -200,16 +200,19 @@ onMounted(() => {
         <el-table-column prop="username" label="Username" width="130" />
         <el-table-column prop="name" label="Name" width="120" />
         <el-table-column prop="remark" label="Remark" min-width="100" show-overflow-tooltip />
-        <el-table-column label="Token" min-width="260">
+        <el-table-column label="Token" min-width="300">
           <template #default="{ row }">
-            <template v-if="row.has_token">
-              <code class="key">sk-****{{ row.token_tail }}</code>
-              <el-button link type="primary" size="small" @click="copyUserToken(row)">Copy</el-button>
-              <el-button link type="warning" size="small" @click="rotateUserToken(row)">Regenerate</el-button>
-              <el-button link type="danger" size="small" @click="revokeUserToken(row)">Revoke</el-button>
-              <div class="tip">expires: {{ row.token_expires_at ? new Date(row.token_expires_at * 1000).toLocaleString() : 'never' }}</div>
-            </template>
-            <el-button v-else link type="primary" size="small" @click="createUserToken(row)">Create</el-button>
+            <div class="token-cell">
+              <template v-if="row.has_token">
+                <el-tooltip :content="`expires: ${row.token_expires_at ? new Date(row.token_expires_at * 1000).toLocaleString() : 'never'}`" placement="top">
+                  <code class="key">sk-****{{ row.token_tail }}</code>
+                </el-tooltip>
+                <el-button link type="primary" size="small" @click="copyUserToken(row)">Copy</el-button>
+                <el-button link type="warning" size="small" @click="rotateUserToken(row)">Regenerate</el-button>
+                <el-button link type="danger" size="small" @click="revokeUserToken(row)">Revoke</el-button>
+              </template>
+              <el-button v-else link type="primary" size="small" @click="createUserToken(row)">Create</el-button>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="Quota ($)" width="150">
@@ -358,6 +361,8 @@ onMounted(() => {
 .key { font-size: 12px; background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
 .token { display: inline-flex; align-items: center; gap: 8px; }
 .token code { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.token-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.token-cell code { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
 .token-form { margin-top: 8px; }
 .token-add { margin-bottom: 4px; }
 </style>
