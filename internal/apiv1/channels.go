@@ -116,7 +116,7 @@ func createChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		if b.Name == "" || b.BaseURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name 与 base_url 必填"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name and base_url are required"})
 			return
 		}
 		ch := b.toModel()
@@ -134,7 +134,7 @@ func createChannel(a *app.App) gin.HandlerFunc {
 			}
 			for _, e := range entries {
 				if e.Key == "" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "key 不能为空"})
+					c.JSON(http.StatusBadRequest, gin.H{"error": "key must not be empty"})
 					return
 				}
 			}
@@ -262,7 +262,7 @@ func testChannel(a *app.App) gin.HandlerFunc {
 		}
 		adpt := adapter.Get(ch.Adapter)
 		if adpt == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "未知 adapter 类型: " + ch.Adapter})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown adapter type: " + ch.Adapter})
 			return
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(ch.TimeoutMS)*time.Millisecond)
@@ -391,14 +391,14 @@ func parseKeyEntries(raw json.RawMessage) ([]keyEntry, error) {
 		}
 		var strs []string
 		if err := json.Unmarshal(trimmed, &strs); err != nil {
-			return nil, errors.New("keys 必须是字符串数组或 {name,source,remark,key} 对象数组")
+			return nil, errors.New("keys must be a string array or an array of {name,source,remark,key} objects")
 		}
 		for _, s := range strs {
 			entries = append(entries, keyEntry{Key: s})
 		}
 		return entries, nil
 	}
-	return nil, errors.New("keys 必须是数组")
+	return nil, errors.New("keys must be an array")
 }
 
 func addKeys(a *app.App) gin.HandlerFunc {
@@ -417,12 +417,12 @@ func addKeys(a *app.App) gin.HandlerFunc {
 			return
 		}
 		if len(entries) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "keys 不能为空"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "keys must not be empty"})
 			return
 		}
 		for _, e := range entries {
 			if e.Key == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "key 不能为空"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "key must not be empty"})
 				return
 			}
 		}

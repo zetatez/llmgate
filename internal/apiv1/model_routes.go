@@ -89,7 +89,7 @@ func createModelRoute(a *app.App) gin.HandlerFunc {
 			return
 		}
 		if b.DisplayName == "" || b.ChannelID <= 0 || b.UpstreamModel == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "display_name / channel_id / upstream_model 必填"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "display_name / channel_id / upstream_model are required"})
 			return
 		}
 		enabled := 1

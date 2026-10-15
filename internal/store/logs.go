@@ -103,6 +103,39 @@ func QueryLogs(db *sql.DB, f LogFilter) ([]*models.RequestLog, error) {
 	return out, rows.Err()
 }
 
+// CountLogs 返回满足条件（不含分页）的日志总数，供前端分页。
+func CountLogs(db *sql.DB, f LogFilter) (int64, error) {
+	where := []string{"1=1"}
+	args := []any{}
+	if f.UserID > 0 {
+		where = append(where, "user_id = ?")
+		args = append(args, f.UserID)
+	}
+	if f.DisplayModel != "" {
+		where = append(where, "display_model = ?")
+		args = append(args, f.DisplayModel)
+	}
+	if f.Status != "" {
+		where = append(where, "status = ?")
+		args = append(args, f.Status)
+	}
+	if f.ChannelID > 0 {
+		where = append(where, "channel_id = ?")
+		args = append(args, f.ChannelID)
+	}
+	if f.From > 0 {
+		where = append(where, "created_at >= ?")
+		args = append(args, f.From)
+	}
+	if f.To > 0 {
+		where = append(where, "created_at <= ?")
+		args = append(args, f.To)
+	}
+	var n int64
+	err := db.QueryRow(`SELECT COUNT(*) FROM request_logs WHERE `+strings.Join(where, " AND "), args...).Scan(&n)
+	return n, err
+}
+
 // UsagePoint 按天聚合的用量。
 type UsagePoint struct {
 	Date         string  `json:"date"` // YYYY-MM-DD

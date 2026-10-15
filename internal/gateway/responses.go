@@ -115,14 +115,14 @@ func responsesPlain(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rout
 		if res.StatusCode < 200 || res.StatusCode >= 400 {
 			// 上游非 2xx（如协议透传错误）：原样透传，客户端可读到真实原因
 			finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
-			_ = store.TouchChannelKey(a.DB, res.KeyID)
+			touchChannelKey(a.DB, res.KeyID)
 			c.Data(res.StatusCode, ct, res.Body)
 			return
 		}
 		// 2xx：将 chat completion 转成 Responses 对象
 		parseUsage(res.Body, logEntry)
 		finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
-		_ = store.TouchChannelKey(a.DB, res.KeyID)
+		touchChannelKey(a.DB, res.KeyID)
 		out := chatToResponse(res.Body, model, res.Route.UpstreamModel, logEntry)
 		c.Data(http.StatusOK, "application/json", out)
 		return
@@ -287,7 +287,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 	if logEntry.Status == "success" {
 		_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
 	}
-	_ = store.TouchChannelKey(a.DB, logEntry.KeyID)
+	touchChannelKey(a.DB, logEntry.KeyID)
 }
 
 // responsesSSE 把上游 chat 增量 lazy 转成 Responses 的 output item 序列：

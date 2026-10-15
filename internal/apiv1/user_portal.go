@@ -69,6 +69,8 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 	authed.DELETE("/tokens/:id", userDeleteToken(a))
 
 	authed.GET("/logs", userLogs(a))
+	authed.GET("/logs/count", userLogsCount(a))
+	authed.POST("/logout-all", userLogoutAll(a))
 }
 
 // setUserSession 种下（或清除，maxAge<0 时）用户端 httpOnly 会话 Cookie。
@@ -350,13 +352,13 @@ func userAddKeys(a *app.App) gin.HandlerFunc {
 			return
 		}
 		if len(entries) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "keys 不能为空"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "keys must not be empty"})
 			return
 		}
 		items := make([]store.KeyInput, 0, len(entries))
 		for _, e := range entries {
 			if strings.TrimSpace(e.Key) == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "key 不能为空"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "key must not be empty"})
 				return
 			}
 			enc, err := a.Secret.Encrypt(strings.TrimSpace(e.Key))
@@ -516,13 +518,14 @@ type userTokenView struct {
 	Token      string `json:"token,omitempty"` // 仅创建时返回一次
 	TokenTail  string `json:"token_tail"`
 	Enabled    int    `json:"enabled"`
+	ExpiresAt  int64  `json:"expires_at"`
 	LastUsedAt int64  `json:"last_used_at"`
 	CreatedAt  int64  `json:"created_at"`
 }
 
 func toUserTokenView(a *app.App, t *models.UserToken, plain string) userTokenView {
 	return userTokenView{ID: t.ID, Name: t.Name, Token: plain, TokenTail: a.KeyTail(t.TokenEnc),
-		Enabled: t.Enabled, LastUsedAt: t.LastUsedAt, CreatedAt: t.CreatedAt}
+		Enabled: t.Enabled, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt, CreatedAt: t.CreatedAt}
 }
 
 func userListTokens(a *app.App) gin.HandlerFunc {
@@ -545,17 +548,22 @@ func userCreateToken(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
 		var b struct {
-			Name string `json:"name"`
+			Name          string `json:"name"`
+			ExpiresInDays *int   `json:"expires_in_days"` // 0/缺省 = 永不过期
 		}
 		if !decode(c, &b) {
 			return
+		}
+		expiresAt := int64(0)
+		if b.ExpiresInDays != nil && *b.ExpiresInDays > 0 {
+			expiresAt = models.Now() + int64(*b.ExpiresInDays)*86400
 		}
 		plain, enc, err := a.NewGatewayToken()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		t := &models.UserToken{UserID: u.ID, Name: strings.TrimSpace(b.Name), TokenHash: app.HashToken(plain), TokenEnc: enc, Enabled: 1}
+		t := &models.UserToken{UserID: u.ID, Name: strings.TrimSpace(b.Name), TokenHash: app.HashToken(plain), TokenEnc: enc, Enabled: 1, ExpiresAt: expiresAt}
 		id, err := store.CreateUserToken(a.DB, t)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -583,8 +591,9 @@ func userUpdateToken(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			Name    *string `json:"name"`
-			Enabled *int    `json:"enabled"`
+			Name          *string `json:"name"`
+			Enabled       *int    `json:"enabled"`
+			ExpiresInDays *int    `json:"expires_in_days"` // 0 = 永不过期；缺省 = 不变
 		}
 		if !decode(c, &b) {
 			return
@@ -594,6 +603,13 @@ func userUpdateToken(a *app.App) gin.HandlerFunc {
 		}
 		if b.Enabled != nil {
 			cur.Enabled = *b.Enabled
+		}
+		if b.ExpiresInDays != nil {
+			if *b.ExpiresInDays > 0 {
+				cur.ExpiresAt = models.Now() + int64(*b.ExpiresInDays)*86400
+			} else {
+				cur.ExpiresAt = 0
+			}
 		}
 		if err := store.UpdateUserToken(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -636,12 +652,42 @@ func userLogs(a *app.App) gin.HandlerFunc {
 		if v := c.Query("limit"); v != "" {
 			fmt.Sscanf(v, "%d", &f.Limit)
 		}
+		if v := c.Query("offset"); v != "" {
+			fmt.Sscanf(v, "%d", &f.Offset)
+		}
 		list, err := store.QueryLogs(a.DB, f)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": list})
+	}
+}
+
+// userLogsCount 返回当前用户日志总数（分页用）。
+func userLogsCount(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := currentUser(c)
+		f := store.LogFilter{UserID: u.ID, DisplayModel: c.Query("display_model"), Status: c.Query("status")}
+		n, err := store.CountLogs(a.DB, f)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": n})
+	}
+}
+
+// userLogoutAll 注销该用户的所有登录会话（含其它设备），并清除当前 Cookie。
+func userLogoutAll(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := currentUser(c)
+		if err := store.DeleteUserSessionsForUser(a.DB, u.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		setUserSession(c, "", -1)
+		c.JSON(http.StatusOK, gin.H{"data": "ok"})
 	}
 }
 

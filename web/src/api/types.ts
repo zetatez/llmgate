@@ -70,6 +70,7 @@ export interface UserToken {
   token?: string
   token_tail: string
   enabled: number
+  expires_at: number
   last_used_at: number
   created_at: number
 }
@@ -115,6 +116,16 @@ export interface UserOverview {
   week: UsagePoint[]
   today: UsageSummary
   total: UsageSummary
+}
+
+/** 管理员：某用户聚合详情 */
+export interface AdminUserDetail {
+  user: User
+  keys: UserKey[]
+  tokens: UserToken[]
+  today: UsageSummary
+  total: UsageSummary
+  by_model: ModelUsage[]
 }
 
 export interface RequestLog {

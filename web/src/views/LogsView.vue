@@ -7,7 +7,9 @@ const list = ref<RequestLog[]>([])
 const loading = ref(false)
 const status = ref('')
 const displayModel = ref('')
-const limit = ref(50)
+const page = ref(1)
+const size = ref(50)
+const total = ref(0)
 
 function fmtTime(ts: number) {
   if (!ts) return '-'
@@ -16,14 +18,32 @@ function fmtTime(ts: number) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+function baseParams(): Record<string, string | number> {
+  const params: Record<string, string | number> = {}
+  if (status.value) params.status = status.value
+  if (displayModel.value) params.display_model = displayModel.value
+  return params
+}
+
+async function search() {
+  page.value = 1
+  await load()
+}
+
 async function load() {
   loading.value = true
   try {
-    const params: Record<string, string | number> = { limit: limit.value }
-    if (status.value) params.status = status.value
-    if (displayModel.value) params.display_model = displayModel.value
+    const params = { ...baseParams(), limit: size.value, offset: (page.value - 1) * size.value }
     list.value = await logsApi.list(params)
-  } finally { loading.value = false }
+    total.value = await logsApi.count(baseParams())
+  } finally {
+    loading.value = false
+  }
+}
+
+function onSizeChange() {
+  page.value = 1
+  load()
 }
 
 onMounted(load)
@@ -33,17 +53,17 @@ onMounted(load)
   <el-card shadow="never">
     <template #header>
       <div class="filters">
-        <el-input v-model="displayModel" placeholder="Model" clearable style="width: 160px" @keyup.enter="load" />
+        <el-input v-model="displayModel" placeholder="Model" clearable style="width: 160px" @keyup.enter="search" />
         <el-select v-model="status" placeholder="Status" clearable style="width: 110px">
           <el-option label="Success" value="success" />
           <el-option label="Failed" value="error" />
         </el-select>
-        <el-select v-model="limit" style="width: 100px">
-          <el-option label="50" :value="50" />
-          <el-option label="100" :value="100" />
-          <el-option label="200" :value="200" />
+        <el-select v-model="size" style="width: 120px" @change="onSizeChange">
+          <el-option label="50 / page" :value="50" />
+          <el-option label="100 / page" :value="100" />
+          <el-option label="200 / page" :value="200" />
         </el-select>
-        <el-button type="primary" @click="load">Search</el-button>
+        <el-button type="primary" @click="search">Search</el-button>
       </div>
     </template>
     <el-table v-loading="loading" :data="list" size="small" max-height="70vh">
@@ -70,10 +90,22 @@ onMounted(load)
       </el-table-column>
       <el-table-column prop="error_code" label="Error" min-width="140" show-overflow-tooltip />
     </el-table>
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="size"
+        :total="total"
+        layout="total, prev, pager, next"
+        :disabled="loading"
+        @current-change="load"
+      />
+    </div>
   </el-card>
 </template>
 
 <style scoped>
 .filters { display: flex; gap: 8px; align-items: center; }
 .nowrap { white-space: nowrap; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 </style>

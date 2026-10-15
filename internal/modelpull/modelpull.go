@@ -41,7 +41,7 @@ func PullChannel(ctx context.Context, a *app.App, ch *models.Channel, opt Option
 	}
 	adpt := adapter.Get(ch.Adapter)
 	if adpt == nil {
-		return nil, fmt.Errorf("未知 adapter 类型: %s", ch.Adapter)
+		return nil, fmt.Errorf("unknown adapter type: %s", ch.Adapter)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(ch.TimeoutMS)*time.Millisecond)
 	defer cancel()
@@ -54,13 +54,13 @@ func PullChannel(ctx context.Context, a *app.App, ch *models.Channel, opt Option
 	if resp.StatusCode >= 400 {
 		ct := resp.Headers["Content-Type"]
 		if strings.Contains(strings.ToLower(ct), "html") {
-			return nil, fmt.Errorf("上游返回 HTML 页面（HTTP %d），请检查 base_url 是否为 API 地址", resp.StatusCode)
+			return nil, fmt.Errorf("upstream returned an HTML page (HTTP %d); check that base_url points to an API endpoint", resp.StatusCode)
 		}
-		return nil, fmt.Errorf("上游返回 %d: %s", resp.StatusCode, truncate(string(body), 200))
+		return nil, fmt.Errorf("upstream returned %d: %s", resp.StatusCode, truncate(string(body), 200))
 	}
 	names, err := adapter.ParseModels(body)
 	if err != nil || len(names) == 0 {
-		return nil, errors.New("上游未返回可用的模型列表")
+		return nil, errors.New("upstream returned no usable model list")
 	}
 
 	res := &Result{Models: names}

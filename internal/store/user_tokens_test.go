@@ -71,3 +71,32 @@ func TestUserTokensCRUDAndResolve(t *testing.T) {
 		t.Fatal("deleted token should be gone")
 	}
 }
+
+func TestResolveUserTokenExpiry(t *testing.T) {
+	db := setupDB(t)
+	uid, err := CreateUser(db, &models.User{Name: "u", Username: "u", TokenHash: "ph", Status: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 已过期令牌 → 不解析
+	if _, err := CreateUserToken(db, &models.UserToken{UserID: uid, Name: "exp", TokenHash: "hexp", Enabled: 1, ExpiresAt: models.Now() - 1}); err != nil {
+		t.Fatal(err)
+	}
+	if u, tok, err := ResolveUserToken(db, "hexp"); u != nil || tok == nil || err != nil {
+		t.Fatalf("expired token should not resolve user, got %+v %+v %v", u, tok, err)
+	}
+	// 未过期令牌 → 正常解析
+	if _, err := CreateUserToken(db, &models.UserToken{UserID: uid, Name: "ok", TokenHash: "hok", Enabled: 1, ExpiresAt: models.Now() + 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if u, _, err := ResolveUserToken(db, "hok"); err != nil || u == nil || u.ID != uid {
+		t.Fatalf("valid token should resolve, got %+v err %v", u, err)
+	}
+	// 永不过期（0）→ 正常解析
+	if _, err := CreateUserToken(db, &models.UserToken{UserID: uid, Name: "never", TokenHash: "hnever", Enabled: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if u, _, _ := ResolveUserToken(db, "hnever"); u == nil {
+		t.Fatal("token with no expiry should resolve")
+	}
+}

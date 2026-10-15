@@ -76,7 +76,7 @@ func (m *Manager) Decrypt(enc string) (string, error) {
 	}
 	plain, err := m.aead.Open(nil, raw[:ns], raw[ns:], nil)
 	if err != nil {
-		return "", errors.New("decrypt failed (seed 不匹配?)")
+		return "", errors.New("decrypt failed (seed mismatch?)")
 	}
 	return string(plain), nil
 }

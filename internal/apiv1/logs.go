@@ -16,6 +16,7 @@ import (
 // RegisterLogRoutes 挂载日志与统计路由。
 func RegisterLogRoutes(g *gin.RouterGroup, a *app.App) {
 	g.GET("", queryLogs(a))
+	g.GET("/count", countLogs(a))
 	g.GET("/usage/dashboard", usageDashboard(a))
 	g.GET("/usage/by-model", usageByModel(a))
 	g.GET("/usage/by-user-model", usageByUserModel(a))
@@ -59,7 +60,7 @@ func usageByModel(a *app.App) gin.HandlerFunc {
 		if dateStr != "" {
 			t, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "date 格式应为 YYYY-MM-DD"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "date must be in YYYY-MM-DD format"})
 				return
 			}
 			day = t
@@ -77,26 +78,7 @@ func usageByModel(a *app.App) gin.HandlerFunc {
 
 func queryLogs(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		f := store.LogFilter{
-			DisplayModel: c.Query("display_model"),
-			Status:       c.Query("status"),
-		}
-		if v := c.Query("channel_id"); v != "" {
-			id, _ := strconv.ParseInt(v, 10, 64)
-			f.ChannelID = id
-		}
-		if v := c.Query("from"); v != "" {
-			f.From, _ = strconv.ParseInt(v, 10, 64)
-		}
-		if v := c.Query("to"); v != "" {
-			f.To, _ = strconv.ParseInt(v, 10, 64)
-		}
-		if v := c.Query("offset"); v != "" {
-			f.Offset, _ = strconv.Atoi(v)
-		}
-		if v := c.Query("limit"); v != "" {
-			f.Limit, _ = strconv.Atoi(v)
-		}
+		f := parseLogFilter(c)
 		list, err := store.QueryLogs(a.DB, f)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -104,6 +86,47 @@ func queryLogs(a *app.App) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"data": list})
 	}
+}
+
+// countLogs 返回满足筛选条件的日志总数（分页用）。
+func countLogs(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		n, err := store.CountLogs(a.DB, parseLogFilter(c))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": n})
+	}
+}
+
+// parseLogFilter 从查询参数构造日志筛选条件（管理端）。
+func parseLogFilter(c *gin.Context) store.LogFilter {
+	f := store.LogFilter{
+		DisplayModel: c.Query("display_model"),
+		Status:       c.Query("status"),
+	}
+	if v := c.Query("channel_id"); v != "" {
+		id, _ := strconv.ParseInt(v, 10, 64)
+		f.ChannelID = id
+	}
+	if v := c.Query("user_id"); v != "" {
+		id, _ := strconv.ParseInt(v, 10, 64)
+		f.UserID = id
+	}
+	if v := c.Query("from"); v != "" {
+		f.From, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if v := c.Query("to"); v != "" {
+		f.To, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if v := c.Query("offset"); v != "" {
+		f.Offset, _ = strconv.Atoi(v)
+	}
+	if v := c.Query("limit"); v != "" {
+		f.Limit, _ = strconv.Atoi(v)
+	}
+	return f
 }
 
 // dashboardPayload 仪表盘一次性数据。
@@ -185,18 +208,18 @@ type settingDef struct {
 
 // settingsCatalog 内置设置目录：每项设置都有分类与描述，字段顺序即返回顺序。
 var settingsCatalog = []settingDef{
-	{classification: "Basic", key: "default_timeout_ms", description: "默认请求超时（毫秒），用于渠道未单独设置超时时", def: "60000", mutable: true},
-	{classification: "Logging", key: "log_retain_days", description: "超过该天数的请求日志在启动时清理（0=禁用）", def: "30", mutable: true},
-	{classification: "Pricing", key: "model_pricing", description: "模型单价（USD/百万 tokens，JSON）；路由自定义单价优先于此处", def: "{}", mutable: true},
-	{classification: "Auto-pull", key: "pull_interval_min", description: "自动拉取上游模型的间隔（分钟），0=禁用", def: "60", mutable: true},
-	{classification: "Auto-pull", key: "pull_default_priority", description: "自动拉取新建路由的默认优先级（越小越优先）", def: "0", mutable: true},
-	{classification: "Auto-pull", key: "pull_default_weight", description: "自动拉取新建路由的默认权重", def: "1", mutable: true},
-	{classification: "Status", key: "model_pull_last", description: "最近一次自动拉取的执行摘要（只读）", def: "", mutable: false},
-	{classification: "Runtime", key: "gateway_prefix", description: "网关前缀（运行期配置，只读）", def: "/", mutable: false},
-	{classification: "Failover", key: "circuit_fail_threshold", description: "熔断：滑动窗口内连续失败多少次才真正冷却渠道/模型（抗抖动）", def: "6", mutable: true},
-	{classification: "Failover", key: "circuit_fail_window_s", description: "熔断：连续失败计数的滑动窗口（秒）", def: "30", mutable: true},
-	{classification: "Failover", key: "circuit_quota_cooldown_s", description: "熔断：额度用尽/欠费/过期时的冷却时长（秒）", def: "30", mutable: true},
-	{classification: "Failover", key: "circuit_probe_backoff_s", description: "探活：冷却渠道探测失败后的退避时长（秒）", def: "30", mutable: true},
+	{classification: "Basic", key: "default_timeout_ms", description: "Default request timeout (ms) used when a channel has no per-channel timeout", def: "60000", mutable: true},
+	{classification: "Logging", key: "log_retain_days", description: "Request logs older than this many days are cleaned up on startup (0 = disabled)", def: "30", mutable: true},
+	{classification: "Pricing", key: "model_pricing", description: "Model prices (USD per million tokens, JSON); per-route prices take precedence", def: "{}", mutable: true},
+	{classification: "Auto-pull", key: "pull_interval_min", description: "Interval for auto-pulling upstream models (minutes); 0 = disabled", def: "60", mutable: true},
+	{classification: "Auto-pull", key: "pull_default_priority", description: "Default priority for routes created by auto-pull (lower = preferred)", def: "0", mutable: true},
+	{classification: "Auto-pull", key: "pull_default_weight", description: "Default weight for routes created by auto-pull", def: "1", mutable: true},
+	{classification: "Status", key: "model_pull_last", description: "Summary of the last auto-pull run (read-only)", def: "", mutable: false},
+	{classification: "Runtime", key: "gateway_prefix", description: "Gateway prefix (runtime config, read-only)", def: "/", mutable: false},
+	{classification: "Failover", key: "circuit_fail_threshold", description: "Circuit breaker: consecutive failures within the window before a channel/model is cooled down (jitter resistance)", def: "6", mutable: true},
+	{classification: "Failover", key: "circuit_fail_window_s", description: "Circuit breaker: sliding window (seconds) for consecutive-failure counting", def: "30", mutable: true},
+	{classification: "Failover", key: "circuit_quota_cooldown_s", description: "Circuit breaker: cooldown (seconds) when a key hits quota/arrears/expiry", def: "30", mutable: true},
+	{classification: "Failover", key: "circuit_probe_backoff_s", description: "Probe: backoff (seconds) after a failed recovery probe of a cooled-down channel", def: "30", mutable: true},
 }
 
 func getSettings(a *app.App) gin.HandlerFunc {
@@ -240,7 +263,7 @@ func updateSettings(a *app.App) gin.HandlerFunc {
 		}
 		for _, item := range b.Data {
 			if !mutable[item.Key] {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "不允许修改的配置: " + item.Key})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "setting is not mutable: " + item.Key})
 				return
 			}
 		}

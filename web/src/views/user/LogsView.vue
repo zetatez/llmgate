@@ -5,11 +5,24 @@ import type { RequestLog } from '../../api'
 
 const logs = ref<RequestLog[]>([])
 const loading = ref(false)
-const limit = ref(100)
+const page = ref(1)
+const size = ref(50)
+const total = ref(0)
 
 async function load() {
   loading.value = true
-  try { logs.value = await portalApi.logs(limit.value) } finally { loading.value = false }
+  try {
+    const offset = (page.value - 1) * size.value
+    logs.value = await portalApi.logs({ limit: size.value, offset })
+    total.value = await portalApi.logsCount()
+  } finally {
+    loading.value = false
+  }
+}
+
+function onSizeChange() {
+  page.value = 1
+  load()
 }
 
 function fmtTime(ts: number) {
@@ -28,11 +41,10 @@ onMounted(load)
       <div class="head">
         <span>My Requests</span>
         <div>
-          <el-select v-model="limit" style="width: 120px" @change="load">
-            <el-option label="Last 50" :value="50" />
-            <el-option label="Last 100" :value="100" />
-            <el-option label="Last 200" :value="200" />
-            <el-option label="Last 500" :value="500" />
+          <el-select v-model="size" style="width: 120px" @change="onSizeChange">
+            <el-option label="50 / page" :value="50" />
+            <el-option label="100 / page" :value="100" />
+            <el-option label="200 / page" :value="200" />
           </el-select>
           <el-button size="small" class="ml" :loading="loading" @click="load">Refresh</el-button>
         </div>
@@ -66,10 +78,22 @@ onMounted(load)
       </el-table-column>
     </el-table>
     <el-empty v-if="!loading && !logs.length" description="No requests yet" />
+
+    <div class="pager">
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="size"
+        :total="total"
+        layout="total, prev, pager, next"
+        :disabled="loading"
+        @current-change="load"
+      />
+    </div>
   </el-card>
 </template>
 
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; }
 .ml { margin-left: 8px; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 </style>

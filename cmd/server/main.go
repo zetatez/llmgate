@@ -80,6 +80,17 @@ func main() {
 	go modelPuller.Run()
 	go modelPuller.RunBackground()
 
+	// 会话清理：过期会话每小时回收（启动时已清理一次）
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := store.CleanupExpiredSessions(db); err != nil {
+				log.Printf("warn: cleanup sessions: %v", err)
+			}
+		}
+	}()
+
 	if cfg.LogLevel == "debug" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -99,6 +110,7 @@ func main() {
 
 	apiv1.Register(r.Group("/api/admin"), a, modelPuller.SyncNow)
 	apiv1.RegisterUserPortal(r.Group("/api/user"), a)
+	r.GET("/api/session", apiv1.SessionProbe(a))
 	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus, pen)
 
 	// 生产构建（-tags embedweb）时托管前端静态资源；本地开发返回 nil 不影响运行

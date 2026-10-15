@@ -38,13 +38,19 @@ curl -o /dev/null -w '%{http_code}\n' http://<服务器IP>:3210/   # → 200（�
 ```
 
 ### 第 5 步：初始化使用
-1. 浏览器打开 `http://<服务器IP>:3210` ，用 `LGM_ADMIN_TOKEN` 登录管理后台
-2. 「渠道管理」新建上游套餐（BaseURL + API Key，可多个 Key）
-3. 「模型路由」把对外模型名绑定渠道
-4. 「用户管理」创建用户，得到一次性 `sk-xxx` 令牌
-5. 在任意 OpenAI 兼容客户端中配置：
+1. 浏览器打开 `http://<服务器IP>:3210`，登录页选 **Admin**，用 `LGM_ADMIN_TOKEN` 登录管理后台
+2. **Channels**：新建上游渠道（Base URL + 适配器；Key 可稍后由用户录入）
+3. **Model Routes**：把对外模型名绑定渠道
+4. **Users**：创建用户账号（用户名 + 密码）
+5. 用户打开同一地址，登录页选 **User**，用账号登录后：
+   - 在 **My API Keys** 录入自己的上游 API Key（选择渠道）
+   - 在 **My Tokens** 创建 `sk-xxx` 消费令牌
+6. 在任意 OpenAI 兼容客户端中配置：
    - **Base URL**: `http://<服务器IP>:3210/v1`
-   - **API Key**: `sk-xxx`
+   - **API Key**: 该用户创建的 `sk-xxx`
+
+> 多租户（BYOK）：网关只使用**请求用户本人录入的 Key**（按 `channel_keys.user_id` 隔离），用户之间互不可见。
+> 升级到多租户后，既有 Key 归属为「管理员/全局」不参与用户路由——可在 **Channels** 里把 Key 的 Owner 指派给某用户，或让用户自行录入。
 
 ## 二、常用运维
 
@@ -94,6 +100,9 @@ server {
 }
 ```
 之后客户端 Base URL 改为 `https://llm.example.com/v1`。
+
+> 反代场景请在 `.env` 设置 `LGM_TRUSTED_PROXIES=127.0.0.1`（或代理地址），以便按真实客户端 IP 统计登录限速；
+> 会话 Cookie 的 `Secure` 已识别 `X-Forwarded-Proto: https`。留空时默认不信任 `X-Forwarded-For`。
 
 ### 防火墙
 只需放行你实际对外服务的端口（默认映射 `TCP 3210`，或用 Nginx 时只放行 80/443）。

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { logoutUser } from '../api/client'
 import { portalApi } from '../api'
 import type { PortalUser } from '../api'
@@ -23,6 +23,19 @@ const displayName = computed(() => me.value?.name || me.value?.username || '')
 async function logout() {
   await logoutUser()
   router.push('/login')
+}
+
+// 注销所有设备（吊销全部会话）
+async function logoutAll() {
+  try {
+    await ElMessageBox.confirm('Sign out of all devices? Every active session will be revoked.', 'Sign out all devices', { type: 'warning' })
+  } catch { return }
+  try {
+    await portalApi.logoutAll()
+    router.push('/login')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'Failed to sign out')
+  }
 }
 
 // 自助改密码
@@ -70,6 +83,7 @@ onMounted(async () => {
         <div class="right">
           <span class="user">{{ displayName }}</span>
           <el-button link type="primary" @click="openPassword">Password</el-button>
+          <el-button link type="warning" @click="logoutAll">Sign out all</el-button>
           <el-button link type="danger" @click="logout">Logout</el-button>
         </div>
       </el-header>

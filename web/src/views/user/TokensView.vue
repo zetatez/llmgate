@@ -29,16 +29,16 @@ async function load() {
   }
 }
 
-const dialog = reactive({ visible: false, name: '' })
+const dialog = reactive({ visible: false, name: '', days: 0 })
 const reveal = reactive({ visible: false, token: '' })
 
 function openAdd() {
-  Object.assign(dialog, { visible: true, name: '' })
+  Object.assign(dialog, { visible: true, name: '', days: 0 })
 }
 
 async function create() {
   try {
-    const t = await portalApi.createToken(dialog.name)
+    const t = await portalApi.createToken(dialog.name, dialog.days)
     dialog.visible = false
     reveal.token = t.token || ''
     reveal.visible = true
@@ -106,6 +106,9 @@ onMounted(load)
         <el-table-column label="Last used" width="170">
           <template #default="{ row }">{{ row.last_used_at ? new Date(row.last_used_at * 1000).toLocaleString() : 'never' }}</template>
         </el-table-column>
+        <el-table-column label="Expires" width="170">
+          <template #default="{ row }">{{ row.expires_at ? new Date(row.expires_at * 1000).toLocaleString() : 'never' }}</template>
+        </el-table-column>
         <el-table-column label="Created" width="170">
           <template #default="{ row }">{{ new Date(row.created_at * 1000).toLocaleString() }}</template>
         </el-table-column>
@@ -124,6 +127,14 @@ onMounted(load)
     <el-dialog v-model="dialog.visible" title="Create Token" width="420px">
       <el-form label-width="90px">
         <el-form-item label="Name"><el-input v-model="dialog.name" placeholder="e.g. laptop / ci" /></el-form-item>
+        <el-form-item label="Expires">
+          <el-select v-model="dialog.days" style="width: 100%">
+            <el-option label="Never" :value="0" />
+            <el-option label="7 days" :value="7" />
+            <el-option label="30 days" :value="30" />
+            <el-option label="90 days" :value="90" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog.visible = false">Cancel</el-button>

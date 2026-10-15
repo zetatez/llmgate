@@ -7,11 +7,11 @@ import (
 	"llmgate/internal/models"
 )
 
-const userTokenCols = `id, user_id, name, token_hash, token_enc, enabled, last_used_at, created_at`
+const userTokenCols = `id, user_id, name, token_hash, token_enc, enabled, expires_at, last_used_at, created_at`
 
 func scanUserToken(row interface{ Scan(...any) error }) (*models.UserToken, error) {
 	t := &models.UserToken{}
-	err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.TokenHash, &t.TokenEnc, &t.Enabled, &t.LastUsedAt, &t.CreatedAt)
+	err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.TokenHash, &t.TokenEnc, &t.Enabled, &t.ExpiresAt, &t.LastUsedAt, &t.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -49,18 +49,18 @@ func GetUserToken(db *sql.DB, id int64) (*models.UserToken, error) {
 // CreateUserToken 新建消费令牌，返回新 id。
 func CreateUserToken(db *sql.DB, t *models.UserToken) (int64, error) {
 	res, err := db.Exec(`
-		INSERT INTO user_tokens (user_id, name, token_hash, token_enc, enabled, last_used_at, created_at)
-		VALUES (?, ?, ?, ?, ?, 0, ?)`,
-		t.UserID, t.Name, t.TokenHash, t.TokenEnc, t.Enabled, models.Now())
+		INSERT INTO user_tokens (user_id, name, token_hash, token_enc, enabled, expires_at, last_used_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+		t.UserID, t.Name, t.TokenHash, t.TokenEnc, t.Enabled, t.ExpiresAt, models.Now())
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-// UpdateUserToken 更新令牌名称与启用状态。
+// UpdateUserToken 更新令牌名称、启用状态与过期时间。
 func UpdateUserToken(db *sql.DB, t *models.UserToken) error {
-	res, err := db.Exec(`UPDATE user_tokens SET name=?, enabled=? WHERE id=?`, t.Name, t.Enabled, t.ID)
+	res, err := db.Exec(`UPDATE user_tokens SET name=?, enabled=?, expires_at=? WHERE id=?`, t.Name, t.Enabled, t.ExpiresAt, t.ID)
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func TouchUserToken(db *sql.DB, id int64) error {
 }
 
 // ResolveUserToken 用令牌哈希定位所属用户与其令牌（网关鉴权）。
-// 令牌不存在、或用户/令牌被禁用时返回 (nil, token, nil)（token 可能非空便于区分原因）。
+// 令牌不存在、被禁用、已过期，或用户被禁用时返回 (nil, token, nil)（token 可能非空便于区分原因）。
 func ResolveUserToken(db *sql.DB, hash string) (*models.User, *models.UserToken, error) {
 	row := db.QueryRow(`SELECT `+userTokenCols+` FROM user_tokens WHERE token_hash=?`, hash)
 	t, err := scanUserToken(row)
@@ -99,11 +99,14 @@ func ResolveUserToken(db *sql.DB, hash string) (*models.User, *models.UserToken,
 	if err != nil {
 		return nil, nil, err
 	}
+	if t.Enabled != 1 || (t.ExpiresAt > 0 && t.ExpiresAt <= models.Now()) {
+		return nil, t, nil
+	}
 	u, err := GetUser(db, t.UserID)
 	if err != nil {
 		return nil, t, err
 	}
-	if u == nil || u.Status != 1 || t.Enabled != 1 {
+	if u == nil || u.Status != 1 {
 		return nil, t, nil
 	}
 	return u, t, nil

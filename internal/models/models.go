@@ -28,6 +28,7 @@ type UserToken struct {
 	TokenHash  string `json:"-"` // 鉴权用哈希
 	TokenEnc   string `json:"-"` // AES 加密（支持回显/复制）
 	Enabled    int    `json:"enabled"`
+	ExpiresAt  int64  `json:"expires_at"` // 过期时间（unix 秒），0 = 永不过期
 	LastUsedAt int64  `json:"last_used_at"`
 	CreatedAt  int64  `json:"created_at"`
 }

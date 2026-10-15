@@ -9,21 +9,26 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"llmgate/internal/app"
+	"llmgate/internal/models"
+	"llmgate/internal/store"
 )
 
 // adminSessionCookie 管理端 httpOnly 会话 Cookie 名。
 const adminSessionCookie = "llmgate_admin_session"
 
+// adminSessionTTL 管理员会话有效期（秒）。
+const adminSessionTTL = 30 * 24 * 3600
+
 // Register 挂载管理端路由。
-// 会话凭据为 httpOnly Cookie（不再依赖前端 localStorage）：
-//   - POST /login  校验 Bearer 令牌并种下 httpOnly 会话 Cookie
-//   - POST /logout 清除会话 Cookie
-//   - authMiddleware 同时接受 Bearer 头或会话 Cookie
+// 会话凭据为 httpOnly Cookie（服务端会话，可吊销）：
+//   - POST /login  校验 Bearer 令牌并建立服务端会话
+//   - POST /logout 删除服务端会话并清 Cookie
+//   - authMiddleware 同时接受 Bearer 管理令牌（脚本/CLI）或会话 Cookie
 //   - csrfOriginCheck 对非安全方法校验 Origin/Referer 与请求 Host 一致
 func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any) {
 	admin.Use(csrfOriginCheck())
 	admin.POST("/login", loginHandler(a))
-	admin.POST("/logout", logoutHandler())
+	admin.POST("/logout", logoutHandler(a))
 	admin.Use(authMiddleware(a))
 	admin.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
@@ -48,7 +53,8 @@ func setAdminSession(c *gin.Context, token string, maxAge int) {
 	c.SetCookie(adminSessionCookie, token, maxAge, "/", "", secure, true)
 }
 
-// loginHandler 校验管理令牌并建立 httpOnly 会话（带失败限速防爆破）。
+// loginHandler 校验管理令牌并建立服务端会话（带失败限速防爆破）。
+// Cookie 只保存随机会话令牌（库内存哈希），不再保存 admin token 本身，登出即可吊销。
 func loginHandler(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := "admin|" + remoteKey(c)
@@ -64,14 +70,26 @@ func loginHandler(a *app.App) gin.HandlerFunc {
 			return
 		}
 		authLimiter.reset(key)
-		setAdminSession(c, token, 30*24*3600)
+		sess, err := app.GenSecret(32)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.CreateAdminSession(a.DB, app.HashToken(sess), models.Now()+adminSessionTTL); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		setAdminSession(c, sess, adminSessionTTL)
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "ok"}})
 	}
 }
 
-// logoutHandler 清除会话 Cookie。
-func logoutHandler() gin.HandlerFunc {
+// logoutHandler 删除服务端会话并清除 Cookie。
+func logoutHandler(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if sess, err := c.Cookie(adminSessionCookie); err == nil && sess != "" {
+			_ = store.DeleteAdminSession(a.DB, app.HashToken(sess))
+		}
 		setAdminSession(c, "", -1)
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "ok"}})
 	}
@@ -99,19 +117,55 @@ func csrfOriginCheck() gin.HandlerFunc {
 	}
 }
 
-// authMiddleware 校验 Authorization: Bearer <admin_token> 或 httpOnly 会话 Cookie。
+// authMiddleware 校验 Authorization: Bearer <admin_token> 或服务端会话 Cookie。
 func authMiddleware(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := bearerToken(c.GetHeader("Authorization"))
-		if token == "" {
-			token, _ = c.Cookie(adminSessionCookie)
+		// Bearer 管理令牌（脚本/CLI）优先
+		if token := bearerToken(c.GetHeader("Authorization")); token != "" {
+			hash, err := a.GetSetting("admin_token_hash")
+			if err != nil || hash == "" || !a.VerifyToken(token, hash) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+				return
+			}
+			c.Next()
+			return
 		}
-		hash, err := a.GetSetting("admin_token_hash")
-		if err != nil || hash == "" || !a.VerifyToken(token, hash) {
+		// 服务端会话 Cookie
+		sess, _ := c.Cookie(adminSessionCookie)
+		if sess == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		ok, err := store.AdminSessionValid(a.DB, app.HashToken(sess))
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 		c.Next()
+	}
+}
+
+// SessionProbe 汇总当前会话身份（供前端路由守卫一次请求判定），始终返回 200。
+// role: admin / user / anonymous。
+func SessionProbe(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if sess, err := c.Cookie(adminSessionCookie); err == nil && sess != "" {
+			if ok, _ := store.AdminSessionValid(a.DB, app.HashToken(sess)); ok {
+				c.JSON(http.StatusOK, gin.H{"role": "admin"})
+				return
+			}
+		}
+		if sess, err := c.Cookie(userSessionCookie); err == nil && sess != "" {
+			if u, _ := store.GetUserBySessionHash(a.DB, app.HashToken(sess)); u != nil {
+				c.JSON(http.StatusOK, gin.H{"role": "user", "user": toPortalUser(u)})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"role": "anonymous"})
 	}
 }
 

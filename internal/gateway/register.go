@@ -63,7 +63,7 @@ func gatewayAuth(a *app.App) gin.HandlerFunc {
 			return
 		}
 		if utok != nil {
-			_ = store.TouchUserToken(a.DB, utok.ID)
+			touchUserToken(a.DB, utok.ID)
 		}
 		c.Set(ctxUserKey, user)
 		c.Next()
@@ -228,7 +228,7 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 		if logEntry.Status == "success" {
 			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
 		}
-		_ = store.TouchChannelKey(a.DB, res.KeyID)
+		touchChannelKey(a.DB, res.KeyID)
 		c.Data(res.StatusCode, contentType(res), res.Body)
 		return
 	}
@@ -362,7 +362,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	if logEntry.Status == "success" {
 		_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
 	}
-	_ = store.TouchChannelKey(a.DB, logEntry.KeyID)
+	touchChannelKey(a.DB, logEntry.KeyID)
 }
 
 // parseUsage 从（非流式）上游响应体解析 usage。

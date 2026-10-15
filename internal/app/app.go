@@ -144,7 +144,7 @@ func (a *App) FirstEnabledKey(channelID int64) (string, error) {
 	if plain, ok := pick(false); ok {
 		return plain, nil
 	}
-	return "", errors.New("渠道没有可用的 Key")
+	return "", errors.New("channel has no enabled key")
 }
 
 // NewGatewayToken 生成一个新的网关消费令牌：返回明文（sk-xxx，仅一次性展示）与加密串。

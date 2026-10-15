@@ -21,6 +21,7 @@ func newPortalRouter(a *app.App) *gin.Engine {
 	r := gin.New()
 	Register(r.Group(basePath), a, nil)
 	RegisterUserPortal(r.Group("/api/user"), a)
+	r.GET("/api/session", SessionProbe(a))
 	return r
 }
 

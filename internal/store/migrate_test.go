@@ -63,13 +63,15 @@ func TestMigrateBackfillsLegacyTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 升级到最新（直接应用 009，等价于 Migrate 恰好要跑的那一步）
-	sqlBytes, err := migrationsFS.ReadFile("migrations/009_multiuser.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(string(sqlBytes)); err != nil {
-		t.Fatalf("apply 009: %v", err)
+	// 升级到最新（应用 009/010，等价于 Migrate 恰好要跑的那几步）
+	for _, name := range []string{"009_multiuser.sql", "010_sessions.sql"} {
+		sqlBytes, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(sqlBytes)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
 	}
 
 	// 旧令牌被回填进 user_tokens，升级后客户端继续可用

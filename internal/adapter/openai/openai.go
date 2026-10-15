@@ -56,7 +56,7 @@ func SetProxy(raw string) error {
 		socksDialer = d
 		return nil
 	default:
-		return fmt.Errorf("unsupported LGM_PROXY scheme: %s (支持 http/https/socks5/socks5h)", u.Scheme)
+		return fmt.Errorf("unsupported LGM_PROXY scheme: %s (supported: http/https/socks5/socks5h)", u.Scheme)
 	}
 }
 

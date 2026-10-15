@@ -12,10 +12,11 @@
 - 把多个「上游套餐」（渠道）统一聚合成一个 OpenAI 兼容的网关接口
 - 模型名聚合：对外一个模型名可映射到多个上游渠道，自动路由与故障转移
 - 可用性优先：主用渠道失败自动切换备用渠道，对调用方透明
-- 自用为主，可给少量朋友发独立令牌并设定额度
+- 多用户 + BYOK：用户以用户名/密码登录，把自己的上游 Key 录入管理员定义的渠道；
+  网关按归属隔离——每个用户只使用**自己录入的 Key**，Key 之间互不可见
 
 ### 非目标（当前明确不做）
-- 多租户计费/充值/账单（只做配额上限）
+- 计费/充值/账单（只做配额上限）
 - 其他上游协议适配器（Claude/Gemini 原生协议）— 预留扩展点，Phase 2 后再议
 - 高可用多实例 / 分布式（单机社区版，SQLite）
 
@@ -72,15 +73,35 @@ llmgate/
 
 ## 5. 数据模型（SQLite）
 
-### users（轻量用户）
+### users（用户账号）
  | 字段          | 类型   | 说明                                                        |
  | ---           | ---    | ---                                                         |
  | id            | int    | PK                                                          |
  | name / remark | string | 显示名/备注                                                 |
- | token_hash    | string | 令牌哈希存储（sha256），原始 `sk-xxx` 仅创建/重置时展示一次 |
+ | username      | string | 登录名（非空时唯一；由管理员创建）                          |
+ | password_hash | string | bcrypt 密码哈希（不对外）                                   |
  | quota_limit   | float  | 额度上限（按估算成本美元计），0 = 不限                      |
  | quota_used    | float  | 已用额度（累计）                                            |
  | status        | int    | 启用/禁用                                                   |
+
+> `token_hash`/`token_enc` 为旧版单令牌遗留列，不再用于鉴权（消费令牌改由 `user_tokens` 承载）。
+
+### user_tokens（用户的网关消费令牌，一人可多个）
+ | 字段                      | 类型   | 说明                                     |
+ | ---                       | ---    | ---                                      |
+ | id / user_id              | int    | PK / FK → users                          |
+ | name                      | string | 令牌备注名                               |
+ | token_hash / token_enc    | string | 鉴权哈希 / AES 密文（支持回显末4位）     |
+ | enabled / expires_at      | int    | 启用状态 / 过期时间（0 = 永不过期）      |
+ | last_used_at / created_at | time   | 最近使用 / 创建时间                      |
+
+### user_sessions / admin_sessions（登录会话，库内只存哈希）
+ | 字段                    | 类型   | 说明                                        |
+ | ---                     | ---    | ---                                         |
+ | id                      | int    | PK                                          |
+ | user_id                 | int    | （仅 user_sessions）FK → users              |
+ | token_hash              | string | 随机会话令牌的 sha256                       |
+ | created_at / expires_at | time   | 创建 / 过期（后台每小时清理，可服务端吊销） |
 
 ### channels（渠道 = 一个上游套餐）
  | 字段         | 类型   | 说明                                   |
@@ -97,14 +118,17 @@ llmgate/
  | note         | string | 备注                                   |
 
 ### channel_keys（一个渠道挂多个 Key）
- | 字段         | 类型 | 说明                   |
- | ---          | ---  | ---                    |
- | id           | int  | PK                     |
- | channel_id   | int  | FK → channels          |
- | api_key_enc  | blob | AES-256-GCM 加密的 Key |
- | enabled      | bool | 是否参与使用           |
- | weight       | int  | 池内轮换权重           |
- | last_used_at | time | 最近使用时间           |
+ | 字段         | 类型 | 说明                            |
+ | ---          | ---  | ---                             |
+ | id           | int  | PK                              |
+ | channel_id   | int  | FK → channels                   |
+ | user_id      | int  | Key 归属用户；0 = 管理员/全局   |
+ | api_key_enc  | blob | AES-256-GCM 加密的 Key          |
+ | enabled      | bool | 是否参与使用                    |
+ | weight       | int  | 池内轮换权重                    |
+ | last_used_at | time | 最近使用时间                    |
+
+> 网关按请求用户过滤：只使用 `channel_keys.user_id = 请求用户` 的 Key（BYOK 隔离）。
 
 ### model_routes（对外模型名 → 渠道映射）
  | 字段           | 类型   | 说明                           |
@@ -149,7 +173,7 @@ llmgate/
 1. 网关收到 `chat/completions`，取出 `model` 字段
 2. 查 `model_routes[display_name]` 中 `enabled` 且渠道 `health_state=healthy` 的候选
 3. 按 `priority` 升序分组；同组内按 `weight` 加权随机选渠道
-4. 该渠道内再按 `channel_keys` 的 `weight` 加权随机选一个 Key
+4. 该渠道内再按 `channel_keys` 的 `weight` 加权随机选一个 **属于该用户的** Key
 5. 无可用候选 → 返回 404 `model_not_found`
 
 ### 故障转移
@@ -173,32 +197,57 @@ llmgate/
  | POST | `/v1/embeddings`       | 向量化                           |
  | GET  | `/v1/models`           | 返回所有 enabled 的对外模型名    |
 
-鉴权：`Authorization: Bearer sk-xxx`（对 `users.token_hash` 校验）；额度超额返回 403 + 说明。
+鉴权：`Authorization: Bearer sk-xxx`（对 `user_tokens.token_hash` 校验，解析出归属用户）；
+额度超额返回 403；Key 归属该用户（未录入任何 Key 的模型对该用户表现为 404）。
+
+### 用户端 `/api/user/*`（用户名 + 密码登录，httpOnly 会话）
+ | 方法    | 路径                        | 说明                                     |
+ | ---     | ---                         | ---                                      |
+ | POST    | `/api/user/login` `/logout` | 登录/登出（含失败限速）                  |
+ | GET     | `/api/user/me` `/overview`  | 账号信息 / 用量概览                      |
+ | GET     | `/api/user/channels`        | 可录入 Key 的渠道（含本人 Key 数）       |
+ | CRUD    | `/api/user/keys`            | 本人 API Key（仅自己的可见/可改）        |
+ | POST    | `/api/user/keys/:id/test`   | 用本人 Key 测试上游连通性                |
+ | CRUD    | `/api/user/tokens`          | 本人消费令牌（可设过期时间）             |
+ | PUT     | `/api/user/password`        | 自助改密码（注销其它设备）               |
+ | POST    | `/api/user/logout-all`      | 注销全部设备                             |
+ | GET     | `/api/user/logs` `logs/count` | 本人请求日志（分页）                   |
 
 ### 管理端 `/api/admin/*`
  | 方法    | 路径                           | 说明                                           |
  | ---     | ---                            | ---                                            |
  | CRUD    | `/api/admin/channels`          | 渠道管理，含 `POST /:id/test`（测试连通性）    |
- | CRUD    | `/api/admin/channels/:id/keys` | 渠道 Key 池                                    |
+ | CRUD    | `/api/admin/channels/:id/keys` | 渠道 Key 池（可指派 Owner 给某用户）           |
  | CRUD    | `/api/admin/model-routes`      | 模型路由映射                                   |
- | CRUD    | `/api/admin/users`             | 用户、Token 生成/重置、额度设置                |
- | GET     | `/api/admin/logs`              | 请求日志（筛选：时间/模型/渠道/状态）          |
- | GET     | `/api/admin/usage`             | 聚合统计（按天/模型/渠道，调用量/费用/tokens） |
- | GET/PUT | `/api/admin/settings`          | 全局设置：默认超时、加密种子轮换等             |
+ | CRUD    | `/api/admin/users`             | 用户账号（用户名/密码）、令牌、额度            |
+ | GET     | `/api/admin/users/:id/overview`| 某用户的 Key/令牌/用量聚合                     |
+ | GET     | `/api/admin/logs` `/logs/count`| 请求日志（时间/模型/渠道/状态筛选 + 分页）     |
+ | GET     | `/api/admin/usage/*`           | 聚合统计（按天/模型/用户）                     |
+ | GET/PUT | `/api/admin/settings`          | 全局设置（超时、熔断、拉取等）                 |
 
-管理端鉴权：`admin_token`（`.env` 初始注入 / 首次启动自动生成打印）。
+管理端鉴权：`admin_token`（`.env` 注入 / 首次启动打印）换服务端会话（httpOnly Cookie，可吊销）。
 
 ## 8. 前端页面
 
+### 管理端（Admin）
  | 页面     | 内容                                                                                |
  | ---      | ---                                                                                 |
- | 登录     | 输入 admin token（会话存 localStorage，可选 HttpOnly 变体）                         |
+ | 登录     | 双模式：**Admin**（admin token）/ **User**（用户名+密码）；会话为 httpOnly Cookie   |
  | 仪表盘   | 今日调用量/费用/Token 卡片，近 7/30 天趋势图（ECharts），渠道健康状态，最近失败列表 |
- | 渠道管理 | 渠道表格 + 新增/编辑弹窗（BaseURL、优先级、权重、Key 池批量添加）、测试连接、启停   |
+ | 渠道管理 | 渠道表格 + 新增/编辑弹窗（BaseURL、优先级、权重、Key 池批量添加）、测试连接、启停；Key 可指派 Owner |
  | 模型路由 | 对外模型名视图，展开显示映射的各渠道与权重，编辑映射                                |
- | 用户管理 | 用户列表，新建/停用、Token 生成（一次性展示）、额度设置与用量查看                   |
- | 请求日志 | 表格 + 时间/模型/状态筛选，点击查看详情（渠道、Key、tokens、耗时、错误）            |
- | 系统设置 | 默认超时、日志保留天数、加密种子轮换                                                |
+ | 用户管理 | 用户列表（用户名/密码）、令牌管理、额度设置；**用户详情**（Key/令牌/用量）          |
+ | 请求日志 | 表格 + 时间/模型/状态筛选 + 分页                                                    |
+ | 系统设置 | 默认超时、日志保留天数、熔断/拉取参数等                                             |
+
+### 用户端（User）
+ | 页面        | 内容                                                              |
+ | ---         | ---                                                               |
+ | Overview    | 配额与用量概览（今日/累计/近 7 天）                               |
+ | My API Keys | 录入/管理自己的上游 Key（单选或批量），测试连通性，仅本人可见     |
+ | My Tokens   | 创建/吊销自己的 `sk-` 消费令牌（可设过期），查看网关 Base URL     |
+ | My Requests | 本人请求日志（分页）                                              |
+ | 顶栏        | 自助改密码、注销全部设备、登出                                    |
 
 ## 9. 部署（docker-compose）
 

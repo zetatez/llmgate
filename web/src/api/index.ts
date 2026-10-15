@@ -1,6 +1,6 @@
 import { adminApi, userApi } from './client'
 import type {
-  Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute,
+  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute,
   ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User,
   UserChannel, UserKey, UserModelUsage, UserOverview, UserToken,
 } from './types'
@@ -37,9 +37,10 @@ export const usersApi = {
     adminApi.post<DataEnvelope<User>>('/users', d).then(unwrap),
   update: (id: number, d: Partial<User> & { password?: string }) => adminApi.put<DataEnvelope<User>>(`/users/${id}`, d).then(unwrap),
   remove: (id: number) => adminApi.delete(`/users/${id}`),
+  overview: (id: number) => adminApi.get<DataEnvelope<AdminUserDetail>>(`/users/${id}/overview`).then(unwrap),
   tokens: (id: number) => adminApi.get<DataEnvelope<UserToken[]>>(`/users/${id}/tokens`).then(unwrap),
-  createToken: (id: number, name: string) =>
-    adminApi.post<DataEnvelope<UserToken>>(`/users/${id}/tokens`, { name }).then(unwrap),
+  createToken: (id: number, name: string, expiresInDays?: number) =>
+    adminApi.post<DataEnvelope<UserToken>>(`/users/${id}/tokens`, { name, expires_in_days: expiresInDays ?? 0 }).then(unwrap),
   removeToken: (id: number, tokenId: number) => adminApi.delete(`/users/${id}/tokens/${tokenId}`),
 }
 
@@ -57,17 +58,23 @@ export const portalApi = {
     userApi.post<DataEnvelope<{ ok: boolean; status?: number; error?: string; latency_ms?: number }>>(`/keys/${keyId}/test`).then(unwrap),
   changePassword: (currentPassword: string, newPassword: string) =>
     userApi.put<DataEnvelope<string>>('/password', { current_password: currentPassword, new_password: newPassword }).then(unwrap),
+  logoutAll: () => userApi.post<DataEnvelope<string>>('/logout-all', {}).then(unwrap),
   tokens: () => userApi.get<DataEnvelope<UserToken[]>>('/tokens').then(unwrap),
-  createToken: (name: string) => userApi.post<DataEnvelope<UserToken>>('/tokens', { name }).then(unwrap),
-  updateToken: (id: number, d: { name?: string; enabled?: number }) =>
+  createToken: (name: string, expiresInDays?: number) =>
+    userApi.post<DataEnvelope<UserToken>>('/tokens', { name, expires_in_days: expiresInDays ?? 0 }).then(unwrap),
+  updateToken: (id: number, d: { name?: string; enabled?: number; expires_in_days?: number }) =>
     userApi.put<DataEnvelope<UserToken>>(`/tokens/${id}`, d).then(unwrap),
   removeToken: (id: number) => userApi.delete(`/tokens/${id}`),
-  logs: (limit = 50) => userApi.get<DataEnvelope<RequestLog[]>>('/logs', { params: { limit } }).then(unwrap),
+  logs: (params: { limit?: number; offset?: number } = {}) =>
+    userApi.get<DataEnvelope<RequestLog[]>>('/logs', { params }).then(unwrap),
+  logsCount: () => userApi.get<DataEnvelope<number>>('/logs/count').then(unwrap),
 }
 
 export const logsApi = {
   list: (params: Record<string, string | number>) =>
     adminApi.get<DataEnvelope<RequestLog[]>>('/logs', { params }).then(unwrap),
+  count: (params: Record<string, string | number>) =>
+    adminApi.get<DataEnvelope<number>>('/logs/count', { params }).then(unwrap),
   dashboard: () => adminApi.get<DataEnvelope<DashboardPayload>>('/logs/usage/dashboard').then(unwrap),
   usageByModel: (date?: string) =>
     adminApi.get<DataEnvelope<{ date: string; models: ModelUsage[] }>>('/logs/usage/by-model', { params: { date: date ?? '' } }).then(unwrap),
@@ -86,4 +93,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserToken }
+export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserToken }

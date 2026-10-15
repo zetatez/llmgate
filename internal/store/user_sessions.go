@@ -51,8 +51,12 @@ func DeleteUserSessionsForUser(db *sql.DB, userID int64) error {
 	return err
 }
 
-// CleanupExpiredSessions 清理过期会话（启动时调用）。
+// CleanupExpiredSessions 清理过期的用户会话与管理员会话（启动时 + 后台定时调用）。
 func CleanupExpiredSessions(db *sql.DB) error {
-	_, err := db.Exec(`DELETE FROM user_sessions WHERE expires_at > 0 AND expires_at <= ?`, models.Now())
+	now := models.Now()
+	if _, err := db.Exec(`DELETE FROM user_sessions WHERE expires_at > 0 AND expires_at <= ?`, now); err != nil {
+		return err
+	}
+	_, err := db.Exec(`DELETE FROM admin_sessions WHERE expires_at > 0 AND expires_at <= ?`, now)
 	return err
 }

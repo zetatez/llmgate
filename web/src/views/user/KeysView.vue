@@ -18,18 +18,40 @@ async function load() {
   }
 }
 
-const dialog = reactive({ visible: false, channel_id: 0, name: '', key: '', source: '', remark: '' })
+const dialog = reactive({
+  visible: false, channel_id: 0, name: '', key: '', source: '', remark: '',
+  mode: 'single' as 'single' | 'bulk', bulkText: '',
+})
 
 function openAdd() {
-  Object.assign(dialog, { visible: true, channel_id: channels.value[0]?.id ?? 0, name: '', key: '', source: '', remark: '' })
+  Object.assign(dialog, {
+    visible: true, channel_id: channels.value[0]?.id ?? 0, name: '', key: '', source: '', remark: '',
+    mode: 'single', bulkText: '',
+  })
+}
+
+// 批量解析：每行 name=key 或 name:key，或仅 key
+function parseKeyLines(text: string): Array<{ name: string; key: string }> {
+  return text.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
+    const m = line.match(/^(.+?)\s*[=:]\s*(.+)$/)
+    if (m) return { name: m[1].trim(), key: m[2].trim() }
+    return { name: '', key: line }
+  })
 }
 
 async function add() {
   if (!dialog.channel_id) { ElMessage.warning('Please select a channel'); return }
-  if (!dialog.key.trim()) { ElMessage.warning('API key is required'); return }
+  let entries: Array<{ name?: string; source?: string; remark?: string; key: string }> = []
+  if (dialog.mode === 'bulk') {
+    entries = parseKeyLines(dialog.bulkText)
+    if (!entries.length) { ElMessage.warning('Nothing to add'); return }
+  } else {
+    if (!dialog.key.trim()) { ElMessage.warning('API key is required'); return }
+    entries = [{ name: dialog.name, source: dialog.source, remark: dialog.remark, key: dialog.key.trim() }]
+  }
   try {
-    await portalApi.addKeys(dialog.channel_id, [{ name: dialog.name, source: dialog.source, remark: dialog.remark, key: dialog.key.trim() }])
-    ElMessage.success('Key added')
+    const r = await portalApi.addKeys(dialog.channel_id, entries)
+    ElMessage.success(`Added ${r.added} key(s)`)
     dialog.visible = false
     load()
   } catch (e: any) {
@@ -145,19 +167,32 @@ onMounted(load)
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialog.visible" title="Add API Key" width="480px">
+    <el-dialog v-model="dialog.visible" title="Add API Key" width="500px">
       <el-form label-width="110px">
         <el-form-item label="Channel" required>
           <el-select v-model="dialog.channel_id" style="width: 100%">
             <el-option v-for="c in channels" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Name"><el-input v-model="dialog.name" placeholder="e.g. primary" /></el-form-item>
-        <el-form-item label="API Key" required>
-          <el-input v-model="dialog.key" placeholder="sk-..." show-password />
+        <el-form-item label="Mode">
+          <el-radio-group v-model="dialog.mode">
+            <el-radio-button label="single">Single</el-radio-button>
+            <el-radio-button label="bulk">Bulk</el-radio-button>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item label="Source"><el-input v-model="dialog.source" placeholder="e.g. official" /></el-form-item>
-        <el-form-item label="Remark"><el-input v-model="dialog.remark" /></el-form-item>
+        <template v-if="dialog.mode === 'single'">
+          <el-form-item label="Name"><el-input v-model="dialog.name" placeholder="e.g. primary" /></el-form-item>
+          <el-form-item label="API Key" required>
+            <el-input v-model="dialog.key" placeholder="sk-..." show-password />
+          </el-form-item>
+          <el-form-item label="Source"><el-input v-model="dialog.source" placeholder="e.g. official" /></el-form-item>
+          <el-form-item label="Remark"><el-input v-model="dialog.remark" /></el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="Keys">
+            <el-input v-model="dialog.bulkText" type="textarea" :rows="6" placeholder="name=key, one per line" />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="dialog.visible = false">Cancel</el-button>

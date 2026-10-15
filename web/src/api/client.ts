@@ -50,6 +50,20 @@ export async function verifySession(): Promise<boolean> {
   }
 }
 
+export type SessionRole = 'admin' | 'user' | 'anonymous'
+
+// 一次请求获取当前会话身份（供路由守卫判定，避免两次串行校验）。
+export async function getSession(): Promise<{ role: SessionRole }> {
+  try {
+    const res = await fetch('/api/session', { credentials: 'same-origin' })
+    if (!res.ok) return { role: 'anonymous' }
+    const body = await res.json()
+    return { role: (body?.role as SessionRole) || 'anonymous' }
+  } catch {
+    return { role: 'anonymous' }
+  }
+}
+
 // 用户端 API client：会话凭据同样是 httpOnly Cookie（与管理员端相互独立）。
 export const userApi = axios.create({
   baseURL: '/api/user',

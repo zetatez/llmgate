@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { verifySession, verifyUserSession } from '../api/client'
+import { getSession } from '../api/client'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -38,25 +38,23 @@ const router = createRouter({
   ],
 })
 
-// 会话为 httpOnly Cookie，前端无法同步读取，故按区域异步校验：
-//   - admin 区域 → /api/admin/ping
-//   - user  区域 → /api/user/me
+// 会话为 httpOnly Cookie，前端无法同步读取，故用一次 /api/session 请求判定身份。
 router.beforeEach(async (to) => {
   const isAdminArea = to.matched.some((r) => r.meta.area === 'admin')
   const isUserArea = to.matched.some((r) => r.meta.area === 'user')
 
   if (to.name === 'login') {
-    if (await verifySession()) return { name: 'dashboard' }
-    if (await verifyUserSession()) return { name: 'user-overview' }
+    const { role } = await getSession()
+    if (role === 'admin') return { name: 'dashboard' }
+    if (role === 'user') return { name: 'user-overview' }
     return true
   }
+  const { role } = await getSession()
   if (isAdminArea) {
-    if (await verifySession()) return true
-    return { name: 'login', query: { redirect: to.fullPath } }
+    return role === 'admin' ? true : { name: 'login', query: { redirect: to.fullPath } }
   }
   if (isUserArea) {
-    if (await verifyUserSession()) return true
-    return { name: 'login', query: { redirect: to.fullPath } }
+    return role === 'user' ? true : { name: 'login', query: { redirect: to.fullPath } }
   }
   return true
 })

@@ -55,7 +55,7 @@ func Load() (*Config, error) {
 		}
 	}
 	if cfg.GatewayPrefix != "/" && (cfg.GatewayPrefix == "" || cfg.GatewayPrefix[0] != '/') {
-		return nil, fmt.Errorf("LGM_GATEWAY_PREFIX 必须以 / 开头")
+		return nil, fmt.Errorf("LGM_GATEWAY_PREFIX must start with /")
 	}
 	return cfg, nil
 }
