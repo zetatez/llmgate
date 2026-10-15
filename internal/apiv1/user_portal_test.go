@@ -413,3 +413,73 @@ func TestAdminUserTokenEndpoints(t *testing.T) {
 		t.Fatalf("admin delete token = %d, body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestUserChangePassword(t *testing.T) {
+	a := newApp(t)
+	r := newPortalRouter(a)
+	adminCreateUser(t, r, "alice")
+	cookie := userLoginCookie(t, r, "alice", "secret1")
+
+	// 旧密码错误 → 400
+	if w := doCookie(r, http.MethodPut, "/api/user/password", `{"current_password":"nope","new_password":"brandnew"}`, cookie); w.Code != http.StatusBadRequest {
+		t.Fatalf("wrong current = %d, want 400", w.Code)
+	}
+	// 新密码过短 → 400
+	if w := doCookie(r, http.MethodPut, "/api/user/password", `{"current_password":"secret1","new_password":"123"}`, cookie); w.Code != http.StatusBadRequest {
+		t.Fatalf("short new = %d, want 400", w.Code)
+	}
+	// 成功 → 200
+	if w := doCookie(r, http.MethodPut, "/api/user/password", `{"current_password":"secret1","new_password":"brandnew"}`, cookie); w.Code != http.StatusOK {
+		t.Fatalf("change password = %d, body=%s", w.Code, w.Body.String())
+	}
+	// 旧密码失效、新密码可用
+	if w := doCookie(r, http.MethodPost, "/api/user/login", `{"username":"alice","password":"secret1"}`, nil); w.Code != http.StatusUnauthorized {
+		t.Fatalf("old password should be rejected = %d", w.Code)
+	}
+	userLoginCookie(t, r, "alice", "brandnew")
+}
+
+func TestUserTestKey(t *testing.T) {
+	a := newApp(t)
+	r := newPortalRouter(a)
+	adminCreateUser(t, r, "alice")
+	// 上游不可达的渠道（连接立即被拒）
+	chID, err := store.CreateChannel(a.DB, &models.Channel{
+		Name: "c", BaseURL: "http://127.0.0.1:1", Adapter: "openai", Enabled: 1, HealthState: "healthy", TimeoutMS: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := userLoginCookie(t, r, "alice", "secret1")
+
+	if w := doCookie(r, http.MethodPost, "/api/user/keys", fmt.Sprintf(`{"channel_id":%d,"keys":[{"name":"k","key":"sk-abc"}]}`, chID), cookie); w.Code != http.StatusOK {
+		t.Fatalf("add key = %d, body=%s", w.Code, w.Body.String())
+	}
+	w := doCookie(r, http.MethodGet, "/api/user/keys", "", cookie)
+	var kl struct {
+		Data []userKeyView `json:"data"`
+	}
+	decodeBody(t, w, &kl)
+	keyID := kl.Data[0].ID
+
+	// 上游不可达 → 200 且 ok:false（不把测试失败当成 5xx）
+	w = doCookie(r, http.MethodPost, fmt.Sprintf("/api/user/keys/%d/test", keyID), "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("test key = %d, body=%s", w.Code, w.Body.String())
+	}
+	var res struct {
+		Data struct {
+			Ok    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"data"`
+	}
+	decodeBody(t, w, &res)
+	if res.Data.Ok {
+		t.Fatal("unreachable upstream should report ok=false")
+	}
+
+	// 测试不存在的 Key → 404
+	if w := doCookie(r, http.MethodPost, "/api/user/keys/99999/test", "", cookie); w.Code != http.StatusNotFound {
+		t.Fatalf("test missing key = %d, want 404", w.Code)
+	}
+}

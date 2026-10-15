@@ -115,6 +115,18 @@ func TouchUserLogin(db *sql.DB, id int64) error {
 	return err
 }
 
+// SetUserPassword 更新用户密码哈希（改密用）。
+func SetUserPassword(db *sql.DB, id int64, hash string) error {
+	res, err := db.Exec(`UPDATE users SET password_hash=?, updated_at=? WHERE id=?`, hash, models.Now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("user %d not found", id)
+	}
+	return nil
+}
+
 // DeleteUser 删除用户（user_tokens / user_sessions 级联删除）。
 func DeleteUser(db *sql.DB, id int64) error {
 	res, err := db.Exec(`DELETE FROM users WHERE id=?`, id)

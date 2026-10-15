@@ -80,6 +80,21 @@ async function remove(k: UserKey) {
   }
 }
 
+// 用本人 Key 测试与上游渠道的连通性
+const testingId = ref(0)
+async function test(k: UserKey) {
+  testingId.value = k.id
+  try {
+    const r = await portalApi.testKey(k.id)
+    if (r.ok) ElMessage.success(`Connection OK (${r.latency_ms}ms)`)
+    else ElMessage.error(`Connection failed: ${r.error || `status ${r.status}`}`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'Test failed')
+  } finally {
+    testingId.value = 0
+  }
+}
+
 const hasChannels = computed(() => channels.value.length > 0)
 
 onMounted(load)
@@ -120,9 +135,10 @@ onMounted(load)
         <el-table-column label="Enabled" width="80">
           <template #default="{ row }"><el-switch :model-value="row.enabled === 1" @change="toggle(row)" /></template>
         </el-table-column>
-        <el-table-column label="Actions" width="140" fixed="right">
+        <el-table-column label="Actions" width="190" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">Edit</el-button>
+            <el-button link type="success" size="small" :loading="testingId === row.id" @click="test(row)">Test</el-button>
             <el-button link type="danger" size="small" @click="remove(row)">Delete</el-button>
           </template>
         </el-table-column>

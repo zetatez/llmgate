@@ -53,6 +53,10 @@ export const portalApi = {
   updateKey: (keyId: number, d: { name?: string; source?: string; remark?: string; key?: string; enabled?: number }) =>
     userApi.put<DataEnvelope<string>>(`/keys/${keyId}`, d).then(unwrap),
   removeKey: (keyId: number) => userApi.delete(`/keys/${keyId}`),
+  testKey: (keyId: number) =>
+    userApi.post<DataEnvelope<{ ok: boolean; status?: number; error?: string; latency_ms?: number }>>(`/keys/${keyId}/test`).then(unwrap),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    userApi.put<DataEnvelope<string>>('/password', { current_password: currentPassword, new_password: newPassword }).then(unwrap),
   tokens: () => userApi.get<DataEnvelope<UserToken[]>>('/tokens').then(unwrap),
   createToken: (name: string) => userApi.post<DataEnvelope<UserToken>>('/tokens', { name }).then(unwrap),
   updateToken: (id: number, d: { name?: string; enabled?: number }) =>

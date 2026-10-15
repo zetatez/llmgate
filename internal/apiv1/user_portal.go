@@ -4,14 +4,18 @@
 package apiv1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 
+	"llmgate/internal/adapter"
 	"llmgate/internal/app"
 	"llmgate/internal/models"
 	"llmgate/internal/store"
@@ -51,11 +55,13 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 	authed.GET("/me", userMe(a))
 	authed.GET("/overview", userOverview(a))
 	authed.GET("/channels", userChannels(a))
+	authed.PUT("/password", userChangePassword(a))
 
 	authed.GET("/keys", userListKeys(a))
 	authed.POST("/keys", userAddKeys(a))
 	authed.PUT("/keys/:id", userUpdateKey(a))
 	authed.DELETE("/keys/:id", userDeleteKey(a))
+	authed.POST("/keys/:id/test", userTestKey(a))
 
 	authed.GET("/tokens", userListTokens(a))
 	authed.POST("/tokens", userCreateToken(a))
@@ -178,6 +184,50 @@ func userMe(a *app.App) gin.HandlerFunc {
 		v := toPortalUser(currentUser(c))
 		v.GatewayPrefix = a.Cfg.GatewayPrefix
 		c.JSON(http.StatusOK, gin.H{"data": v})
+	}
+}
+
+// userChangePassword 用户自助改密码：校验旧密码 → 更新哈希 → 注销其它设备并续签当前会话。
+func userChangePassword(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := currentUser(c)
+		var b struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if !decode(c, &b) {
+			return
+		}
+		if !CheckPassword(u.PasswordHash, b.CurrentPassword) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "current password is incorrect"})
+			return
+		}
+		if len(b.NewPassword) < 6 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "new password must be at least 6 characters"})
+			return
+		}
+		hash, err := HashPassword(b.NewPassword)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.SetUserPassword(a.DB, u.ID, hash); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		// 改密后强制其它设备下线；为当前客户端续签一个新会话，避免自己被登出
+		_ = store.DeleteUserSessionsForUser(a.DB, u.ID)
+		token, err := app.GenSecret(32)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if err := store.CreateUserSession(a.DB, u.ID, app.HashToken(token), models.Now()+userSessionTTL); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		setUserSession(c, token, userSessionTTL)
+		c.JSON(http.StatusOK, gin.H{"data": "ok"})
 	}
 }
 
@@ -404,6 +454,57 @@ func userDeleteKey(a *app.App) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": "deleted"})
+	}
+}
+
+// userTestKey 用用户自己的 Key 请求所属渠道上游 /v1/models，验证连通性（仅限本人 Key）。
+func userTestKey(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c, "id")
+		if !ok {
+			return
+		}
+		cur := ownedKey(a, c, id)
+		if cur == nil {
+			return
+		}
+		ch, err := store.GetChannel(a.DB, cur.ChannelID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if ch == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+			return
+		}
+		apiKey, err := a.Secret.Decrypt(cur.APIKeyEnc)
+		if err != nil || apiKey == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "key decrypt failed"})
+			return
+		}
+		adpt := adapter.Get(ch.Adapter)
+		if adpt == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown adapter: " + ch.Adapter})
+			return
+		}
+		timeout := ch.TimeoutMS
+		if timeout <= 0 {
+			timeout = 60000
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(timeout)*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "error": err.Error(), "latency_ms": time.Since(start).Milliseconds()}})
+			return
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode >= 400 {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "status": resp.StatusCode, "error": strings.TrimSpace(string(body)), "latency_ms": time.Since(start).Milliseconds()}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": true, "status": resp.StatusCode, "latency_ms": time.Since(start).Milliseconds()}})
 	}
 }
 

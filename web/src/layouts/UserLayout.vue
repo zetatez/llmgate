@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { logoutUser } from '../api/client'
 import { portalApi } from '../api'
 import type { PortalUser } from '../api'
@@ -14,6 +14,7 @@ const menus = [
   { path: '/user/overview', label: 'Overview', icon: 'Odometer' },
   { path: '/user/keys', label: 'My API Keys', icon: 'Key' },
   { path: '/user/tokens', label: 'My Tokens', icon: 'Ticket' },
+  { path: '/user/logs', label: 'My Requests', icon: 'Document' },
 ]
 
 const active = computed(() => route.path)
@@ -22,6 +23,29 @@ const displayName = computed(() => me.value?.name || me.value?.username || '')
 async function logout() {
   await logoutUser()
   router.push('/login')
+}
+
+// 自助改密码
+const pwDialog = reactive({ visible: false, current: '', next: '', confirm: '', busy: false })
+
+function openPassword() {
+  Object.assign(pwDialog, { visible: true, current: '', next: '', confirm: '', busy: false })
+}
+
+async function submitPassword() {
+  if (!pwDialog.current) { ElMessage.warning('Enter your current password'); return }
+  if (pwDialog.next.length < 6) { ElMessage.warning('New password must be at least 6 characters'); return }
+  if (pwDialog.next !== pwDialog.confirm) { ElMessage.warning('Passwords do not match'); return }
+  pwDialog.busy = true
+  try {
+    await portalApi.changePassword(pwDialog.current, pwDialog.next)
+    ElMessage.success('Password updated')
+    pwDialog.visible = false
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'Failed to update password')
+  } finally {
+    pwDialog.busy = false
+  }
 }
 
 onMounted(async () => {
@@ -45,6 +69,7 @@ onMounted(async () => {
         <span class="page-title">{{ route.meta.title || '' }}</span>
         <div class="right">
           <span class="user">{{ displayName }}</span>
+          <el-button link type="primary" @click="openPassword">Password</el-button>
           <el-button link type="danger" @click="logout">Logout</el-button>
         </div>
       </el-header>
@@ -52,6 +77,24 @@ onMounted(async () => {
         <router-view />
       </el-main>
     </el-container>
+
+    <el-dialog v-model="pwDialog.visible" title="Change Password" width="420px">
+      <el-form label-width="130px">
+        <el-form-item label="Current password">
+          <el-input v-model="pwDialog.current" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="New password">
+          <el-input v-model="pwDialog.next" type="password" show-password placeholder="at least 6 characters" />
+        </el-form-item>
+        <el-form-item label="Confirm">
+          <el-input v-model="pwDialog.confirm" type="password" show-password @keyup.enter="submitPassword" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="pwDialog.visible = false">Cancel</el-button>
+        <el-button type="primary" :loading="pwDialog.busy" @click="submitPassword">Save</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
