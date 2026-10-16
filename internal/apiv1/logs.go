@@ -214,7 +214,6 @@ var settingsCatalog = []settingDef{
 	{classification: "Auto-pull", key: "pull_interval_min", description: "Interval for auto-pulling upstream models (minutes); 0 = disabled", def: "60", mutable: true},
 	{classification: "Auto-pull", key: "pull_default_priority", description: "Default priority for routes created by auto-pull (lower = preferred)", def: "0", mutable: true},
 	{classification: "Auto-pull", key: "pull_default_weight", description: "Default weight for routes created by auto-pull", def: "1", mutable: true},
-	{classification: "Status", key: "model_pull_last", description: "Summary of the last auto-pull run (read-only)", def: "", mutable: false},
 	{classification: "Runtime", key: "gateway_prefix", description: "Gateway prefix (runtime config, read-only)", def: "/", mutable: false},
 	{classification: "Failover", key: "circuit_fail_threshold", description: "Circuit breaker: consecutive failures within the window before a channel/model is cooled down (jitter resistance)", def: "6", mutable: true},
 	{classification: "Failover", key: "circuit_fail_window_s", description: "Circuit breaker: sliding window (seconds) for consecutive-failure counting", def: "30", mutable: true},

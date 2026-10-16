@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { settingsApi, type SettingItem } from '../api'
 
@@ -23,12 +23,6 @@ const meta: Record<string, SettingMeta> = {
   pull_default_weight: { type: 'number', min: 1, step: 1 },
   model_pricing: { type: 'pricing' },
 }
-
-const lastRun = computed(() => {
-  const raw = form.model_pull_last
-  if (!raw) return null
-  try { return JSON.parse(raw) } catch { return null }
-})
 
 function pricingPreview(): string {
   try {
@@ -114,19 +108,6 @@ onMounted(load)
       </el-table-column>
       <el-table-column prop="description" label="Description" min-width="280" />
     </el-table>
-
-    <!-- Last auto-pull run (read-only) -->
-    <div v-if="lastRun" class="mt">
-      <el-descriptions :column="6" size="small" border>
-        <el-descriptions-item label="Last run">{{ new Date(lastRun.at * 1000).toLocaleString() }}</el-descriptions-item>
-        <el-descriptions-item label="Created">{{ lastRun.created }}</el-descriptions-item>
-        <el-descriptions-item label="Removed">{{ lastRun.removed }}</el-descriptions-item>
-        <el-descriptions-item label="Skipped">{{ lastRun.skipped }}</el-descriptions-item>
-        <el-descriptions-item label="Failed channels">{{ lastRun.errored }}</el-descriptions-item>
-        <el-descriptions-item label="Duration">{{ lastRun.cost_ms }}ms</el-descriptions-item>
-      </el-descriptions>
-    </div>
-    <el-alert v-else class="mt" title="Auto-pull has not run yet (set the interval above to a value > 0 and save)" type="info" :closable="false" />
 
     <!-- Pricing editor -->
     <el-dialog v-model="pricingDialog.visible" title="Model Pricing (JSON)" width="560px">
