@@ -104,7 +104,6 @@ onMounted(load)
     </el-alert>
 
     <el-card shadow="never" v-loading="loading">
-      <template #header><span>My Token</span></template>
 
       <template v-if="!hasToken">
         <el-empty description="You don't have a token yet." />

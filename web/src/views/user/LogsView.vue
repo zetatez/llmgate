@@ -39,7 +39,7 @@ onMounted(load)
   <el-card shadow="never">
     <template #header>
       <div class="head">
-        <span>My Requests</span>
+        <span />
         <div>
           <el-select v-model="size" style="width: 120px" @change="onSizeChange">
             <el-option label="50 / page" :value="50" />

@@ -196,7 +196,7 @@ onMounted(() => {
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>Users</span>
+          <span />
           <el-button type="primary" size="small" @click="openCreateUser">Add User</el-button>
         </div>
       </template>

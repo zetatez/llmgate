@@ -143,7 +143,6 @@ onMounted(load)
 <template>
   <div class="settings" v-loading="loading">
     <aside class="nav">
-      <div class="nav-title">Settings</div>
       <div
         v-for="g in groups"
         :key="g.classification"
@@ -214,13 +213,6 @@ onMounted(load)
   flex-shrink: 0;
   position: sticky;
   top: 16px;
-}
-.nav-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ll-ink);
-  margin-bottom: 10px;
-  padding-left: 10px;
 }
 .nav-item {
   display: flex;

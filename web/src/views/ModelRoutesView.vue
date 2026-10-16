@@ -258,7 +258,7 @@ onMounted(load)
         <el-card shadow="never">
           <template #header>
             <div class="head">
-              <span>Model Routes</span>
+              <span />
               <div>
                 <el-input v-model="search" placeholder="Search model / channel / upstream model" clearable style="width: 260px" class="mr" />
                 <el-radio-group v-model="statusFilter" size="small" class="mr">

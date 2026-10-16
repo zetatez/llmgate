@@ -131,7 +131,7 @@ onMounted(load)
     <el-card shadow="never" v-loading="loading">
       <template #header>
         <div class="head">
-          <span>My API Keys</span>
+          <span />
           <el-button type="primary" size="small" :disabled="!hasChannels" @click="openAdd">Add Key</el-button>
         </div>
       </template>

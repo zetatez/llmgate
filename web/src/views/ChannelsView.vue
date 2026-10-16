@@ -247,7 +247,7 @@ onMounted(() => {
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>Channels</span>
+          <span />
           <div>
             <el-button
               size="small"

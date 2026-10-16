@@ -85,7 +85,6 @@ onMounted(async () => {
       </div>
     </header>
     <main class="main">
-      <div class="page-title">{{ route.meta.title || '' }}</div>
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
           <component :is="Component" />
@@ -195,11 +194,5 @@ onMounted(async () => {
   flex: 1;
   padding: 16px;
   background: var(--ll-bg);
-}
-.page-title {
-  font-size: 16px;
-  font-weight: 700;
-  margin-bottom: 14px;
-  color: var(--ll-ink);
 }
 </style>
