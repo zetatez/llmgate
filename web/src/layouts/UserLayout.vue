@@ -120,7 +120,7 @@ onMounted(async () => {
   flex-direction: column;
 }
 .topbar {
-  height: 48px;
+  height: 40px;
   background: #14161f;
   display: flex;
   align-items: center;
@@ -139,8 +139,8 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 .logo-mark {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 8px;
   background: linear-gradient(135deg, #5b6bff, #8b5cf6);
   display: inline-flex;
@@ -151,7 +151,7 @@ onMounted(async () => {
   color: #fff;
 }
 .logo-text {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -164,7 +164,7 @@ onMounted(async () => {
   --el-menu-text-color: #a2a8b8;
   --el-menu-hover-text-color: #ffffff;
   --el-menu-active-color: #ffffff;
-  --el-menu-item-height: 48px;
+  --el-menu-item-height: 40px;
 }
 .topmenu :deep(.el-menu-item) {
   border-bottom: 2px solid transparent;
