@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -30,6 +31,8 @@ type Config struct {
 	// TrustedProxies 受信反向代理（CIDR/IP 列表）。留空=不信任任何代理（ClientIP 取 TCP 对端，
 	// 不采信 X-Forwarded-For，避免被伪造绕过登录限速）。反代部署时填写代理地址。
 	TrustedProxies []string
+	// SessionTTLHours 会话有效期（小时），默认 720（30 天）。
+	SessionTTLHours int
 }
 
 // Load 从环境变量读取配置；自动加载 ./.env（可选）。
@@ -38,14 +41,15 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		HTTPAddr:      getenv("LGM_HTTP_ADDR", ":8080"),
-		DBPath:        getenv("LGM_DB_PATH", "./data/llmgate.db"),
-		AdminToken:    os.Getenv("LGM_ADMIN_TOKEN"),
-		EncryptSeed:   os.Getenv("LGM_ENCRYPT_SEED"),
-		GatewayPrefix: getenv("LGM_GATEWAY_PREFIX", "/"),
-		LogLevel:      getenv("LGM_LOG_LEVEL", "release"),
-		TZ:            getenv("LGM_TZ", "Asia/Shanghai"),
-		Proxy:         os.Getenv("LGM_PROXY"),
+		HTTPAddr:        getenv("LGM_HTTP_ADDR", ":8080"),
+		DBPath:          getenv("LGM_DB_PATH", "./data/llmgate.db"),
+		AdminToken:      os.Getenv("LGM_ADMIN_TOKEN"),
+		EncryptSeed:     os.Getenv("LGM_ENCRYPT_SEED"),
+		GatewayPrefix:   getenv("LGM_GATEWAY_PREFIX", "/"),
+		LogLevel:        getenv("LGM_LOG_LEVEL", "release"),
+		TZ:              getenv("LGM_TZ", "Asia/Shanghai"),
+		Proxy:           os.Getenv("LGM_PROXY"),
+		SessionTTLHours: getenvInt("LGM_SESSION_TTL_HOURS", 720),
 	}
 	if raw := os.Getenv("LGM_TRUSTED_PROXIES"); raw != "" {
 		for _, p := range strings.Split(raw, ",") {
@@ -63,6 +67,16 @@ func Load() (*Config, error) {
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// getenvInt 读取整数环境变量；空/非法回退默认。
+func getenvInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
 	}
 	return def
 }

@@ -94,6 +94,40 @@ func (l *loginLimiter) sweepLocked(n time.Time) {
 // authLimiter 进程级共享的登录限速器（管理员端与用户端共用）。
 var authLimiter = newLoginLimiter()
 
+// ---- 通用固定窗口限速（已登录用户的操作，如测试 Key / 自助改密码）----
+
+type opState struct {
+	start time.Time
+	count int
+}
+
+type opLimiter struct {
+	mu  sync.Mutex
+	m   map[string]*opState
+	now func() time.Time
+}
+
+func newOpLimiter() *opLimiter {
+	return &opLimiter{m: map[string]*opState{}, now: time.Now}
+}
+
+// allow 在 window 内最多放行 max 次；超限返回 false。
+func (l *opLimiter) allow(key string, max int, window time.Duration) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	s := l.m[key]
+	if s == nil || now.Sub(s.start) >= window {
+		s = &opState{start: now}
+		l.m[key] = s
+	}
+	s.count++
+	return s.count <= max
+}
+
+// opLimit 用户端低频操作限速器。
+var opLimit = newOpLimiter()
+
 // remoteKey 以客户端 IP 作为限速键（防单点爆破）。
 func remoteKey(c *gin.Context) string { return c.ClientIP() }
 

@@ -6,7 +6,7 @@ func unsetAll(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"LGM_HTTP_ADDR", "LGM_DB_PATH", "LGM_ADMIN_TOKEN", "LGM_ENCRYPT_SEED",
-		"LGM_GATEWAY_PREFIX", "LGM_LOG_LEVEL", "LGM_TZ", "LGM_PROXY", "LGM_TRUSTED_PROXIES",
+		"LGM_GATEWAY_PREFIX", "LGM_LOG_LEVEL", "LGM_TZ", "LGM_PROXY", "LGM_TRUSTED_PROXIES", "LGM_SESSION_TTL_HOURS",
 	} {
 		t.Setenv(k, "")
 	}
@@ -38,6 +38,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if len(cfg.TrustedProxies) != 0 {
 		t.Errorf("TrustedProxies default should be empty, got %v", cfg.TrustedProxies)
+	}
+	if cfg.SessionTTLHours != 720 {
+		t.Errorf("SessionTTLHours default = %d, want 720", cfg.SessionTTLHours)
 	}
 }
 

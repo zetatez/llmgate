@@ -61,6 +61,28 @@ func doRemote(r http.Handler, method, path, body, token, remote string) *httptes
 	return w
 }
 
+func TestOpLimiter(t *testing.T) {
+	now := time.Now()
+	l := newOpLimiter()
+	l.now = func() time.Time { return now }
+	for i := 0; i < 3; i++ {
+		if !l.allow("k", 3, time.Minute) {
+			t.Fatalf("attempt %d should pass", i)
+		}
+	}
+	if l.allow("k", 3, time.Minute) {
+		t.Fatal("fourth call in the window should be limited")
+	}
+	if !l.allow("other", 3, time.Minute) {
+		t.Fatal("other key should not be affected")
+	}
+	// 窗口过后重置
+	now = now.Add(2 * time.Minute)
+	if !l.allow("k", 3, time.Minute) {
+		t.Fatal("should reset after the window passes")
+	}
+}
+
 func TestAdminLoginRateLimited(t *testing.T) {
 	a := newApp(t)
 	r := newRouter(a, nil)

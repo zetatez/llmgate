@@ -16,8 +16,15 @@ import (
 // adminSessionCookie 管理端 httpOnly 会话 Cookie 名。
 const adminSessionCookie = "llmgate_admin_session"
 
-// adminSessionTTL 管理员会话有效期（秒）。
-const adminSessionTTL = 30 * 24 * 3600
+// sessionTTL 会话有效期（秒），默认 30 天；main 启动时经 SetSessionTTL 覆盖。
+var sessionTTL = int64(30 * 24 * 3600)
+
+// SetSessionTTL 设置会话有效期（秒）；非正数保持默认。
+func SetSessionTTL(seconds int) {
+	if seconds > 0 {
+		sessionTTL = int64(seconds)
+	}
+}
 
 // Register 挂载管理端路由。
 // 会话凭据为 httpOnly Cookie（服务端会话，可吊销）：
@@ -75,11 +82,11 @@ func loginHandler(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if err := store.CreateAdminSession(a.DB, app.HashToken(sess), models.Now()+adminSessionTTL); err != nil {
+		if err := store.CreateAdminSession(a.DB, app.HashToken(sess), models.Now()+sessionTTL); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		setAdminSession(c, sess, adminSessionTTL)
+		setAdminSession(c, sess, int(sessionTTL))
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "ok"}})
 	}
 }

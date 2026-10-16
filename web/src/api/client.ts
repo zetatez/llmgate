@@ -40,16 +40,6 @@ export async function logoutAdmin(): Promise<void> {
   }
 }
 
-// 校验当前管理员会话（Cookie）是否有效（登录页/路由守卫用）。
-export async function verifySession(): Promise<boolean> {
-  try {
-    const res = await fetch('/api/admin/ping', { credentials: 'same-origin' })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
 export type SessionRole = 'admin' | 'user' | 'anonymous'
 
 // 一次请求获取当前会话身份（供路由守卫判定，避免两次串行校验）。
@@ -96,15 +86,5 @@ export async function logoutUser(): Promise<void> {
     await axios.post('/api/user/logout', {}, { withCredentials: true })
   } catch {
     /* 忽略 */
-  }
-}
-
-// 校验当前用户端会话是否有效。
-export async function verifyUserSession(): Promise<boolean> {
-  try {
-    const res = await fetch('/api/user/me', { credentials: 'same-origin' })
-    return res.ok
-  } catch {
-    return false
   }
 }

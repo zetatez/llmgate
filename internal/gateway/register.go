@@ -24,8 +24,9 @@ import (
 
 // Register 挂载网关路由，全部请求走用户令牌鉴权。
 // 注意：gate 组路径由调用方传入（cfg.GatewayPrefix + "v1"）。
-func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Penalizer) {
-	v1.Use(gatewayAuth(a))
+// rl 为按用户限流器（可为 nil/禁用）。
+func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Penalizer, rl *RateLimiter) {
+	v1.Use(gatewayAuth(a, rl))
 	v1.GET("/models", handleListModels(a))
 	v1.POST("/chat/completions", handleForward(a, bus, pen, "/v1/chat/completions"))
 	v1.POST("/completions", handleForward(a, bus, pen, "/v1/completions"))
@@ -35,8 +36,8 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 
 const ctxUserKey = "llmgate.user"
 
-// gatewayAuth 校验 Bearer sk-xxx 令牌（user_tokens）并检查额度。
-func gatewayAuth(a *app.App) gin.HandlerFunc {
+// gatewayAuth 校验 Bearer sk-xxx 令牌（users.token_hash）并检查额度与限流。
+func gatewayAuth(a *app.App, rl *RateLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerValue(c.GetHeader("Authorization"))
 		if token == "" {
@@ -61,6 +62,22 @@ func gatewayAuth(a *app.App) gin.HandlerFunc {
 				"error": gin.H{"message": "quota exceeded", "type": "quota_exceeded"},
 			})
 			return
+		}
+		// 按用户限流：并发额度覆盖整条请求（含流式），QPS 秒窗口计数
+		if rl != nil && rl.Enabled() {
+			if !rl.Acquire(user.ID) {
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+					"error": gin.H{"message": "too many concurrent requests, please retry later", "type": "rate_limit_exceeded"},
+				})
+				return
+			}
+			defer rl.Release(user.ID)
+			if !rl.AllowQPS(user.ID) {
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+					"error": gin.H{"message": "rate limit exceeded, please slow down", "type": "rate_limit_exceeded"},
+				})
+				return
+			}
 		}
 		touchUserToken(a.DB, user.ID)
 		c.Set(ctxUserKey, user)

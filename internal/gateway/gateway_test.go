@@ -78,7 +78,7 @@ func newTestEnv(t *testing.T, upstreamURL string) *testEnv {
 	bus := logbus.New(db, 64)
 	t.Cleanup(func() { bus.Close() })
 	uh := gin.New()
-	Register(uh.Group("/v1"), a, bus, router.NewPenalizer())
+	Register(uh.Group("/v1"), a, bus, router.NewPenalizer(), nil)
 	return &testEnv{a: a, bus: bus, uh: uh, db: db, userID: uid}
 }
 

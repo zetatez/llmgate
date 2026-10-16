@@ -24,9 +24,6 @@ import (
 // userSessionCookie 用户端 httpOnly 会话 Cookie 名。
 const userSessionCookie = "llmgate_user_session"
 
-// userSessionTTL 用户会话有效期（秒）。
-const userSessionTTL = 30 * 24 * 3600
-
 // ctxUserPortalKey 用户端中间件写入的当前用户（*models.User）。
 const ctxUserPortalKey = "llmgate.portal.user"
 
@@ -112,12 +109,12 @@ func userLogin(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if err := store.CreateUserSession(a.DB, u.ID, app.HashToken(token), models.Now()+userSessionTTL); err != nil {
+		if err := store.CreateUserSession(a.DB, u.ID, app.HashToken(token), models.Now()+sessionTTL); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		_ = store.TouchUserLogin(a.DB, u.ID)
-		setUserSession(c, token, userSessionTTL)
+		setUserSession(c, token, int(sessionTTL))
 		v := toPortalUser(u)
 		v.GatewayPrefix = a.Cfg.GatewayPrefix
 		c.JSON(http.StatusOK, gin.H{"data": v})
@@ -193,6 +190,11 @@ func userMe(a *app.App) gin.HandlerFunc {
 func userChangePassword(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
+		// 限速：同一用户 15 分钟内最多 8 次尝试（防爆破当前密码）
+		if !opLimit.allow("pwd:"+fmt.Sprint(u.ID), 8, 15*time.Minute) {
+			tooManyLogins(c)
+			return
+		}
 		var b struct {
 			CurrentPassword string `json:"current_password"`
 			NewPassword     string `json:"new_password"`
@@ -224,11 +226,11 @@ func userChangePassword(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if err := store.CreateUserSession(a.DB, u.ID, app.HashToken(token), models.Now()+userSessionTTL); err != nil {
+		if err := store.CreateUserSession(a.DB, u.ID, app.HashToken(token), models.Now()+sessionTTL); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		setUserSession(c, token, userSessionTTL)
+		setUserSession(c, token, int(sessionTTL))
 		c.JSON(http.StatusOK, gin.H{"data": "ok"})
 	}
 }
@@ -239,16 +241,16 @@ type userChannelView struct {
 	ID      int64  `json:"id"`
 	Name    string `json:"name"`
 	Adapter string `json:"adapter"`
-	BaseURL string `json:"base_url"`
 	MyKeys  int    `json:"my_keys"`
 }
 
 // userChannels 列出管理员启用中的渠道，并标注当前用户已录入的 Key 数。
+// 不暴露渠道 base_url（BYOK 下用户只需知道渠道名与适配器）。
 func userChannels(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
 		rows, err := a.DB.Query(`
-			SELECT ch.id, ch.name, ch.adapter, ch.base_url,
+			SELECT ch.id, ch.name, ch.adapter,
 				(SELECT COUNT(*) FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.user_id = ?) AS my_keys
 			FROM channels ch WHERE ch.enabled = 1 ORDER BY ch.priority ASC, ch.name ASC`, u.ID)
 		if err != nil {
@@ -259,7 +261,7 @@ func userChannels(a *app.App) gin.HandlerFunc {
 		out := []userChannelView{}
 		for rows.Next() {
 			var v userChannelView
-			if err := rows.Scan(&v.ID, &v.Name, &v.Adapter, &v.BaseURL, &v.MyKeys); err != nil {
+			if err := rows.Scan(&v.ID, &v.Name, &v.Adapter, &v.MyKeys); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -464,6 +466,12 @@ func userTestKey(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "id")
 		if !ok {
+			return
+		}
+		u := currentUser(c)
+		// 限速：同一用户每分钟最多 12 次连通性测试（防反复触发上游请求）
+		if !opLimit.allow("test:"+fmt.Sprint(u.ID), 12, time.Minute) {
+			tooManyLogins(c)
 			return
 		}
 		cur := ownedKey(a, c, id)

@@ -66,6 +66,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("init app: %v", err)
 	}
+	apiv1.SetSessionTTL(cfg.SessionTTLHours * 3600)
+	log.Printf("session ttl: %d hours", cfg.SessionTTLHours)
 
 	logBus := logbus.New(db, 1024)
 	defer logBus.Close()
@@ -119,7 +121,7 @@ func main() {
 	apiv1.Register(r.Group("/api/admin"), a, modelPuller.SyncNow)
 	apiv1.RegisterUserPortal(r.Group("/api/user"), a)
 	r.GET("/api/session", apiv1.SessionProbe(a))
-	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus, pen)
+	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus, pen, gatewayRateLimiter(a))
 
 	// 生产构建（-tags embedweb）时托管前端静态资源；本地开发返回 nil 不影响运行
 	if h := web.Handler(); h != nil {
@@ -205,4 +207,16 @@ func intSettingSec(a *app.App, key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// gatewayRateLimiter 从 settings 读取按用户网关限流参数（0=禁用）。
+func gatewayRateLimiter(a *app.App) *gateway.RateLimiter {
+	rl := gateway.NewRateLimiter(
+		intSettingSec(a, "rate_limit_qps", 0),
+		intSettingSec(a, "rate_limit_concurrency", 0),
+	)
+	if rl.Enabled() {
+		log.Printf("gateway rate-limit: qps=%d concurrency=%d", rl.QPS(), rl.Concurrency())
+	}
+	return rl
 }

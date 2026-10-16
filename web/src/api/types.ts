@@ -86,12 +86,11 @@ export interface PortalUser {
   gateway_prefix: string
 }
 
-/** 用户端：可录入 Key 的渠道 */
+/** 用户端：可录入 Key 的渠道（不暴露上游 base_url） */
 export interface UserChannel {
   id: number
   name: string
   adapter: string
-  base_url: string
   my_keys: number
 }
 

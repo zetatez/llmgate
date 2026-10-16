@@ -220,6 +220,8 @@ var settingsCatalog = []settingDef{
 	{classification: "Failover", key: "circuit_fail_window_s", description: "Circuit breaker: sliding window (seconds) for consecutive-failure counting", def: "30", mutable: true},
 	{classification: "Failover", key: "circuit_quota_cooldown_s", description: "Circuit breaker: cooldown (seconds) when a key hits quota/arrears/expiry", def: "30", mutable: true},
 	{classification: "Failover", key: "circuit_probe_backoff_s", description: "Probe: backoff (seconds) after a failed recovery probe of a cooled-down channel", def: "30", mutable: true},
+	{classification: "Rate limit", key: "rate_limit_qps", description: "Per-user gateway requests per second (0 = disabled)", def: "0", mutable: true},
+	{classification: "Rate limit", key: "rate_limit_concurrency", description: "Per-user max concurrent in-flight gateway requests (0 = disabled)", def: "0", mutable: true},
 }
 
 func getSettings(a *app.App) gin.HandlerFunc {
