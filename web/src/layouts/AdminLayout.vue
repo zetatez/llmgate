@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { logoutAdmin } from '../api/client'
-import { Fold, Expand, SwitchButton } from '@element-plus/icons-vue'
+import { SwitchButton } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
-const collapsed = ref(false)
 
 const menus = [
   { path: '/dashboard', label: 'Dashboard', icon: 'Odometer' },
@@ -26,63 +25,59 @@ async function logout() {
 </script>
 
 <template>
-  <el-container class="layout">
-    <el-aside :width="collapsed ? '64px' : '210px'" class="aside">
+  <div class="layout">
+    <header class="topbar">
       <div class="logo">
         <span class="logo-mark">LG</span>
-        <span v-show="!collapsed" class="logo-text">LLM Gate</span>
+        <span class="logo-text">LLM Gate</span>
       </div>
-      <el-menu :default-active="active" :collapse="collapsed" :collapse-transition="false" router class="menu">
+      <el-menu :default-active="active" mode="horizontal" router class="topmenu" :ellipsis="false">
         <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
           <el-icon><component :is="m.icon" /></el-icon>
-          <template #title>{{ m.label }}</template>
+          <span class="m-label">{{ m.label }}</span>
         </el-menu-item>
       </el-menu>
-    </el-aside>
-    <el-container>
-      <el-header class="header">
-        <div class="left">
-          <el-button text class="collapse-btn" @click="collapsed = !collapsed">
-            <el-icon :size="18"><component :is="collapsed ? Expand : Fold" /></el-icon>
-          </el-button>
-          <span class="page-title">{{ route.meta.title || '' }}</span>
-        </div>
-        <div class="right">
-          <span class="who">Admin</span>
-          <el-button link type="danger" @click="logout">
-            <el-icon><SwitchButton /></el-icon>&nbsp;Logout
-          </el-button>
-        </div>
-      </el-header>
-      <el-main class="main">
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
-      </el-main>
-    </el-container>
-  </el-container>
+      <div class="right">
+        <span class="who">Admin</span>
+        <el-button link type="danger" @click="logout">
+          <el-icon><SwitchButton /></el-icon>&nbsp;Logout
+        </el-button>
+      </div>
+    </header>
+    <main class="main">
+      <div class="page-title">{{ route.meta.title || '' }}</div>
+      <router-view v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
+    </main>
+  </div>
 </template>
 
 <style scoped>
 .layout {
-  height: 100vh;
-}
-.aside {
-  transition: width 0.2s ease;
-  overflow: hidden;
-  background: #14161f;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
-.logo {
+.topbar {
   height: 60px;
+  background: #14161f;
   display: flex;
   align-items: center;
-  justify-content: center;
+  padding: 0 16px;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.logo {
+  display: flex;
+  align-items: center;
   gap: 8px;
   color: #fff;
+  margin-right: 12px;
   flex-shrink: 0;
 }
 .logo-mark {
@@ -96,59 +91,56 @@ async function logout() {
   font-weight: 800;
   font-size: 13px;
   color: #fff;
-  flex-shrink: 0;
 }
 .logo-text {
   font-size: 16px;
   font-weight: 700;
   white-space: nowrap;
 }
-.menu {
-  border-right: none;
+.topmenu {
+  flex: 1;
+  min-width: 0;
   background: transparent;
+  border-bottom: none;
+  --el-menu-bg-color: transparent;
   --el-menu-text-color: #a2a8b8;
-  --el-menu-hover-bg-color: #1d2030;
+  --el-menu-hover-text-color: #ffffff;
   --el-menu-active-color: #ffffff;
+  --el-menu-item-height: 60px;
 }
-.menu :deep(.el-menu-item.is-active) {
-  background: linear-gradient(90deg, #5b6bff, #7c66f5);
+.topmenu :deep(.el-menu-item) {
+  border-bottom: 2px solid transparent;
 }
-.menu :deep(.el-menu-item:hover) {
+.topmenu :deep(.el-menu-item:hover) {
+  background: #1d2030;
+}
+.topmenu :deep(.el-menu-item.is-active) {
   color: #fff;
+  border-bottom: 2px solid #7c89ff;
+  background: linear-gradient(180deg, transparent, rgba(124, 137, 255, 0.18));
 }
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #ececf1;
-  background: #fff;
-  height: 60px;
-  padding: 0 16px;
-}
-.left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.collapse-btn {
-  font-size: 16px;
-  color: #6b7280;
-}
-.page-title {
-  font-size: 15px;
-  font-weight: 600;
+.m-label {
+  margin-left: 6px;
 }
 .right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 .who {
-  color: #6b7280;
+  color: #a2a8b8;
   font-size: 13px;
 }
 .main {
-  background: var(--ll-bg);
+  flex: 1;
   padding: 16px;
+  background: var(--ll-bg);
+}
+.page-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  color: #1f2430;
 }
 </style>

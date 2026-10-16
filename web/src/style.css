@@ -73,3 +73,45 @@ body {
 .fade-leave-to {
   opacity: 0;
 }
+
+/* ---- Element Plus 全局细节 ---- */
+:root {
+  --el-table-header-bg-color: #f7f8fa;
+  --el-table-header-text-color: #5a6072;
+  --el-border-color-lighter: #ececf1;
+  --el-border-color: #e2e3ea;
+  --el-text-color-primary: #1f2430;
+  --el-text-color-regular: #3a3f4f;
+  --el-text-color-secondary: #8a90a0;
+}
+
+.el-button {
+  font-weight: 500;
+}
+
+.el-card__header {
+  font-weight: 600;
+  color: #1f2430;
+  padding: 14px 16px;
+}
+
+.el-table {
+  --el-table-border-color: #ececf1;
+}
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: #5a6072;
+}
+.el-table .el-table__row:hover > td.el-table__cell {
+  background: #f8f9ff;
+}
+
+.el-dialog {
+  border-radius: 14px;
+}
+.el-tag {
+  border-radius: 999px;
+}
+.el-message-box {
+  border-radius: 14px;
+}
