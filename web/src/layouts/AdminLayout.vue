@@ -62,7 +62,7 @@ async function logout() {
   flex-direction: column;
 }
 .topbar {
-  height: 60px;
+  height: 48px;
   background: #14161f;
   display: flex;
   align-items: center;
@@ -81,19 +81,19 @@ async function logout() {
   flex-shrink: 0;
 }
 .logo-mark {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border-radius: 8px;
   background: linear-gradient(135deg, #5b6bff, #8b5cf6);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 13px;
+  font-size: 12px;
   color: #fff;
 }
 .logo-text {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -106,7 +106,7 @@ async function logout() {
   --el-menu-text-color: #a2a8b8;
   --el-menu-hover-text-color: #ffffff;
   --el-menu-active-color: #ffffff;
-  --el-menu-item-height: 60px;
+  --el-menu-item-height: 48px;
 }
 .topmenu :deep(.el-menu-item) {
   border-bottom: 2px solid transparent;
@@ -130,7 +130,7 @@ async function logout() {
 }
 .who {
   color: #a2a8b8;
-  font-size: 13px;
+  font-size: 12px;
 }
 .main {
   flex: 1;
