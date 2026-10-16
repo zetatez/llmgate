@@ -62,20 +62,27 @@ async function onUserSubmit() {
 
 <template>
   <div class="login-wrap">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
     <el-card class="login-card">
-      <h2 class="title">LLM Gate</h2>
-      <p class="subtitle">Sign in to continue</p>
+      <div class="brand">
+        <span class="logo-mark">LG</span>
+        <div class="brand-text">
+          <h2 class="title">LLM Gate</h2>
+          <p class="subtitle">Sign in to continue</p>
+        </div>
+      </div>
 
       <el-tabs v-model="tab" stretch>
         <el-tab-pane label="User" name="user">
           <el-form @submit.prevent="onUserSubmit">
             <el-form-item>
-              <el-input v-model="username" placeholder="Username" @keyup.enter="onUserSubmit" />
+              <el-input v-model="username" placeholder="Username" size="large" @keyup.enter="onUserSubmit" />
             </el-form-item>
             <el-form-item>
-              <el-input v-model="password" type="password" placeholder="Password" show-password @keyup.enter="onUserSubmit" />
+              <el-input v-model="password" type="password" placeholder="Password" size="large" show-password @keyup.enter="onUserSubmit" />
             </el-form-item>
-            <el-button type="primary" class="w-full" :loading="loading" @click="onUserSubmit">
+            <el-button type="primary" class="w-full" size="large" :loading="loading" @click="onUserSubmit">
               Sign In
             </el-button>
           </el-form>
@@ -84,9 +91,9 @@ async function onUserSubmit() {
         <el-tab-pane label="Admin" name="admin">
           <el-form @submit.prevent="onAdminSubmit">
             <el-form-item>
-              <el-input v-model="token" type="password" placeholder="Admin token" show-password @keyup.enter="onAdminSubmit" />
+              <el-input v-model="token" type="password" placeholder="Admin token" size="large" show-password @keyup.enter="onAdminSubmit" />
             </el-form-item>
-            <el-button type="primary" class="w-full" :loading="loading" @click="onAdminSubmit">
+            <el-button type="primary" class="w-full" size="large" :loading="loading" @click="onAdminSubmit">
               Sign In
             </el-button>
           </el-form>
@@ -98,24 +105,73 @@ async function onUserSubmit() {
 
 <style scoped>
 .login-wrap {
+  position: relative;
   height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f0f2f5;
+  background: linear-gradient(135deg, #eef0ff 0%, #f5f6fa 45%, #f6effd 100%);
+  overflow: hidden;
+}
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.blob-1 {
+  width: 420px;
+  height: 420px;
+  background: #5b6bff;
+  top: -120px;
+  right: -80px;
+}
+.blob-2 {
+  width: 360px;
+  height: 360px;
+  background: #a78bfa;
+  bottom: -120px;
+  left: -60px;
 }
 .login-card {
-  width: 380px;
+  width: 400px;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(16, 24, 40, 0.12);
+  position: relative;
+  z-index: 1;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+.logo-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #5b6bff, #8b5cf6);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 18px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.brand-text {
+  text-align: left;
 }
 .title {
-  text-align: center;
-  margin: 0 0 4px;
+  margin: 0;
+  font-size: 20px;
 }
 .subtitle {
-  text-align: center;
-  color: #999;
+  margin: 2px 0 0;
+  color: #909399;
   font-size: 13px;
-  margin: 0 0 16px;
 }
 .w-full {
   width: 100%;
