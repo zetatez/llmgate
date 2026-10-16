@@ -160,9 +160,9 @@ onMounted(load)
 <style scoped>
 .mb { margin-bottom: 10px; }
 .ml { margin-left: 8px; }
-.tip { font-size: 12px; color: #909399; margin-left: 8px; }
-.base { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; color: #1677ff; }
+.tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
+.base { background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; color: var(--el-color-primary); }
 .token { display: inline-flex; align-items: center; gap: 8px; }
-.token code { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.token code { background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; }
 .form { margin-top: 8px; max-width: 560px; }
 </style>

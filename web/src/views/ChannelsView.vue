@@ -440,13 +440,13 @@ onMounted(() => {
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .toolbar { display: flex; align-items: center; }
-.tip { font-size: 12px; color: #909399; margin-left: 8px; }
+.tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
 .mt { margin-top: 12px; }
 .mr { margin-right: 8px; }
 .ml { margin-left: 6px; }
 .mb { margin-bottom: 10px; }
 .model-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 180px; overflow-y: auto; }
-.model-tag { background: #f0f2f5; border-radius: 4px; padding: 2px 8px; font-size: 12px; color: #606266; }
-.dim { color: #909399; font-weight: normal; }
-.count { font-size: 12px; color: #909399; margin-right: 8px; }
+.model-tag { background: var(--ll-soft); border-radius: 4px; padding: 2px 8px; font-size: 12px; color: var(--ll-muted); }
+.dim { color: var(--ll-muted); font-weight: normal; }
+.count { font-size: 12px; color: var(--ll-muted); margin-right: 8px; }
 </style>

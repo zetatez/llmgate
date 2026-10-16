@@ -498,12 +498,12 @@ onMounted(load)
 .head { display: flex; justify-content: space-between; align-items: center; }
 .mr { margin-right: 8px; }
 .mt { margin-top: 8px; }
-.tip { font-size: 12px; color: #909399; margin-left: 8px; }
+.tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
 .inner-table { margin: 4px 16px 0; }
 .add-route-btn { margin-left: 16px; }
 .row-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .row-line .el-select { flex-shrink: 0; }
 .row-block { margin-bottom: 10px; }
 .price-line { margin-top: -2px; padding-left: 130px; flex-wrap: wrap; }
-.tip-line { font-size: 12px; color: #909399; margin: 12px 4px 0; line-height: 1.6; }
+.tip-line { font-size: 12px; color: var(--ll-muted); margin: 12px 4px 0; line-height: 1.6; }
 </style>

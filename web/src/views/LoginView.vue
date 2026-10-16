@@ -110,34 +110,34 @@ async function onUserSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #eef0f9 0%, #f7f8fb 45%, #f4f1fb 100%);
+  background: radial-gradient(900px 480px at 50% -10%, rgba(139,147,214,.20), transparent 60%), var(--ll-bg);
   overflow: hidden;
 }
 .blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(70px);
-  opacity: 0.4;
+  filter: blur(90px);
+  opacity: 0.22;
   pointer-events: none;
 }
 .blob-1 {
   width: 420px;
   height: 420px;
-  background: #a3a9df;
+  background: #8b93d6;
   top: -120px;
   right: -80px;
 }
 .blob-2 {
   width: 360px;
   height: 360px;
-  background: #c3bce6;
+  background: #b5a7dd;
   bottom: -120px;
   left: -60px;
 }
 .login-card {
   width: 400px;
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(16, 24, 40, 0.12);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
   position: relative;
   z-index: 1;
 }
@@ -170,7 +170,7 @@ async function onUserSubmit() {
 }
 .subtitle {
   margin: 2px 0 0;
-  color: #909399;
+  color: var(--ll-muted);
   font-size: 13px;
 }
 .w-full {

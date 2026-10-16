@@ -31,10 +31,10 @@ function humanNum(n?: number): string {
 }
 
 const cards = computed(() => [
-  { label: 'Account', value: me.value?.username || '—', sub: me.value?.name || '', icon: User, color: '#7c86d6', bg: '#eef0f9' },
-  { label: 'Quota used ($)', value: money(me.value?.quota_used), sub: `/ ${me.value?.quota_limit ? money(me.value.quota_limit) : 'unlimited'}`, icon: Coin, color: '#6f9a86', bg: '#e9f4ee' },
-  { label: 'Today requests', value: humanNum(overview.value?.today.total_requests), sub: `${overview.value?.today.total_requests ?? 0}`, icon: Connection, color: '#7a93b8', bg: '#eef2f8' },
-  { label: 'Today cost ($)', value: money(overview.value?.today.cost), sub: '', icon: Money, color: '#b18a4f', bg: '#faf3e6' },
+  { label: 'Account', value: me.value?.username || '—', sub: me.value?.name || '', icon: User, color: 'var(--el-color-primary)', bg: 'rgba(124,134,214,.15)' },
+  { label: 'Quota used ($)', value: money(me.value?.quota_used), sub: `/ ${me.value?.quota_limit ? money(me.value.quota_limit) : 'unlimited'}`, icon: Coin, color: '#6f9a86', bg: 'rgba(111,154,134,.15)' },
+  { label: 'Today requests', value: humanNum(overview.value?.today.total_requests), sub: `${overview.value?.today.total_requests ?? 0}`, icon: Connection, color: '#7a93b8', bg: 'var(--ll-soft)' },
+  { label: 'Today cost ($)', value: money(overview.value?.today.cost), sub: '', icon: Money, color: '#b18a4f', bg: 'rgba(177,138,79,.16)' },
 ])
 
 const totalCards = computed(() => [
@@ -121,8 +121,8 @@ onMounted(load)
 .stat-icon.plain {
   width: 38px;
   height: 38px;
-  background: #f1f2f7;
-  color: #5a6072;
+  background: var(--ll-soft);
+  color: var(--ll-muted);
 }
 .stat-meta {
   min-width: 0;
@@ -130,18 +130,18 @@ onMounted(load)
 .stat-num {
   font-size: 22px;
   font-weight: 700;
-  color: #1f2430;
+  color: var(--ll-ink);
   line-height: 1.2;
   white-space: nowrap;
 }
 .sub {
   font-size: 12px;
   font-weight: 400;
-  color: #8a90a0;
+  color: var(--ll-muted);
   margin-left: 4px;
 }
 .stat-label {
-  color: #8a90a0;
+  color: var(--ll-muted);
   font-size: 13px;
   margin-top: 2px;
   white-space: nowrap;

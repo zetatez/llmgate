@@ -80,10 +80,10 @@ const stats = computed<Stat[]>(() => {
   const r = range.value
   const t = payload.value?.today
   return [
-    { label: 'Requests', value: humanNum(r.req), today: `today ${t?.total_requests ?? 0}`, icon: Connection, color: '#7c86d6', bg: '#eef0f9' },
-    { label: 'Tokens', value: humanNum(r.tokens), today: `today ${humanNum(t?.total_tokens)}`, icon: ChatDotRound, color: '#6f9a86', bg: '#e9f4ee' },
-    { label: 'Spend ($)', value: humanMoney(r.cost), today: `today ${humanMoney(t?.cost)}`, icon: Money, color: '#b18a4f', bg: '#faf3e6' },
-    { label: 'Errors', value: humanNum(r.errors), today: `today ${t?.errors ?? 0}`, icon: WarningFilled, color: r.errors > 0 ? '#c9808a' : '#6f9a86', bg: r.errors > 0 ? '#fbeff0' : '#e9f6ee' },
+    { label: 'Requests', value: humanNum(r.req), today: `today ${t?.total_requests ?? 0}`, icon: Connection, color: 'var(--el-color-primary)', bg: 'rgba(124,134,214,.15)' },
+    { label: 'Tokens', value: humanNum(r.tokens), today: `today ${humanNum(t?.total_tokens)}`, icon: ChatDotRound, color: '#6f9a86', bg: 'rgba(111,154,134,.15)' },
+    { label: 'Spend ($)', value: humanMoney(r.cost), today: `today ${humanMoney(t?.cost)}`, icon: Money, color: '#b18a4f', bg: 'rgba(177,138,79,.16)' },
+    { label: 'Errors', value: humanNum(r.errors), today: `today ${t?.errors ?? 0}`, icon: WarningFilled, color: r.errors > 0 ? '#c9808a' : '#6f9a86', bg: r.errors > 0 ? 'rgba(201,128,138,.16)' : 'rgba(111,154,134,.15)' },
   ]
 })
 
@@ -146,9 +146,9 @@ function renderChart() {
     },
     legend: { type: 'scroll', bottom: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10 },
     grid: { left: 48, right: 48, top: 24, bottom: 34 },
-    xAxis: { type: 'category', data: daysLabel, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280' } },
+    xAxis: { type: 'category', data: daysLabel, axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c' } },
     yAxis: [
-      { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#6b7280' }, splitLine: { lineStyle: { color: '#f0f1f5' } } },
+      { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
       { type: 'value', axisLabel: { formatter: (v: number) => '$' + humanMoney(v), color: '#b18a4f' }, splitLine: { show: false } },
     ],
     series: [
@@ -334,13 +334,13 @@ onBeforeUnmount(() => {
 }
 .gateway .gl {
   font-size: 12px;
-  color: #8a90a0;
+  color: var(--ll-muted);
 }
 .gateway code {
-  background: #f1f2f7;
+  background: var(--ll-soft);
   border-radius: 6px;
   padding: 2px 10px;
-  color: #7c86d6;
+  color: var(--el-color-primary);
   font-size: 13px;
 }
 .stat-card {
@@ -367,18 +367,18 @@ onBeforeUnmount(() => {
 .stat-num {
   font-size: 24px;
   font-weight: 700;
-  color: #1f2430;
+  color: var(--ll-ink);
   line-height: 1.2;
   white-space: nowrap;
 }
 .stat-label {
-  color: #8a90a0;
+  color: var(--ll-muted);
   font-size: 13px;
   margin-top: 2px;
   white-space: nowrap;
 }
 .stat-today {
-  color: #b3b8c4;
+  color: var(--ll-muted);
 }
 .head {
   display: flex;
@@ -389,7 +389,7 @@ onBeforeUnmount(() => {
 }
 .week-sum {
   font-size: 12px;
-  color: #8a90a0;
+  color: var(--ll-muted);
 }
 .model-item {
   margin-bottom: 12px;
@@ -401,19 +401,19 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .model-name {
-  color: #3a3f4f;
+  color: var(--ll-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .model-val {
-  color: #6b7280;
+  color: var(--ll-muted);
   white-space: nowrap;
 }
 .bar {
   height: 6px;
   border-radius: 3px;
-  background: #f0f1f5;
+  background: var(--ll-soft);
   margin-top: 5px;
   overflow: hidden;
 }
@@ -433,7 +433,7 @@ onBeforeUnmount(() => {
 }
 .tip {
   font-size: 12px;
-  color: #8a90a0;
+  color: var(--ll-muted);
 }
 .mt {
   margin-top: 14px;

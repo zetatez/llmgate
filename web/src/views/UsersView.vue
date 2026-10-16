@@ -358,16 +358,16 @@ onMounted(() => {
 
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; }
-.tip { font-size: 12px; color: #909399; margin-left: 8px; }
+.tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
 .mb { margin-bottom: 10px; }
 .mt { margin-top: 12px; }
 .ml { margin-left: 8px; }
-.base { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; color: #1677ff; }
-.key { font-size: 12px; background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.base { background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; color: var(--el-color-primary); }
+.key { font-size: 12px; background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; }
 .token { display: inline-flex; align-items: center; gap: 8px; }
-.token code { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.token code { background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; }
 .token-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.token-cell code { background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.token-cell code { background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; }
 .token-form { margin-top: 8px; }
 .token-add { margin-bottom: 4px; }
 </style>

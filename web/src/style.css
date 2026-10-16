@@ -1,5 +1,5 @@
 :root {
-  /* 品牌色：柔和靛蓝（淡雅） */
+  /* 品牌色：柔和靛蓝 */
   --el-color-primary: #8b93d6;
   --el-color-primary-light-3: #a3a9df;
   --el-color-primary-light-5: #bcbfe9;
@@ -11,13 +11,64 @@
   --el-border-radius-base: 8px;
   --el-border-radius-small: 6px;
 
+  /* 语义变量（浅色） */
   --ll-bg: #f6f7fa;
+  --ll-card: #ffffff;
+  --ll-soft: #f1f2f7;
+  --ll-border: #ececf1;
+  --ll-hover: #f5f6fb;
+  --ll-ink: #1f2430;
+  --ll-muted: #8a90a0;
   --ll-card-radius: 12px;
-  --ll-ink: #2b2f3a;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   line-height: 1.5;
   color-scheme: light;
+}
+
+/* 深色主题（默认）：对齐 opencode 控制台的近黑底 + 中性卡片 */
+html.dark {
+  --el-bg-color: #17181c;
+  --el-bg-color-overlay: #1d1e23;
+  --el-bg-color-page: #0e0f12;
+  --el-fill-color-blank: #17181c;
+  --el-fill-color: #23252c;
+  --el-fill-color-light: #202229;
+  --el-fill-color-lighter: #1c1e24;
+  --el-fill-color-extra-light: #191b20;
+  --el-fill-color-dark: #2a2c33;
+  --el-border-color: #2a2c33;
+  --el-border-color-light: #262830;
+  --el-border-color-lighter: #22242b;
+  --el-border-color-extra-light: #1e2027;
+  --el-text-color-primary: #e6e8ee;
+  --el-text-color-regular: #c3c7d1;
+  --el-text-color-secondary: #8b909c;
+  --el-text-color-placeholder: #6b707c;
+  --el-text-color-disabled: #565b66;
+  --el-table-header-bg-color: #202229;
+  --el-table-header-text-color: #a8aebc;
+  --el-table-tr-bg-color: #17181c;
+  --el-table-row-hover-bg-color: #1d1f25;
+  --el-mask-color: rgba(0, 0, 0, 0.6);
+
+  --el-color-primary: #9aa2e0;
+  --el-color-primary-light-3: #6f76ab;
+  --el-color-primary-light-5: #565b85;
+  --el-color-primary-light-7: #3d415f;
+  --el-color-primary-light-8: #30344a;
+  --el-color-primary-light-9: #23263a;
+  --el-color-primary-dark-2: #aab1e6;
+
+  --ll-bg: #0e0f12;
+  --ll-card: #17181c;
+  --ll-soft: #202229;
+  --ll-border: #262830;
+  --ll-hover: #1d1f25;
+  --ll-ink: #e6e8ee;
+  --ll-muted: #8b909c;
+
+  color-scheme: dark;
 }
 
 * {
@@ -44,21 +95,22 @@ body {
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #c9ccd6;
+  background: #3a3d47;
   border-radius: 4px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #a9adba;
+  background: #4a4e5a;
 }
 
-/* 卡片统一：圆角 + 轻边框 + 柔和阴影 */
-.el-card.is-always-shadow,
-.el-card.is-hover-shadow:hover {
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
-}
+/* 卡片统一 */
 .el-card {
   border-radius: var(--ll-card-radius);
-  border: 1px solid #ececf1;
+  border: 1px solid var(--ll-border);
+  background: var(--ll-card);
+}
+.el-card.is-always-shadow,
+.el-card.is-hover-shadow:hover {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 
 /* 路由切换淡入 */
@@ -74,38 +126,22 @@ body {
   opacity: 0;
 }
 
-/* ---- Element Plus 全局细节 ---- */
-:root {
-  --el-table-header-bg-color: #f7f8fa;
-  --el-table-header-text-color: #5a6072;
-  --el-border-color-lighter: #ececf1;
-  --el-border-color: #e2e3ea;
-  --el-text-color-primary: #1f2430;
-  --el-text-color-regular: #3a3f4f;
-  --el-text-color-secondary: #8a90a0;
-}
-
+/* ---- Element Plus 细节 ---- */
 .el-button {
   font-weight: 500;
 }
-
 .el-card__header {
   font-weight: 600;
-  color: #1f2430;
+  color: var(--ll-ink);
   padding: 14px 16px;
+  border-bottom: 1px solid var(--ll-border);
 }
-
 .el-table {
-  --el-table-border-color: #ececf1;
+  --el-table-border-color: var(--ll-border);
 }
 .el-table th.el-table__cell {
   font-weight: 600;
-  color: #5a6072;
 }
-.el-table .el-table__row:hover > td.el-table__cell {
-  background: #f5f6fb;
-}
-
 .el-dialog {
   border-radius: 14px;
 }

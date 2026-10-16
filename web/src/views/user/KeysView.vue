@@ -223,5 +223,5 @@ onMounted(load)
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; }
 .mb { margin-bottom: 10px; }
-.key { font-size: 12px; background: #f0f2f5; border-radius: 4px; padding: 1px 8px; }
+.key { font-size: 12px; background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; }
 </style>

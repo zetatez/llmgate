@@ -160,11 +160,11 @@ onMounted(load)
 .title {
   font-size: 16px;
   font-weight: 700;
-  color: #1f2430;
+  color: var(--ll-ink);
 }
 .sub {
   font-size: 12px;
-  color: #8a90a0;
+  color: var(--ll-muted);
   margin-top: 2px;
 }
 .grp {
@@ -180,7 +180,7 @@ onMounted(load)
   justify-content: space-between;
   gap: 20px;
   padding: 12px 2px;
-  border-top: 1px solid #eef0f4;
+  border-top: 1px solid var(--ll-soft);
 }
 .field:first-of-type {
   border-top: none;
@@ -195,7 +195,7 @@ onMounted(load)
 }
 .field-key code {
   font-size: 13px;
-  color: #3a3f4f;
+  color: var(--ll-ink);
   font-weight: 600;
 }
 .ro {
@@ -203,7 +203,7 @@ onMounted(load)
 }
 .field-desc {
   font-size: 12px;
-  color: #8a90a0;
+  color: var(--ll-muted);
   margin-top: 3px;
 }
 .field-control {
@@ -211,7 +211,7 @@ onMounted(load)
 }
 .val {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--ll-muted);
   word-break: break-all;
   max-width: 360px;
 }
@@ -221,7 +221,7 @@ onMounted(load)
   gap: 10px;
 }
 .pricing-preview {
-  color: #606266;
+  color: var(--ll-muted);
   font-size: 13px;
 }
 .mt {
@@ -229,7 +229,7 @@ onMounted(load)
 }
 .tip {
   font-size: 12px;
-  color: #909399;
+  color: var(--ll-muted);
   line-height: 1.6;
 }
 .code :deep(textarea) {

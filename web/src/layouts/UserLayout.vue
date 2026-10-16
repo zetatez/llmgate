@@ -121,8 +121,8 @@ onMounted(async () => {
 }
 .topbar {
   height: 40px;
-  background: #ffffff;
-  border-bottom: 1px solid #eceef3;
+  background: var(--ll-card);
+  border-bottom: 1px solid var(--ll-border);
   display: flex;
   align-items: center;
   padding: 0 16px;
@@ -135,7 +135,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #3a3f4f;
+  color: var(--ll-ink);
   margin-right: 12px;
   flex-shrink: 0;
 }
@@ -162,19 +162,19 @@ onMounted(async () => {
   background: transparent;
   border-bottom: none;
   --el-menu-bg-color: transparent;
-  --el-menu-text-color: #6f7688;
-  --el-menu-hover-text-color: #444a5e;
-  --el-menu-active-color: #6a72c8;
+  --el-menu-text-color: var(--ll-muted);
+  --el-menu-hover-text-color: var(--ll-ink);
+  --el-menu-active-color: var(--el-color-primary);
   --el-menu-item-height: 40px;
 }
 .topmenu :deep(.el-menu-item) {
   border-bottom: 2px solid transparent;
 }
 .topmenu :deep(.el-menu-item:hover) {
-  background: #f4f5fc;
+  background: var(--ll-soft);
 }
 .topmenu :deep(.el-menu-item.is-active) {
-  color: #6a72c8;
+  color: var(--el-color-primary);
   border-bottom: 2px solid #8b93d6;
   background: transparent;
 }
@@ -188,7 +188,7 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 .who {
-  color: #6f7688;
+  color: var(--ll-muted);
   font-size: 12px;
 }
 .main {
@@ -200,6 +200,6 @@ onMounted(async () => {
   font-size: 16px;
   font-weight: 700;
   margin-bottom: 14px;
-  color: #1f2430;
+  color: var(--ll-ink);
 }
 </style>
