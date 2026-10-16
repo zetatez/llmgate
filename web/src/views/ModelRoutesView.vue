@@ -107,7 +107,7 @@ const customGroups = computed<Array<{ display_name: string; routes: ModelRoute[]
 })
 
 const customDialog = reactive({
-  visible: false, editing: false, name: '',
+  visible: false, editing: false, name: '', originalName: '',
   rows: [] as Array<{ channel_id: number; upstream_model: string; priority: number; weight: number; enabled: number; price_custom: boolean; price_input: number; price_output: number }>,
 })
 
@@ -115,6 +115,7 @@ function openCustomCreate() {
   customDialog.visible = true
   customDialog.editing = false
   customDialog.name = ''
+  customDialog.originalName = ''
   customDialog.rows = [{ channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1, price_custom: false, price_input: 0, price_output: 0 }]
 }
 
@@ -132,9 +133,10 @@ async function saveCustomGroup() {
   const rows = customDialog.rows.filter((r) => r.channel_id > 0 && r.upstream_model.trim())
   if (!rows.length) { ElMessage.warning('Add at least one "channel + upstream model"'); return }
   try {
-    // 编辑模式：先删除旧名全部路由再重建
-    if (customDialog.editing) {
-      for (const r of customGroups.value.find((g) => g.display_name === name)?.routes ?? []) {
+    // 编辑模式：按"原名字"删除旧路由再重建（用户可能改了名）
+    if (customDialog.editing && customDialog.originalName) {
+      const old = customGroups.value.find((g) => g.display_name === customDialog.originalName)?.routes ?? []
+      for (const r of old) {
         await modelRoutesApi.remove(r.id)
       }
     }
@@ -156,6 +158,7 @@ async function saveCustomGroup() {
 function openCustomEdit(g: { display_name: string; routes: ModelRoute[] }) {
   customDialog.editing = true
   customDialog.name = g.display_name
+  customDialog.originalName = g.display_name
   customDialog.rows = g.routes.map((r) => ({
     channel_id: r.channel_id, upstream_model: r.upstream_model, priority: r.priority, weight: r.weight, enabled: r.enabled,
     price_custom: r.price_input != null || r.price_output != null,
@@ -394,7 +397,7 @@ onMounted(load)
     </el-tabs>
 
     <!-- 自定义路由：新增/编辑 -->
-    <el-dialog v-model="customDialog.visible" :title="customDialog.editing ? 'Edit Custom Route' : 'New Custom Route'" width="640px">
+    <el-dialog v-model="customDialog.visible" :title="customDialog.editing ? 'Edit Custom Route' : 'New Custom Route'" width="900px">
       <el-form label-width="130px">
         <el-form-item label="External route name" required>
           <el-input v-model="customDialog.name" placeholder="e.g. flash / my-agent-model" />
@@ -498,8 +501,9 @@ onMounted(load)
 .tip { font-size: 12px; color: #909399; margin-left: 8px; }
 .inner-table { margin: 4px 16px 0; }
 .add-route-btn { margin-left: 16px; }
-.row-line { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.row-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.row-line .el-select { flex-shrink: 0; }
 .row-block { margin-bottom: 10px; }
-.price-line { margin-top: -2px; padding-left: 130px; }
+.price-line { margin-top: -2px; padding-left: 130px; flex-wrap: wrap; }
 .tip-line { font-size: 12px; color: #909399; margin: 12px 4px 0; line-height: 1.6; }
 </style>
