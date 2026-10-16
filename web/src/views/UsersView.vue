@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { logsApi, settingsApi, usersApi } from '../api'
-import type { AdminUserDetail, User, UserModelUsage } from '../api'
+import { settingsApi, usersApi } from '../api'
+import type { AdminUserDetail, User } from '../api'
 
 const list = ref<User[]>([])
 const loading = ref(false)
@@ -26,17 +26,6 @@ function copyGatewayBase() {
   ElMessage.success('Copied')
 }
 
-// 用户×模型用量
-const usage = ref<UserModelUsage[]>([])
-const usageDays = ref(7)
-const usageLoading = ref(false)
-
-async function loadUsage() {
-  usageLoading.value = true
-  try {
-    usage.value = await logsApi.usageByUserModel(usageDays.value)
-  } catch { usage.value = [] } finally { usageLoading.value = false }
-}
 
 const dialog = reactive({ visible: false, username: '', password: '', name: '', remark: '', quota_limit: 0 })
 const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 0, status: 1 })
@@ -178,7 +167,6 @@ function money(v?: number) {
 
 onMounted(() => {
   load()
-  loadUsage()
   loadGatewayBase()
 })
 </script>
@@ -239,32 +227,6 @@ onMounted(() => {
         </el-table-column>
       </el-table>
       <el-empty v-if="!loading && !list.length" description='No users yet. Click "Add User" to create an account.' />
-    </el-card>
-
-    <el-card shadow="never" class="mt">
-      <template #header>
-        <div class="head">
-          <span>Usage by User × Model</span>
-          <el-select v-model="usageDays" style="width: 120px" @change="loadUsage">
-            <el-option label="Today" :value="1" />
-            <el-option label="Last 7 days" :value="7" />
-            <el-option label="Last 30 days" :value="30" />
-            <el-option label="All" :value="0" />
-          </el-select>
-        </div>
-      </template>
-      <el-table v-loading="usageLoading" :data="usage" size="small" max-height="420">
-        <el-table-column prop="user_name" label="User" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.user_name || `#${row.user_id}` }}</template>
-        </el-table-column>
-        <el-table-column prop="model" label="Model" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="requests" label="Requests" width="90" sortable />
-        <el-table-column prop="prompt_tokens" label="Upload tokens" width="110" sortable />
-        <el-table-column prop="completion_tokens" label="Download tokens" width="120" sortable />
-        <el-table-column prop="total_tokens" label="Total" width="100" sortable />
-        <el-table-column prop="cost" label="Cost ($)" width="100" sortable />
-      </el-table>
-      <el-empty v-if="!usageLoading && !usage.length" description="No usage in the selected period" />
     </el-card>
 
     <el-dialog v-model="dialog.visible" title="Add User" width="440px">

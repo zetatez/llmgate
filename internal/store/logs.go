@@ -12,7 +12,7 @@ import (
 const logCols = `id, user_id, display_model, channel_id, key_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
 
 // queryLogSelect 附带渠道名（联表，仅查询用）
-const queryLogSelect = `lg.id, lg.user_id, lg.display_model, lg.channel_id, lg.key_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
+const queryLogSelect = `lg.id, lg.user_id, COALESCE(u.name,''), lg.display_model, lg.channel_id, lg.key_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
 
 // insertLogCols 不含 id，交由 AUTOINCREMENT 分配。
 const insertLogCols = `user_id, display_model, channel_id, key_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
@@ -82,7 +82,7 @@ func QueryLogs(db *sql.DB, f LogFilter) ([]*models.RequestLog, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	q := fmt.Sprintf(`SELECT %s FROM request_logs lg LEFT JOIN channels ch ON ch.id = lg.channel_id WHERE %s ORDER BY lg.id DESC LIMIT ? OFFSET ?`,
+	q := fmt.Sprintf(`SELECT %s FROM request_logs lg LEFT JOIN channels ch ON ch.id = lg.channel_id LEFT JOIN users u ON u.id = lg.user_id WHERE %s ORDER BY lg.id DESC LIMIT ? OFFSET ?`,
 		queryLogSelect, strings.Join(where, " AND "))
 	args = append(args, limit, f.Offset)
 	rows, err := db.Query(q, args...)
@@ -93,7 +93,7 @@ func QueryLogs(db *sql.DB, f LogFilter) ([]*models.RequestLog, error) {
 	var out []*models.RequestLog
 	for rows.Next() {
 		l := &models.RequestLog{}
-		if err := rows.Scan(&l.ID, &l.UserID, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.ChannelName, &l.UpstreamModel,
+		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.ChannelName, &l.UpstreamModel,
 			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
 			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
 			return nil, err
@@ -474,6 +474,7 @@ func RecentFailures(db *sql.DB, n int) ([]*models.RequestLog, error) {
 	}
 	rows, err := db.Query(`SELECT `+queryLogSelect+` FROM request_logs lg
 		LEFT JOIN channels ch ON ch.id = lg.channel_id
+		LEFT JOIN users u ON u.id = lg.user_id
 		WHERE lg.status != 'success' ORDER BY lg.id DESC LIMIT ?`, n)
 	if err != nil {
 		return nil, err
@@ -482,7 +483,7 @@ func RecentFailures(db *sql.DB, n int) ([]*models.RequestLog, error) {
 	var out []*models.RequestLog
 	for rows.Next() {
 		l := &models.RequestLog{}
-		if err := rows.Scan(&l.ID, &l.UserID, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.ChannelName, &l.UpstreamModel,
+		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.ChannelName, &l.UpstreamModel,
 			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
 			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
 			return nil, err

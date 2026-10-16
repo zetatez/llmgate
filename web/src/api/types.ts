@@ -129,6 +129,7 @@ export interface AdminUserDetail {
 export interface RequestLog {
   id: number
   user_id: number
+  user_name?: string
   display_model: string
   channel_id: number
   key_id: number

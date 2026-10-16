@@ -75,6 +75,7 @@ type ModelRoute struct {
 type RequestLog struct {
 	ID               int64   `json:"id"`
 	UserID           int64   `json:"user_id"`
+	UserName         string  `json:"user_name"` // 查询时联表填充，非存储字段
 	DisplayModel     string  `json:"display_model"`
 	ChannelID        int64   `json:"channel_id"`
 	KeyID            int64   `json:"key_id"`

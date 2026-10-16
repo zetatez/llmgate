@@ -12,6 +12,7 @@ const menus = [
   { path: '/channels', label: 'Channels', icon: 'Connection' },
   { path: '/model-routes', label: 'Routes', icon: 'Share' },
   { path: '/users', label: 'Users', icon: 'User' },
+  { path: '/usage', label: 'Usage', icon: 'DataLine' },
   { path: '/logs', label: 'Logs', icon: 'Document' },
   { path: '/settings', label: 'Settings', icon: 'Setting' },
 ]
