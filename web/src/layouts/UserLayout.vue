@@ -75,10 +75,7 @@ onMounted(async () => {
         <span class="logo-text">LLM Gate</span>
       </div>
       <el-menu :default-active="active" mode="horizontal" router class="topmenu" :ellipsis="false">
-        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">
-          <el-icon><component :is="m.icon" /></el-icon>
-          <span class="m-label">{{ m.label }}</span>
-        </el-menu-item>
+        <el-menu-item v-for="m in menus" :key="m.path" :index="m.path">{{ m.label }}</el-menu-item>
       </el-menu>
       <div class="right">
         <span class="who">{{ displayName }}</span>
