@@ -75,7 +75,8 @@ export const logsApi = {
     adminApi.get<DataEnvelope<RequestLog[]>>('/logs', { params }).then(unwrap),
   count: (params: Record<string, string | number>) =>
     adminApi.get<DataEnvelope<number>>('/logs/count', { params }).then(unwrap),
-  dashboard: () => adminApi.get<DataEnvelope<DashboardPayload>>('/logs/usage/dashboard').then(unwrap),
+  dashboard: (days = 7) =>
+    adminApi.get<DataEnvelope<DashboardPayload>>('/logs/usage/dashboard', { params: { days } }).then(unwrap),
   usageByModel: (date?: string) =>
     adminApi.get<DataEnvelope<{ date: string; models: ModelUsage[] }>>('/logs/usage/by-model', { params: { date: date ?? '' } }).then(unwrap),
   usageByUserModel: (days: number) =>

@@ -131,6 +131,7 @@ func parseLogFilter(c *gin.Context) store.LogFilter {
 
 // dashboardPayload 仪表盘一次性数据。
 type dashboardPayload struct {
+	Days           int                     `json:"days"`
 	Week           []store.UsagePoint      `json:"week"`
 	WeekModels     []store.UsageModelPoint `json:"week_models"`
 	Today          store.UsageSummary      `json:"today"`
@@ -141,12 +142,18 @@ type dashboardPayload struct {
 
 func usageDashboard(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		week, err := store.UsageByDay(a.DB, 7)
+		days := 7
+		if v := c.Query("days"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 90 {
+				days = n
+			}
+		}
+		week, err := store.UsageByDay(a.DB, days)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		weekModels, err := store.UsageModelByDay(a.DB, 7)
+		weekModels, err := store.UsageModelByDay(a.DB, days)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -160,13 +167,6 @@ func usageDashboard(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		total, err := store.UsageSummaryRange(a.DB, 0)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		_ = total // 累计统计不再输出到仪表盘（取舍：对日常使用无指导意义）
-
 		channelStats, err := store.ChannelStatsToday(a.DB)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -178,7 +178,7 @@ func usageDashboard(a *app.App) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": dashboardPayload{
-			Week: week, WeekModels: weekModels, Today: today, ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
+			Days: days, Week: week, WeekModels: weekModels, Today: today, ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
 		}})
 	}
 }

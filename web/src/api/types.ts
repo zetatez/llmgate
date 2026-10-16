@@ -174,6 +174,7 @@ export interface ChannelDayStat {
 }
 
 export interface DashboardPayload {
+  days: number
   week: UsagePoint[]
   week_models: UsageModelPoint[]
   today: UsageSummary

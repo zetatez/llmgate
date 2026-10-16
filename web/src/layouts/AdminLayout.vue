@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 
 const menus = [
-  { path: '/dashboard', label: 'Dashboard', icon: 'Odometer' },
+  { path: '/dashboard', label: 'Overview', icon: 'Odometer' },
   { path: '/channels', label: 'Channels', icon: 'Connection' },
   { path: '/model-routes', label: 'Routes', icon: 'Share' },
   { path: '/users', label: 'Users', icon: 'User' },

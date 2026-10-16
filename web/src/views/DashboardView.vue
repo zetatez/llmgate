@@ -5,7 +5,7 @@ import * as echarts from 'echarts'
 import { logsApi, settingsApi } from '../api'
 import type { DashboardPayload } from '../api'
 import { ElMessage } from 'element-plus'
-import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Plus, User } from '@element-plus/icons-vue'
+import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Plus, User, Refresh } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const payload = ref<DashboardPayload | null>(null)
@@ -13,6 +13,7 @@ const loading = ref(false)
 const chartEl = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 const gatewayBase = ref('')
+const days = ref(7)
 
 function humanNum(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return '-'
@@ -32,9 +33,9 @@ function humanMoney(n: number | null | undefined): string {
 async function load() {
   loading.value = true
   try {
-    payload.value = await logsApi.dashboard()
+    payload.value = await logsApi.dashboard(days.value)
   } catch (e: any) {
-    ElMessage.error('Failed to load dashboard: ' + (e?.message || e))
+    ElMessage.error('Failed to load overview: ' + (e?.message || e))
   } finally {
     loading.value = false
     renderChart()
@@ -55,22 +56,34 @@ function copyGatewayBase() {
   ElMessage.success('Copied')
 }
 
+// 区间统计（按所选天数求和）
+const range = computed(() => {
+  const w = payload.value?.week || []
+  return w.reduce((s, p) => ({
+    req: s.req + (p.requests || 0),
+    tokens: s.tokens + (p.total_tokens || 0),
+    cost: s.cost + (p.cost || 0),
+    errors: s.errors + (p.errors || 0),
+  }), { req: 0, tokens: 0, cost: 0, errors: 0 })
+})
+
 interface Stat {
   label: string
   value: string
-  title: string
+  today: string
   icon: unknown
   color: string
   bg: string
 }
 
 const stats = computed<Stat[]>(() => {
+  const r = range.value
   const t = payload.value?.today
   return [
-    { label: 'Requests Today', value: humanNum(t?.total_requests), title: `${t?.total_requests ?? 0} requests`, icon: Connection, color: '#7c86d6', bg: '#eef0f9' },
-    { label: 'Tokens Today', value: humanNum(t?.total_tokens), title: `${t?.total_tokens ?? 0} tokens`, icon: ChatDotRound, color: '#6f9a86', bg: '#e9f4ee' },
-    { label: 'Cost Today ($)', value: humanMoney(t?.cost), title: `$${(t?.cost ?? 0).toFixed(4)}`, icon: Money, color: '#b18a4f', bg: '#faf3e6' },
-    { label: 'Errors Today', value: humanNum(t?.errors), title: `${t?.errors ?? 0} errors`, icon: WarningFilled, color: (t?.errors || 0) > 0 ? '#c9808a' : '#6f9a86', bg: (t?.errors || 0) > 0 ? '#fbeff0' : '#e9f6ee' },
+    { label: 'Requests', value: humanNum(r.req), today: `today ${t?.total_requests ?? 0}`, icon: Connection, color: '#7c86d6', bg: '#eef0f9' },
+    { label: 'Tokens', value: humanNum(r.tokens), today: `today ${humanNum(t?.total_tokens)}`, icon: ChatDotRound, color: '#6f9a86', bg: '#e9f4ee' },
+    { label: 'Spend ($)', value: humanMoney(r.cost), today: `today ${humanMoney(t?.cost)}`, icon: Money, color: '#b18a4f', bg: '#faf3e6' },
+    { label: 'Errors', value: humanNum(r.errors), today: `today ${t?.errors ?? 0}`, icon: WarningFilled, color: r.errors > 0 ? '#c9808a' : '#6f9a86', bg: r.errors > 0 ? '#fbeff0' : '#e9f6ee' },
   ]
 })
 
@@ -79,29 +92,34 @@ const weekEmpty = computed(() => {
   return w.length === 0 || w.every((p) => p.total_tokens === 0 && p.requests === 0)
 })
 
-// 近 7 天总览（次级信息行）
-const weekTotal = computed(() => {
-  const w = payload.value?.week || []
-  return w.reduce((s, p) => ({ tokens: s.tokens + (p.total_tokens || 0), cost: s.cost + (p.cost || 0), req: s.req + (p.requests || 0) }), { tokens: 0, cost: 0, req: 0 })
+// Top 模型（按区间 token 汇总 + 占比条）
+const topModels = computed(() => {
+  const marks = payload.value?.week_models || []
+  const totals = new Map<string, number>()
+  for (const m of marks) totals.set(m.model, (totals.get(m.model) || 0) + m.tokens)
+  const arr = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
+  const sum = arr.reduce((s, [, v]) => s + v, 0) || 1
+  return arr.map(([model, tokens]) => ({ model, tokens, share: (tokens / sum) * 100 }))
 })
 
 const MODEL_COLORS = ['#8b93d6', '#8fae9b', '#d3b27f', '#c98b96', '#7a93b8', '#b5a7dd', '#a3b0c2', '#d9a05f', '#9aa7c9', '#c9c2dc']
 
 function renderChart() {
   if (!payload.value || !chartEl.value) return
-  const days = payload.value.week.map((p) => p.date)
+  const daysLabel = payload.value.week.map((p) => p.date)
   const marks = payload.value.week_models || []
   const totals = new Map<string, number>()
   for (const m of marks) totals.set(m.model, (totals.get(m.model) || 0) + m.tokens)
-  const topModels = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([m]) => m)
+  const topModelsArr = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 7).map(([m]) => m)
 
   const seriesByModel = new Map<string, number[]>()
   for (const m of marks) {
-    if (!topModels.includes(m.model)) continue
-    if (!seriesByModel.has(m.model)) seriesByModel.set(m.model, days.map(() => 0))
-    const idx = days.indexOf(m.date)
+    if (!topModelsArr.includes(m.model)) continue
+    if (!seriesByModel.has(m.model)) seriesByModel.set(m.model, daysLabel.map(() => 0))
+    const idx = daysLabel.indexOf(m.date)
     if (idx >= 0) seriesByModel.get(m.model)![idx] += m.tokens
   }
+  const costs = daysLabel.map((d) => payload.value!.week.find((x) => x.date === d)?.cost || 0)
 
   chart = echarts.init(chartEl.value)
   chart.setOption({
@@ -112,32 +130,47 @@ function renderChart() {
       borderWidth: 0,
       textStyle: { color: '#fff' },
       formatter(params: any[]) {
-        const total = params.reduce((s: number, p: any) => s + (p.value || 0), 0)
-        let html = params[0].axisValue + '<br/>'
-        for (const p of params) {
+        const p0 = params[0]
+        let html = p0.axisValue + '<br/>'
+        const token = params.filter((p: any) => p.seriesName !== 'Spend ($)')
+        const total = token.reduce((s: number, p: any) => s + (p.value || 0), 0)
+        for (const p of token) {
           const share = total > 0 ? ' (' + ((p.value / total) * 100).toFixed(1) + '%)' : ''
           html += `${p.marker}${p.seriesName}: ${humanNum(p.value)} token${share}<br/>`
         }
+        const sp = params.find((p: any) => p.seriesName === 'Spend ($)')
+        if (sp) html += `${sp.marker}Spend: $${(sp.value || 0).toFixed(4)}<br/>`
         html += `<b>Total: ${humanNum(total)} token</b>`
         return html
       },
     },
     legend: { type: 'scroll', bottom: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10 },
-    grid: { left: 48, right: 16, top: 24, bottom: 34 },
-    xAxis: { type: 'category', data: days, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280' } },
-    yAxis: {
-      type: 'value',
-      axisLabel: { formatter: (v: number) => humanNum(v), color: '#6b7280' },
-      splitLine: { lineStyle: { color: '#f0f1f5' } },
-    },
-    series: topModels.map((m, i) => ({
-      name: m,
-      type: 'bar',
-      stack: 'models',
-      barMaxWidth: 26,
-      data: days.map((_, j) => seriesByModel.get(m)![j] || 0),
-      itemStyle: { color: MODEL_COLORS[i % MODEL_COLORS.length], borderRadius: i === topModels.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0] },
-    })),
+    grid: { left: 48, right: 48, top: 24, bottom: 34 },
+    xAxis: { type: 'category', data: daysLabel, axisTick: { show: false }, axisLine: { lineStyle: { color: '#e5e7eb' } }, axisLabel: { color: '#6b7280' } },
+    yAxis: [
+      { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#6b7280' }, splitLine: { lineStyle: { color: '#f0f1f5' } } },
+      { type: 'value', axisLabel: { formatter: (v: number) => '$' + humanMoney(v), color: '#b18a4f' }, splitLine: { show: false } },
+    ],
+    series: [
+      ...topModelsArr.map((m, i) => ({
+        name: m,
+        type: 'bar',
+        stack: 'models',
+        barMaxWidth: 26,
+        data: daysLabel.map((_, j) => seriesByModel.get(m)![j] || 0),
+        itemStyle: { color: MODEL_COLORS[i % MODEL_COLORS.length], borderRadius: i === topModelsArr.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0] },
+      })),
+      {
+        name: 'Spend ($)',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        symbolSize: 5,
+        data: costs,
+        lineStyle: { width: 2, color: '#b18a4f' },
+        itemStyle: { color: '#b18a4f' },
+      },
+    ],
   })
 }
 
@@ -157,82 +190,93 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-loading="loading">
-    <!-- 统计卡片 -->
-    <el-row :gutter="14">
-      <el-col v-for="s in stats" :key="s.label" :xs="12" :sm="12" :md="6">
+    <!-- 顶行：时间范围 + 刷新 -->
+    <el-card shadow="never" class="toolbar-card">
+      <div class="toolbar">
+        <el-radio-group v-model="days" size="small" @change="load">
+          <el-radio-button :value="1">Today</el-radio-button>
+          <el-radio-button :value="7">7 days</el-radio-button>
+          <el-radio-button :value="30">30 days</el-radio-button>
+        </el-radio-group>
+        <el-button size="small" text :loading="loading" @click="load"><el-icon :size="15"><Refresh /></el-icon>&nbsp;Refresh</el-button>
+        <div class="spacer" />
+        <div class="gateway">
+          <span class="gl">Gateway</span>
+          <code>{{ gatewayBase }}</code>
+          <el-button link type="primary" size="small" @click="copyGatewayBase"><el-icon :size="14"><CopyDocument /></el-icon>&nbsp;Copy</el-button>
+        </div>
+      </div>
+    </el-card>
+
+    <!-- 统计卡（区间） -->
+    <el-row :gutter="14" class="mt">
+      <el-col v-for="s in stats" :key="s.label" :xs="12" :md="6">
         <el-card shadow="never" class="stat-card">
           <div class="stat-row">
             <div class="stat-icon" :style="{ background: s.bg, color: s.color }">
               <el-icon :size="20"><component :is="s.icon" /></el-icon>
             </div>
             <div class="stat-meta">
-              <div class="stat-num" :title="s.title">{{ s.value }}</div>
-              <div class="stat-label">{{ s.label }}</div>
+              <div class="stat-num">{{ s.value }}</div>
+              <div class="stat-label">{{ s.label }} · <span class="stat-today">{{ s.today }}</span></div>
             </div>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- 快捷操作：网关接入 -->
-    <el-card shadow="never" class="mt">
-      <div class="quick">
-        <div class="quick-gateway">
-          <div class="quick-label">Gateway Base URL</div>
-          <div class="quick-value">
-            <code>{{ gatewayBase }}</code>
-            <el-button link type="primary" size="small" @click="copyGatewayBase"><el-icon :size="14"><CopyDocument /></el-icon>&nbsp;Copy</el-button>
-          </div>
-        </div>
-        <el-button type="primary" plain @click="router.push('/channels')"><el-icon class="btn-icon"><Plus /></el-icon>Add Channel</el-button>
-        <el-button plain @click="router.push('/users')"><el-icon class="btn-icon"><User /></el-icon>Users</el-button>
-      </div>
-    </el-card>
-
     <!-- 用量趋势 -->
     <el-card shadow="never" class="mt">
       <template #header>
         <div class="head">
-          <span>Usage Trend (Last 7 Days)</span>
-          <span class="week-sum">tokens {{ humanNum(weekTotal.tokens) }} · ${{ (weekTotal.cost).toFixed(2) }} · {{ humanNum(weekTotal.req) }} req</span>
+          <span>Usage</span>
+          <span class="week-sum">{{ humanNum(range.tokens) }} tokens · ${{ range.cost.toFixed(2) }}</span>
         </div>
       </template>
       <template v-if="!weekEmpty">
-        <div ref="chartEl" style="height: 300px"></div>
+        <div ref="chartEl" style="height: 280px"></div>
       </template>
-      <el-empty v-else description="No usage in the last 7 days yet" :image-size="70" />
+      <el-empty v-else description="No usage in the selected period" :image-size="70" />
     </el-card>
 
-    <!-- 渠道 / 失败 -->
+    <!-- 底部三栏：Top 模型 / 渠道 / 失败 -->
     <el-row :gutter="14" class="mt">
-      <el-col :xs="24" :md="14">
+      <el-col :xs="24" :md="8">
+        <el-card shadow="never">
+          <template #header>Top Models</template>
+          <template v-if="topModels.length">
+            <div v-for="m in topModels" :key="m.model" class="model-item">
+              <div class="model-head">
+                <span class="model-name" :title="m.model">{{ m.model }}</span>
+                <span class="model-val">{{ humanNum(m.tokens) }} <span class="dim">tok</span></span>
+              </div>
+              <div class="bar"><div class="bar-inner" :style="{ width: m.share + '%' }"></div></div>
+            </div>
+          </template>
+          <el-empty v-else description="No model usage yet" :image-size="50" />
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :md="8">
         <el-card shadow="never">
           <template #header>
-            <div class="head">
-              <span>Channels Today</span>
-              <el-button link type="primary" size="small" @click="router.push('/channels')">Manage</el-button>
-            </div>
+            <div class="head"><span>Channels</span><el-button link type="primary" size="small" @click="router.push('/channels')">Manage</el-button></div>
           </template>
           <el-table :data="payload?.channel_stats ?? []" size="small">
             <el-table-column prop="name" label="Channel" />
-            <el-table-column prop="health" label="Status" width="110">
+            <el-table-column prop="health" label="Status" width="105">
               <template #default="{ row }">
-                <el-tag :type="row.health === 'cooldown' ? 'danger' : 'success'" size="small" effect="light">
-                  {{ row.health === 'cooldown' ? 'Cooldown' : 'Healthy' }}
-                </el-tag>
+                <el-tag :type="row.health === 'cooldown' ? 'danger' : 'success'" size="small" effect="light">{{ row.health === 'cooldown' ? 'Cooldown' : 'Healthy' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="today_requests" label="Requests" align="right" />
-            <el-table-column label="Errors" align="right">
-              <template #default="{ row }">
-                <span :class="row.today_errors > 0 ? 'err' : ''">{{ row.today_errors }}</span>
-              </template>
+            <el-table-column prop="today_requests" label="Req" align="right" />
+            <el-table-column label="Err" align="right">
+              <template #default="{ row }"><span :class="row.today_errors > 0 ? 'err' : ''">{{ row.today_errors }}</span></template>
             </el-table-column>
           </el-table>
-          <el-alert v-if="!payload?.channel_stats?.length" class="mt" title="No channels configured yet" type="info" :closable="false" />
+          <el-alert v-if="!payload?.channel_stats?.length" class="mt" title="No channels configured" type="info" :closable="false" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :md="10">
+      <el-col :xs="24" :md="8">
         <el-card shadow="never">
           <template #header>
             <div class="head">
@@ -243,13 +287,12 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          <el-table :data="payload?.failures ?? []" size="small" max-height="288">
-            <el-table-column label="Time" width="100">
+          <el-table :data="payload?.failures ?? []" size="small" max-height="248">
+            <el-table-column label="Time" width="96">
               <template #default="{ row }">{{ new Date(row.created_at * 1000).toLocaleString().slice(5, 16) }}</template>
             </el-table-column>
-            <el-table-column prop="display_model" label="Model" min-width="110" show-overflow-tooltip />
-            <el-table-column prop="channel_id" label="Ch" width="45" align="center" />
-            <el-table-column prop="error_code" label="Error" min-width="110" show-overflow-tooltip>
+            <el-table-column prop="display_model" label="Model" min-width="100" show-overflow-tooltip />
+            <el-table-column prop="error_code" label="Error" min-width="100" show-overflow-tooltip>
               <template #default="{ row }"><span class="dim err">{{ row.error_code || row.status }}</span></template>
             </el-table-column>
           </el-table>
@@ -257,10 +300,49 @@ onBeforeUnmount(() => {
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 快捷操作 -->
+    <el-card shadow="never" class="mt">
+      <div class="quick">
+        <el-button type="primary" plain @click="router.push('/channels')"><el-icon class="btn-icon"><Plus /></el-icon>Add Channel</el-button>
+        <el-button plain @click="router.push('/users')"><el-icon class="btn-icon"><User /></el-icon>Users</el-button>
+        <span class="tip">模型路由会自动同步；在 Settings → Auto-pull 调整同步间隔。</span>
+      </div>
+    </el-card>
   </div>
 </template>
 
 <style scoped>
+.toolbar-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.spacer {
+  flex: 1;
+}
+.gateway {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gateway .gl {
+  font-size: 12px;
+  color: #8a90a0;
+}
+.gateway code {
+  background: #f1f2f7;
+  border-radius: 6px;
+  padding: 2px 10px;
+  color: #7c86d6;
+  font-size: 13px;
+}
 .stat-card {
   margin-bottom: 14px;
 }
@@ -295,39 +377,8 @@ onBeforeUnmount(() => {
   margin-top: 2px;
   white-space: nowrap;
 }
-.quick {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.quick-gateway {
-  margin-right: auto;
-}
-.quick-label {
-  font-size: 12px;
-  color: #8a90a0;
-}
-.quick-value {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.quick-value code {
-  background: #f1f2f7;
-  border-radius: 6px;
-  padding: 2px 10px;
-  color: #7c86d6;
-  font-size: 13px;
-}
-.btn-icon {
-  margin-right: 2px;
-}
-.mt {
-  margin-top: 14px;
-}
-.ml {
-  margin-left: 6px;
+.stat-today {
+  color: #b3b8c4;
 }
 .head {
   display: flex;
@@ -340,8 +391,58 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #8a90a0;
 }
+.model-item {
+  margin-bottom: 12px;
+}
+.model-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.model-name {
+  color: #3a3f4f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-val {
+  color: #6b7280;
+  white-space: nowrap;
+}
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #f0f1f5;
+  margin-top: 5px;
+  overflow: hidden;
+}
+.bar-inner {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #8b93d6, #b5a7dd);
+}
+.quick {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.btn-icon {
+  margin-right: 2px;
+}
+.tip {
+  font-size: 12px;
+  color: #8a90a0;
+}
+.mt {
+  margin-top: 14px;
+}
+.ml {
+  margin-left: 6px;
+}
 .err {
-  color: #e11d48;
+  color: #c9808a;
   font-weight: 600;
 }
 .dim {

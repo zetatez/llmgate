@@ -15,7 +15,7 @@ const router = createRouter({
       redirect: '/dashboard',
       meta: { area: 'admin' },
       children: [
-        { path: 'dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: 'Dashboard', area: 'admin' } },
+        { path: 'dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: 'Overview', area: 'admin' } },
         { path: 'channels', name: 'channels', component: () => import('../views/ChannelsView.vue'), meta: { title: 'Channels', area: 'admin' } },
         { path: 'model-routes', name: 'model-routes', component: () => import('../views/ModelRoutesView.vue'), meta: { title: 'Routes', area: 'admin' } },
         { path: 'users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: 'Users', area: 'admin' } },
