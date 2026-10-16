@@ -1,8 +1,8 @@
 import { adminApi, userApi } from './client'
 import type {
   AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute,
-  ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User,
-  UserChannel, UserKey, UserModelUsage, UserOverview, UserToken,
+  ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User,
+  UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken,
 } from './types'
 
 interface DataEnvelope<T> { data: T }
@@ -49,6 +49,18 @@ export const portalApi = {
   me: () => userApi.get<DataEnvelope<PortalUser>>('/me').then(unwrap),
   overview: () => userApi.get<DataEnvelope<UserOverview>>('/overview').then(unwrap),
   channels: () => userApi.get<DataEnvelope<UserChannel[]>>('/channels').then(unwrap),
+  createChannel: (d: { name: string; base_url: string; adapter?: string; priority?: number; weight?: number; note?: string }) =>
+    userApi.post<DataEnvelope<{ id: number }>>('/channels', d).then(unwrap),
+  updateChannel: (id: number, d: Partial<UserChannel>) =>
+    userApi.put<DataEnvelope<{ id: number }>>(`/channels/${id}`, d).then(unwrap),
+  removeChannel: (id: number) => userApi.delete(`/channels/${id}`),
+  routes: () => userApi.get<DataEnvelope<UserRoute[]>>('/routes').then(unwrap),
+  createRoute: (d: { display_name: string; channel_id: number; upstream_model: string; priority?: number; weight?: number; enabled?: number }) =>
+    userApi.post<DataEnvelope<{ id: number }>>('/routes', d).then(unwrap),
+  updateRoute: (id: number, d: { display_name?: string; upstream_model?: string; priority?: number; weight?: number; enabled?: number }) =>
+    userApi.put<DataEnvelope<string>>(`/routes/${id}`, d).then(unwrap),
+  removeRoute: (id: number) => userApi.delete(`/routes/${id}`),
+  teamUsage: (days: number) => userApi.get<DataEnvelope<TeamUsage[]>>('/usage/by-user', { params: { days } }).then(unwrap),
   keys: () => userApi.get<DataEnvelope<UserKey[]>>('/keys').then(unwrap),
   addKeys: (channelId: number, keys: Array<{ name?: string; source?: string; remark?: string; key: string }>) =>
     userApi.post<DataEnvelope<{ added: number }>>('/keys', { channel_id: channelId, keys }).then(unwrap),
@@ -94,4 +106,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserToken }
+export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken }

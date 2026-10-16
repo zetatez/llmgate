@@ -422,6 +422,60 @@ func UsageByUserModel(db *sql.DB, from, to int64) ([]UserModelUsage, error) {
 	return out, rows.Err()
 }
 
+// UserUsage 单个用户在区间内的用量聚合（含成功次数）。
+type UserUsage struct {
+	UserID           int64   `json:"user_id"`
+	UserName         string  `json:"user_name"`
+	Requests         int64   `json:"requests"`
+	Success          int64   `json:"success"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	Cost             float64 `json:"cost"`
+}
+
+// UsageByUser 按用户聚合区间 [from,to) 的用量（请求次数/成功次数/上传/下载/合计/费用），按 token 降序。
+// 供"团队共享统计"使用（所有用户可见）。
+func UsageByUser(db *sql.DB, from, to int64) ([]UserUsage, error) {
+	q := `
+		SELECT lg.user_id, COALESCE(u.name, ''),
+			COUNT(*),
+			SUM(CASE WHEN lg.status='success' THEN 1 ELSE 0 END),
+			SUM(lg.prompt_tokens), SUM(lg.completion_tokens), SUM(lg.total_tokens), SUM(lg.cost)
+		FROM request_logs lg
+		LEFT JOIN users u ON u.id = lg.user_id
+		WHERE 1=1`
+	args := []any{}
+	if from > 0 {
+		q += ` AND lg.created_at >= ?`
+		args = append(args, from)
+	}
+	if to > 0 {
+		q += ` AND lg.created_at < ?`
+		args = append(args, to)
+	}
+	q += ` GROUP BY lg.user_id ORDER BY SUM(lg.total_tokens) DESC`
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserUsage
+	for rows.Next() {
+		var m UserUsage
+		var req, suc, ptok, ctok, ttok sql.NullInt64
+		var cost sql.NullFloat64
+		if err := rows.Scan(&m.UserID, &m.UserName, &req, &suc, &ptok, &ctok, &ttok, &cost); err != nil {
+			return nil, err
+		}
+		m.Requests, m.Success = req.Int64, suc.Int64
+		m.PromptTokens, m.CompletionTokens, m.TotalTokens = ptok.Int64, ctok.Int64, ttok.Int64
+		m.Cost = cost.Float64
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // ChannelDayStats 各渠道当日请求/错误数（用于健康卡片）。
 type ChannelDayStats struct {
 	ChannelID int64  `json:"channel_id"`

@@ -51,8 +51,10 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 	authed.Use(userAuthMiddleware(a))
 	authed.GET("/me", userMe(a))
 	authed.GET("/overview", userOverview(a))
-	authed.GET("/channels", userChannels(a))
 	authed.PUT("/password", userChangePassword(a))
+
+	// 渠道（套餐）/ 路由 / 共享统计
+	RegisterUserResourceRoutes(authed, a)
 
 	authed.GET("/keys", userListKeys(a))
 	authed.POST("/keys", userAddKeys(a))
@@ -235,41 +237,7 @@ func userChangePassword(a *app.App) gin.HandlerFunc {
 	}
 }
 
-// ---------------- 渠道 / Key ----------------
-
-type userChannelView struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Adapter string `json:"adapter"`
-	MyKeys  int    `json:"my_keys"`
-}
-
-// userChannels 列出管理员启用中的渠道，并标注当前用户已录入的 Key 数。
-// 不暴露渠道 base_url（BYOK 下用户只需知道渠道名与适配器）。
-func userChannels(a *app.App) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		u := currentUser(c)
-		rows, err := a.DB.Query(`
-			SELECT ch.id, ch.name, ch.adapter,
-				(SELECT COUNT(*) FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.user_id = ?) AS my_keys
-			FROM channels ch WHERE ch.enabled = 1 ORDER BY ch.priority ASC, ch.name ASC`, u.ID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		defer rows.Close()
-		out := []userChannelView{}
-		for rows.Next() {
-			var v userChannelView
-			if err := rows.Scan(&v.ID, &v.Name, &v.Adapter, &v.MyKeys); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			out = append(out, v)
-		}
-		c.JSON(http.StatusOK, gin.H{"data": out})
-	}
-}
+// ---------------- Key ----------------
 
 type userKeyView struct {
 	ID          int64  `json:"id"`

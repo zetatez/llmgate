@@ -31,8 +31,11 @@ const router = createRouter({
       meta: { area: 'user' },
       children: [
         { path: 'overview', name: 'user-overview', component: () => import('../views/user/OverviewView.vue'), meta: { title: 'Overview', area: 'user' } },
+        { path: 'channels', name: 'user-channels', component: () => import('../views/user/ChannelsView.vue'), meta: { title: 'Channels', area: 'user' } },
+        { path: 'routes', name: 'user-routes', component: () => import('../views/user/RoutesView.vue'), meta: { title: 'Routes', area: 'user' } },
         { path: 'keys', name: 'user-keys', component: () => import('../views/user/KeysView.vue'), meta: { title: 'My API Keys', area: 'user' } },
         { path: 'tokens', name: 'user-tokens', component: () => import('../views/user/TokensView.vue'), meta: { title: 'My Tokens', area: 'user' } },
+        { path: 'usage', name: 'user-usage', component: () => import('../views/user/UsageView.vue'), meta: { title: 'Team Usage', area: 'user' } },
         { path: 'logs', name: 'user-logs', component: () => import('../views/user/LogsView.vue'), meta: { title: 'My Requests', area: 'user' } },
       ],
     },

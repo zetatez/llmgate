@@ -106,6 +106,30 @@ func TestUserUsageAggregates(t *testing.T) {
 	}
 }
 
+func TestUsageByUserAgg(t *testing.T) {
+	db := setupDB(t)
+	if err := InsertLogs(db, []*models.RequestLog{
+		{UserID: 1, DisplayModel: "m", Status: "success", PromptTokens: 8, CompletionTokens: 2, TotalTokens: 10, Cost: 0.5, CreatedAt: models.Now()},
+		{UserID: 1, DisplayModel: "m", Status: "error", PromptTokens: 3, CompletionTokens: 0, TotalTokens: 3, Cost: 0, CreatedAt: models.Now()},
+		{UserID: 2, DisplayModel: "m", Status: "success", PromptTokens: 5, CompletionTokens: 5, TotalTokens: 10, Cost: 0.2, CreatedAt: models.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := UsageByUser(db, 0, 0)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("UsageByUser = %+v err %v", list, err)
+	}
+	// 按 token 降序：user1 13 > user2 10
+	u1 := list[0]
+	if u1.UserID != 1 || u1.Requests != 2 || u1.Success != 1 || u1.PromptTokens != 11 || u1.CompletionTokens != 2 || u1.TotalTokens != 13 || u1.Cost != 0.5 {
+		t.Fatalf("user1 agg = %+v", u1)
+	}
+	u2 := list[1]
+	if u2.UserID != 2 || u2.Requests != 1 || u2.Success != 1 || u2.Cost != 0.2 {
+		t.Fatalf("user2 agg = %+v", u2)
+	}
+}
+
 func TestUsageByHour(t *testing.T) {
 	db := setupDB(t)
 	if err := InsertLogs(db, []*models.RequestLog{

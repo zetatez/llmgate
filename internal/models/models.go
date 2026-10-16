@@ -25,6 +25,7 @@ type User struct {
 // Channel 表示一个上游套餐（渠道）。
 type Channel struct {
 	ID            int64  `json:"id"`
+	UserID        int64  `json:"user_id"` // 归属用户；0 = 管理员/全局
 	Name          string `json:"name"`
 	BaseURL       string `json:"base_url"`
 	Adapter       string `json:"adapter"`

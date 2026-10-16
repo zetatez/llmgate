@@ -200,6 +200,11 @@ llmgate/
  | GET     | `/api/user/channels`        | 可录入 Key 的渠道（含本人 Key 数）       |
  | CRUD    | `/api/user/keys`            | 本人 API Key（仅自己的可见/可改）        |
  | POST    | `/api/user/keys/:id/test`   | 用本人 Key 测试上游连通性                |
+ | GET     | `/api/user/channels`        | 全部渠道（所有人可见）；本人可增删改自己的 |
+ | POST/PUT/DELETE | `/api/user/channels[/:id]` | 自建/修改/删除**自己的**渠道（套餐）    |
+ | GET     | `/api/user/routes`          | 全部模型路由（所有人可见）；本人渠道的可改 |
+ | POST/PUT/DELETE | `/api/user/routes[/:id]` | 在**自己的**渠道下新增/改/删路由        |
+ | GET     | `/api/user/usage/by-user`   | 团队共享统计（每人请求/成功/上传/下载/费用） |
  | GET/PUT/DELETE | `/api/user/token`     | 本人唯一消费令牌（创建/改过期/吊销）      |
  | POST    | `/api/user/token/rotate`    | 轮换令牌密钥（旧令牌立即失效）            |
  | PUT     | `/api/user/password`        | 自助改密码（注销其它设备）               |

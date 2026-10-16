@@ -13,8 +13,11 @@ const me = ref<PortalUser | null>(null)
 
 const menus = [
   { path: '/user/overview', label: 'Overview', icon: 'Odometer' },
+  { path: '/user/channels', label: 'Channels', icon: 'Connection' },
+  { path: '/user/routes', label: 'Routes', icon: 'Share' },
   { path: '/user/keys', label: 'My API Keys', icon: 'Key' },
   { path: '/user/tokens', label: 'My Tokens', icon: 'Ticket' },
+  { path: '/user/usage', label: 'Team Usage', icon: 'DataLine' },
   { path: '/user/logs', label: 'My Requests', icon: 'Document' },
 ]
 

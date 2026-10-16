@@ -86,12 +86,48 @@ export interface PortalUser {
   gateway_prefix: string
 }
 
-/** 用户端：可录入 Key 的渠道（不暴露上游 base_url） */
+/** 用户端：渠道（套餐，所有人可见；本人可改） */
 export interface UserChannel {
   id: number
   name: string
   adapter: string
+  base_url: string
+  priority: number
+  weight: number
+  enabled: number
+  health_state: string
+  note: string
+  user_id: number
+  owner_name: string
+  is_mine: boolean
   my_keys: number
+}
+
+/** 用户端：模型路由（所有人可见；本人渠道的可改） */
+export interface UserRoute {
+  id: number
+  display_name: string
+  channel_id: number
+  channel_name: string
+  channel_user_id: number
+  upstream_model: string
+  priority: number
+  weight: number
+  enabled: number
+  effective_enabled: number
+  is_mine: boolean
+}
+
+/** 共享统计：每个用户的用量（所有人可见，含费用） */
+export interface TeamUsage {
+  user_id: number
+  user_name: string
+  requests: number
+  success: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost: number
 }
 
 /** 用户端：本人录入的 API Key */

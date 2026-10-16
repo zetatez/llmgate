@@ -9,11 +9,11 @@ import (
 
 // ---------------- 渠道（Channel） ----------------
 
-const channelCols = `id, name, base_url, adapter, priority, weight, timeout_ms, enabled, health_state, cooldown_until, extra_headers, note, created_at, updated_at`
+const channelCols = `id, user_id, name, base_url, adapter, priority, weight, timeout_ms, enabled, health_state, cooldown_until, extra_headers, note, created_at, updated_at`
 
 func scanChannel(row interface{ Scan(...any) error }) (*models.Channel, error) {
 	c := &models.Channel{}
-	err := row.Scan(&c.ID, &c.Name, &c.BaseURL, &c.Adapter, &c.Priority, &c.Weight,
+	err := row.Scan(&c.ID, &c.UserID, &c.Name, &c.BaseURL, &c.Adapter, &c.Priority, &c.Weight,
 		&c.TimeoutMS, &c.Enabled, &c.HealthState, &c.CooldownUntil, &c.ExtraHeaders, &c.Note, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -23,7 +23,16 @@ func scanChannel(row interface{ Scan(...any) error }) (*models.Channel, error) {
 
 // ListChannels 返回全部渠道（优先级升序，同优先级按权重降序——权重大的排前面）。
 func ListChannels(db *sql.DB) ([]*models.Channel, error) {
-	rows, err := db.Query(`SELECT ` + channelCols + ` FROM channels ORDER BY priority ASC, weight DESC, id ASC`)
+	return queryChannels(db, `SELECT `+channelCols+` FROM channels ORDER BY priority ASC, weight DESC, id ASC`)
+}
+
+// ListChannelsByUser 返回某用户拥有的渠道。
+func ListChannelsByUser(db *sql.DB, userID int64) ([]*models.Channel, error) {
+	return queryChannels(db, `SELECT `+channelCols+` FROM channels WHERE user_id=? ORDER BY priority ASC, weight DESC, id ASC`, userID)
+}
+
+func queryChannels(db *sql.DB, q string, args ...any) ([]*models.Channel, error) {
+	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -52,10 +61,10 @@ func GetChannel(db *sql.DB, id int64) (*models.Channel, error) {
 // CreateChannel 插入渠道并返回新 id。
 func CreateChannel(db *sql.DB, c *models.Channel) (int64, error) {
 	res, err := db.Exec(`
-		INSERT INTO channels (name, base_url, adapter, priority, weight, timeout_ms,
+		INSERT INTO channels (user_id, name, base_url, adapter, priority, weight, timeout_ms,
 			enabled, health_state, note, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.Name, c.BaseURL, c.Adapter, c.Priority, c.Weight, c.TimeoutMS,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.UserID, c.Name, c.BaseURL, c.Adapter, c.Priority, c.Weight, c.TimeoutMS,
 		c.Enabled, c.HealthState, c.Note, models.Now(), models.Now())
 	if err != nil {
 		return 0, err
