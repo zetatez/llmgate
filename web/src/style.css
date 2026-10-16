@@ -1,19 +1,19 @@
 :root {
-  /* 品牌色：indigo */
-  --el-color-primary: #5b6bff;
-  --el-color-primary-light-3: #7c89ff;
-  --el-color-primary-light-5: #9da6ff;
-  --el-color-primary-light-7: #bdc2ff;
-  --el-color-primary-light-8: #cdd1ff;
-  --el-color-primary-light-9: #eef0ff;
-  --el-color-primary-dark-2: #4956cc;
+  /* 品牌色：柔和靛蓝（淡雅） */
+  --el-color-primary: #8b93d6;
+  --el-color-primary-light-3: #a3a9df;
+  --el-color-primary-light-5: #bcbfe9;
+  --el-color-primary-light-7: #d3d5f1;
+  --el-color-primary-light-8: #dfe0f4;
+  --el-color-primary-light-9: #f4f5fc;
+  --el-color-primary-dark-2: #6f76ab;
 
   --el-border-radius-base: 8px;
   --el-border-radius-small: 6px;
 
-  --ll-bg: #f5f6fa;
+  --ll-bg: #f6f7fa;
   --ll-card-radius: 12px;
-  --ll-ink: #22242a;
+  --ll-ink: #2b2f3a;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   line-height: 1.5;
@@ -103,7 +103,7 @@ body {
   color: #5a6072;
 }
 .el-table .el-table__row:hover > td.el-table__cell {
-  background: #f8f9ff;
+  background: #f5f6fb;
 }
 
 .el-dialog {

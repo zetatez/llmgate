@@ -110,27 +110,27 @@ async function onUserSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #eef0ff 0%, #f5f6fa 45%, #f6effd 100%);
+  background: linear-gradient(135deg, #eef0f9 0%, #f7f8fb 45%, #f4f1fb 100%);
   overflow: hidden;
 }
 .blob {
   position: absolute;
   border-radius: 50%;
   filter: blur(70px);
-  opacity: 0.5;
+  opacity: 0.4;
   pointer-events: none;
 }
 .blob-1 {
   width: 420px;
   height: 420px;
-  background: #5b6bff;
+  background: #a3a9df;
   top: -120px;
   right: -80px;
 }
 .blob-2 {
   width: 360px;
   height: 360px;
-  background: #a78bfa;
+  background: #c3bce6;
   bottom: -120px;
   left: -60px;
 }
@@ -152,7 +152,7 @@ async function onUserSubmit() {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #5b6bff, #8b5cf6);
+  background: linear-gradient(135deg, #8b93d6, #b5a7dd);
   display: inline-flex;
   align-items: center;
   justify-content: center;

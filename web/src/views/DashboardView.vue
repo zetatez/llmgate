@@ -67,10 +67,10 @@ interface Stat {
 const stats = computed<Stat[]>(() => {
   const t = payload.value?.today
   return [
-    { label: 'Requests Today', value: humanNum(t?.total_requests), title: `${t?.total_requests ?? 0} requests`, icon: Connection, color: '#5b6bff', bg: '#eef0ff' },
-    { label: 'Tokens Today', value: humanNum(t?.total_tokens), title: `${t?.total_tokens ?? 0} tokens`, icon: ChatDotRound, color: '#0e9f6e', bg: '#e6f7f0' },
-    { label: 'Cost Today ($)', value: humanMoney(t?.cost), title: `$${(t?.cost ?? 0).toFixed(4)}`, icon: Money, color: '#d97706', bg: '#fdf1e3' },
-    { label: 'Errors Today', value: humanNum(t?.errors), title: `${t?.errors ?? 0} errors`, icon: WarningFilled, color: (t?.errors || 0) > 0 ? '#e11d48' : '#16a34a', bg: (t?.errors || 0) > 0 ? '#fdecef' : '#e6f7f0' },
+    { label: 'Requests Today', value: humanNum(t?.total_requests), title: `${t?.total_requests ?? 0} requests`, icon: Connection, color: '#7c86d6', bg: '#eef0f9' },
+    { label: 'Tokens Today', value: humanNum(t?.total_tokens), title: `${t?.total_tokens ?? 0} tokens`, icon: ChatDotRound, color: '#6f9a86', bg: '#e9f4ee' },
+    { label: 'Cost Today ($)', value: humanMoney(t?.cost), title: `$${(t?.cost ?? 0).toFixed(4)}`, icon: Money, color: '#b18a4f', bg: '#faf3e6' },
+    { label: 'Errors Today', value: humanNum(t?.errors), title: `${t?.errors ?? 0} errors`, icon: WarningFilled, color: (t?.errors || 0) > 0 ? '#c9808a' : '#6f9a86', bg: (t?.errors || 0) > 0 ? '#fbeff0' : '#e9f6ee' },
   ]
 })
 
@@ -85,7 +85,7 @@ const weekTotal = computed(() => {
   return w.reduce((s, p) => ({ tokens: s.tokens + (p.total_tokens || 0), cost: s.cost + (p.cost || 0), req: s.req + (p.requests || 0) }), { tokens: 0, cost: 0, req: 0 })
 })
 
-const MODEL_COLORS = ['#5b6bff', '#22c55e', '#f59e0b', '#f43f5e', '#0ea5e9', '#8b5cf6', '#10b981', '#f97316', '#6366f1', '#94a3b8']
+const MODEL_COLORS = ['#8b93d6', '#8fae9b', '#d3b27f', '#c98b96', '#7a93b8', '#b5a7dd', '#a3b0c2', '#d9a05f', '#9aa7c9', '#c9c2dc']
 
 function renderChart() {
   if (!payload.value || !chartEl.value) return
@@ -317,7 +317,7 @@ onBeforeUnmount(() => {
   background: #f1f2f7;
   border-radius: 6px;
   padding: 2px 10px;
-  color: #4956cc;
+  color: #7c86d6;
   font-size: 13px;
 }
 .btn-icon {

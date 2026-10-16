@@ -60,7 +60,8 @@ async function logout() {
 }
 .topbar {
   height: 40px;
-  background: #14161f;
+  background: #ffffff;
+  border-bottom: 1px solid #eceef3;
   display: flex;
   align-items: center;
   padding: 0 16px;
@@ -73,7 +74,7 @@ async function logout() {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #fff;
+  color: #3a3f4f;
   margin-right: 12px;
   flex-shrink: 0;
 }
@@ -81,7 +82,7 @@ async function logout() {
   width: 24px;
   height: 24px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #5b6bff, #8b5cf6);
+  background: linear-gradient(135deg, #8b93d6, #b5a7dd);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -100,21 +101,21 @@ async function logout() {
   background: transparent;
   border-bottom: none;
   --el-menu-bg-color: transparent;
-  --el-menu-text-color: #a2a8b8;
-  --el-menu-hover-text-color: #ffffff;
-  --el-menu-active-color: #ffffff;
+  --el-menu-text-color: #6f7688;
+  --el-menu-hover-text-color: #444a5e;
+  --el-menu-active-color: #6a72c8;
   --el-menu-item-height: 40px;
 }
 .topmenu :deep(.el-menu-item) {
   border-bottom: 2px solid transparent;
 }
 .topmenu :deep(.el-menu-item:hover) {
-  background: #1d2030;
+  background: #f4f5fc;
 }
 .topmenu :deep(.el-menu-item.is-active) {
-  color: #fff;
-  border-bottom: 2px solid #7c89ff;
-  background: linear-gradient(180deg, transparent, rgba(124, 137, 255, 0.18));
+  color: #6a72c8;
+  border-bottom: 2px solid #8b93d6;
+  background: transparent;
 }
 .m-label {
   margin-left: 6px;
@@ -126,7 +127,7 @@ async function logout() {
   flex-shrink: 0;
 }
 .who {
-  color: #a2a8b8;
+  color: #6f7688;
   font-size: 12px;
 }
 .main {

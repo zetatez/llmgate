@@ -31,10 +31,10 @@ function humanNum(n?: number): string {
 }
 
 const cards = computed(() => [
-  { label: 'Account', value: me.value?.username || '—', sub: me.value?.name || '', icon: User, color: '#5b6bff', bg: '#eef0ff' },
-  { label: 'Quota used ($)', value: money(me.value?.quota_used), sub: `/ ${me.value?.quota_limit ? money(me.value.quota_limit) : 'unlimited'}`, icon: Coin, color: '#0e9f6e', bg: '#e6f7f0' },
-  { label: 'Today requests', value: humanNum(overview.value?.today.total_requests), sub: `${overview.value?.today.total_requests ?? 0}`, icon: Connection, color: '#0ea5e9', bg: '#e8f6fd' },
-  { label: 'Today cost ($)', value: money(overview.value?.today.cost), sub: '', icon: Money, color: '#d97706', bg: '#fdf1e3' },
+  { label: 'Account', value: me.value?.username || '—', sub: me.value?.name || '', icon: User, color: '#7c86d6', bg: '#eef0f9' },
+  { label: 'Quota used ($)', value: money(me.value?.quota_used), sub: `/ ${me.value?.quota_limit ? money(me.value.quota_limit) : 'unlimited'}`, icon: Coin, color: '#6f9a86', bg: '#e9f4ee' },
+  { label: 'Today requests', value: humanNum(overview.value?.today.total_requests), sub: `${overview.value?.today.total_requests ?? 0}`, icon: Connection, color: '#7a93b8', bg: '#eef2f8' },
+  { label: 'Today cost ($)', value: money(overview.value?.today.cost), sub: '', icon: Money, color: '#b18a4f', bg: '#faf3e6' },
 ])
 
 const totalCards = computed(() => [
