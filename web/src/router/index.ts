@@ -17,7 +17,7 @@ const router = createRouter({
       children: [
         { path: 'dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: 'Dashboard', area: 'admin' } },
         { path: 'channels', name: 'channels', component: () => import('../views/ChannelsView.vue'), meta: { title: 'Channels', area: 'admin' } },
-        { path: 'model-routes', name: 'model-routes', component: () => import('../views/ModelRoutesView.vue'), meta: { title: 'Model Routes', area: 'admin' } },
+        { path: 'model-routes', name: 'model-routes', component: () => import('../views/ModelRoutesView.vue'), meta: { title: 'Routes', area: 'admin' } },
         { path: 'users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: 'Users', area: 'admin' } },
         { path: 'logs', name: 'logs', component: () => import('../views/LogsView.vue'), meta: { title: 'Logs', area: 'admin' } },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: 'Settings', area: 'admin' } },
