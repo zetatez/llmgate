@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { logsApi, settingsApi } from '../api'
@@ -12,6 +12,9 @@ const payload = ref<DashboardPayload | null>(null)
 const loading = ref(false)
 const chartEl = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+const hourEl = ref<HTMLDivElement>()
+let hourChart: echarts.ECharts | null = null
+const hourMode = ref<'cost' | 'tokens'>('cost')
 const gatewayBase = ref('')
 const days = ref(7)
 
@@ -39,6 +42,7 @@ async function load() {
   } finally {
     loading.value = false
     renderChart()
+    renderHourChart()
   }
 }
 
@@ -91,6 +95,52 @@ const weekEmpty = computed(() => {
   const w = payload.value?.week || []
   return w.length === 0 || w.every((p) => p.total_tokens === 0 && p.requests === 0)
 })
+
+// 用量条：Today / 7 days / 30 days（按 token 归一化）
+const usagePeriods = computed(() => {
+  const p = payload.value?.periods
+  const items = [
+    { label: 'Today', s: p?.today },
+    { label: 'Last 7 days', s: p?.week },
+    { label: 'Last 30 days', s: p?.month },
+  ]
+  const max = Math.max(1, ...items.map((i) => i.s?.total_tokens || 0))
+  return items.map((i) => ({
+    label: i.label,
+    tokens: i.s?.total_tokens || 0,
+    cost: i.s?.cost || 0,
+    req: i.s?.total_requests || 0,
+    pct: ((i.s?.total_tokens || 0) / max) * 100,
+  }))
+})
+
+function renderHourChart() {
+  if (!hourEl.value) return
+  const hours = payload.value?.hours || []
+  if (!hourChart) hourChart = echarts.init(hourEl.value)
+  const mode = hourMode.value
+  hourChart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(18,22,32,.92)',
+      borderWidth: 0,
+      textStyle: { color: '#fff' },
+      valueFormatter: (v: any) => (mode === 'cost' ? '$' + (v || 0).toFixed(4) : humanNum(v) + ' token'),
+    },
+    grid: { left: 56, right: 16, top: 16, bottom: 26 },
+    xAxis: { type: 'category', data: hours.map((h) => h.hour), axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c', interval: 2 } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => (mode === 'cost' ? '$' + humanMoney(v) : humanNum(v)), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 14,
+      data: hours.map((h) => (mode === 'cost' ? h.cost : h.tokens)),
+      itemStyle: { color: '#8b93d6', borderRadius: [3, 3, 0, 0] },
+    }],
+  })
+  hourChart.resize()
+}
+
+watch(hourMode, () => renderHourChart())
 
 // Top 模型（按区间 token 汇总 + 占比条）
 const topModels = computed(() => {
@@ -176,6 +226,7 @@ function renderChart() {
 
 function onResize() {
   chart?.resize()
+  hourChart?.resize()
 }
 
 onMounted(async () => {
@@ -185,6 +236,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   chart?.dispose()
+  hourChart?.dispose()
 })
 </script>
 
@@ -221,6 +273,36 @@ onBeforeUnmount(() => {
               <div class="stat-label">{{ s.label }} · <span class="stat-today">{{ s.today }}</span></div>
             </div>
           </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 用量条 + 按小时 -->
+    <el-row :gutter="14" class="mt">
+      <el-col :xs="24" :md="9">
+        <el-card shadow="never">
+          <template #header>Usage</template>
+          <div v-for="p in usagePeriods" :key="p.label" class="usage-item">
+            <div class="usage-head">
+              <span class="usage-label">{{ p.label }}</span>
+              <span class="usage-val">{{ humanNum(p.tokens) }} tok · {{ p.req }} req · ${{ p.cost.toFixed(2) }}</span>
+            </div>
+            <div class="bar"><div class="bar-inner" :style="{ width: p.pct + '%' }"></div></div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :md="15">
+        <el-card shadow="never">
+          <template #header>
+            <div class="head">
+              <span>Hourly (last 24h)</span>
+              <el-radio-group v-model="hourMode" size="small">
+                <el-radio-button value="cost">Cost</el-radio-button>
+                <el-radio-button value="tokens">Tokens</el-radio-button>
+              </el-radio-group>
+            </div>
+          </template>
+          <div ref="hourEl" style="height: 224px"></div>
         </el-card>
       </el-col>
     </el-row>
@@ -421,6 +503,27 @@ onBeforeUnmount(() => {
   height: 100%;
   border-radius: 3px;
   background: linear-gradient(90deg, #8b93d6, #b5a7dd);
+}
+.usage-item {
+  margin-bottom: 14px;
+}
+.usage-item:last-child {
+  margin-bottom: 0;
+}
+.usage-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.usage-label {
+  color: var(--ll-ink);
+  font-weight: 500;
+}
+.usage-val {
+  color: var(--ll-muted);
+  white-space: nowrap;
 }
 .quick {
   display: flex;

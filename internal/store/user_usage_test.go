@@ -105,3 +105,25 @@ func TestUserUsageAggregates(t *testing.T) {
 		t.Fatalf("expected m1 first, got %+v", bym)
 	}
 }
+
+func TestUsageByHour(t *testing.T) {
+	db := setupDB(t)
+	if err := InsertLogs(db, []*models.RequestLog{
+		{UserID: 1, DisplayModel: "m", Status: "success", TotalTokens: 10, Cost: 0.5, CreatedAt: models.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pts, err := UsageByHour(db, 24)
+	if err != nil || len(pts) != 24 {
+		t.Fatalf("UsageByHour = %d pts, err %v", len(pts), err)
+	}
+	last := pts[len(pts)-1]
+	if last.Requests != 1 || last.Tokens != 10 || last.Cost != 0.5 {
+		t.Fatalf("last hour bucket = %+v", last)
+	}
+	for i, p := range pts {
+		if p.Hour == "" {
+			t.Fatalf("bucket %d missing hour label", i)
+		}
+	}
+}

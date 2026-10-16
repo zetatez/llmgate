@@ -173,11 +173,20 @@ export interface ChannelDayStat {
   today_errors: number
 }
 
+export interface UsageHourPoint {
+  hour: string
+  requests: number
+  tokens: number
+  cost: number
+}
+
 export interface DashboardPayload {
   days: number
   week: UsagePoint[]
   week_models: UsageModelPoint[]
+  hours: UsageHourPoint[]
   today: UsageSummary
+  periods: { today: UsageSummary; week: UsageSummary; month: UsageSummary }
   channel_stats: ChannelDayStat[]
   failures: RequestLog[]
   recent_failures: number

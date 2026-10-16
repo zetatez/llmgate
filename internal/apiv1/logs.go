@@ -131,13 +131,15 @@ func parseLogFilter(c *gin.Context) store.LogFilter {
 
 // dashboardPayload 仪表盘一次性数据。
 type dashboardPayload struct {
-	Days           int                     `json:"days"`
-	Week           []store.UsagePoint      `json:"week"`
-	WeekModels     []store.UsageModelPoint `json:"week_models"`
-	Today          store.UsageSummary      `json:"today"`
-	ChannelStats   []store.ChannelDayStats `json:"channel_stats"`
-	Failures       []*models.RequestLog    `json:"failures"` // 最近失败明细
-	RecentFailures int                     `json:"recent_failures"`
+	Days           int                           `json:"days"`
+	Week           []store.UsagePoint            `json:"week"`
+	WeekModels     []store.UsageModelPoint       `json:"week_models"`
+	Hours          []store.UsageHourPoint        `json:"hours"`
+	Today          store.UsageSummary            `json:"today"`
+	Periods        map[string]store.UsageSummary `json:"periods"` // today / week / month
+	ChannelStats   []store.ChannelDayStats       `json:"channel_stats"`
+	Failures       []*models.RequestLog          `json:"failures"` // 最近失败明细
+	RecentFailures int                           `json:"recent_failures"`
 }
 
 func usageDashboard(a *app.App) gin.HandlerFunc {
@@ -158,11 +160,24 @@ func usageDashboard(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		dayStart := func() int64 {
-			now := time.Now()
-			return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+		hours, err := store.UsageByHour(a.DB, 24)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
-		today, err := store.UsageSummaryRange(a.DB, dayStart())
+		now := time.Now()
+		dayStartT := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		today, err := store.UsageSummaryRange(a.DB, dayStartT.Unix())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		weekSum, err := store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -6).Unix())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		monthSum, err := store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -29).Unix())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -178,7 +193,9 @@ func usageDashboard(a *app.App) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": dashboardPayload{
-			Days: days, Week: week, WeekModels: weekModels, Today: today, ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
+			Days: days, Week: week, WeekModels: weekModels, Hours: hours, Today: today,
+			Periods:      map[string]store.UsageSummary{"today": today, "week": weekSum, "month": monthSum},
+			ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
 		}})
 	}
 }

@@ -136,6 +136,50 @@ func CountLogs(db *sql.DB, f LogFilter) (int64, error) {
 	return n, err
 }
 
+// UsageHourPoint 每小时的用量。
+type UsageHourPoint struct {
+	Hour     string  `json:"hour"` // HH:00
+	Requests int64   `json:"requests"`
+	Tokens   int64   `json:"tokens"`
+	Cost     float64 `json:"cost"`
+}
+
+// UsageByHour 返回最近 hours 小时（含当前小时）按小时聚合，缺失补零。
+func UsageByHour(db *sql.DB, hours int) ([]UsageHourPoint, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	now := time.Now()
+	start := now.Add(time.Duration(-(hours - 1)) * time.Hour)
+	startHour := time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, start.Location())
+	rows, err := db.Query(`
+		SELECT strftime('%Y-%m-%d %H', created_at, 'unixepoch', 'localtime') AS hr,
+			COUNT(*), SUM(total_tokens), SUM(cost)
+		FROM request_logs WHERE created_at >= ? GROUP BY hr`, startHour.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]UsageHourPoint{}
+	for rows.Next() {
+		var hr string
+		var req, tok sql.NullInt64
+		var cost sql.NullFloat64
+		if err := rows.Scan(&hr, &req, &tok, &cost); err != nil {
+			return nil, err
+		}
+		m[hr] = UsageHourPoint{Requests: req.Int64, Tokens: tok.Int64, Cost: cost.Float64}
+	}
+	out := make([]UsageHourPoint, 0, hours)
+	for i := 0; i < hours; i++ {
+		t := startHour.Add(time.Duration(i) * time.Hour)
+		p := m[t.Format("2006-01-02 15")]
+		p.Hour = t.Format("15:00")
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // UsagePoint 按天聚合的用量。
 type UsagePoint struct {
 	Date         string  `json:"date"` // YYYY-MM-DD

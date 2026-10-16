@@ -7,8 +7,8 @@ const form = reactive<Record<string, string>>({})
 const rows = ref<SettingItem[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const active = ref('')
 
-// 可控设置各自的渲染参数（分类与描述由后端目录下发）
 interface SettingMeta {
   type: 'number' | 'pricing'
   min?: number
@@ -30,7 +30,46 @@ const meta: Record<string, SettingMeta> = {
   model_pricing: { type: 'pricing' },
 }
 
-// 按 classification 分组（保持后端顺序）
+// key -> 友好标题
+const titles: Record<string, string> = {
+  default_timeout_ms: 'Default timeout',
+  log_retain_days: 'Log retention',
+  model_pricing: 'Model pricing',
+  pull_interval_min: 'Pull interval',
+  pull_default_priority: 'New route priority',
+  pull_default_weight: 'New route weight',
+  gateway_prefix: 'Gateway prefix',
+  circuit_fail_threshold: 'Failure threshold',
+  circuit_fail_window_s: 'Failure window',
+  circuit_quota_cooldown_s: 'Quota cooldown',
+  circuit_probe_backoff_s: 'Probe backoff',
+  rate_limit_qps: 'Requests per second',
+  rate_limit_concurrency: 'Concurrent requests',
+}
+function title(key: string): string {
+  return titles[key] || key
+}
+
+// 分类 -> 图标 / 副标题
+const sectionIcon: Record<string, string> = {
+  Basic: 'Setting',
+  Runtime: 'Monitor',
+  Failover: 'WarningFilled',
+  'Rate limit': 'Timer',
+  'Auto-pull': 'Refresh',
+  Logging: 'Document',
+  Pricing: 'Coin',
+}
+const sectionDesc: Record<string, string> = {
+  Basic: 'General platform defaults applied when a channel has no override.',
+  Runtime: 'Read-only runtime configuration (set via environment).',
+  Failover: 'Circuit-breaker thresholds, cooldowns and recovery probing.',
+  'Rate limit': 'Per-user throttling applied at the gateway. 0 disables a limit.',
+  'Auto-pull': 'Automatic discovery and sync of upstream models.',
+  Logging: 'Request log retention performed on startup.',
+  Pricing: 'Cost estimation used for usage statistics and quotas.',
+}
+
 const groups = computed(() => {
   const out: { classification: string; items: SettingItem[] }[] = []
   for (const it of rows.value) {
@@ -44,6 +83,8 @@ const groups = computed(() => {
   return out
 })
 
+const current = computed(() => groups.value.find((g) => g.classification === active.value) || groups.value[0])
+
 function isEditable(row: SettingItem): boolean {
   return !!meta[row.key]
 }
@@ -53,19 +94,17 @@ function pricingPreview(): string {
     const obj = JSON.parse(form.model_pricing || '{}')
     const keys = Object.keys(obj)
     if (!keys.length) return '(not configured)'
-    return `${keys.length} model(s): ` + keys.slice(0, 3).join(', ') + (keys.length > 3 ? ' …' : '')
+    return `${keys.length} model(s)`
   } catch {
     return '(invalid JSON)'
   }
 }
 
 const pricingDialog = reactive({ visible: false, text: '' })
-
 function openPricingEdit() {
   pricingDialog.text = form.model_pricing || '{}'
   pricingDialog.visible = true
 }
-
 function savePricing() {
   try {
     const parsed = JSON.parse(pricingDialog.text || '{}')
@@ -82,6 +121,7 @@ async function load() {
   try {
     rows.value = await settingsApi.get()
     for (const it of rows.value) form[it.key] = it.val
+    if (!active.value && groups.value.length) active.value = groups.value[0].classification
   } finally { loading.value = false }
 }
 
@@ -101,43 +141,57 @@ onMounted(load)
 </script>
 
 <template>
-  <div v-loading="loading">
-    <div class="page-head">
-      <div>
-        <div class="title">Settings</div>
-        <div class="sub">Platform-level configuration. Controls marked read-only are managed by the system.</div>
+  <div class="settings" v-loading="loading">
+    <aside class="nav">
+      <div class="nav-title">Settings</div>
+      <div
+        v-for="g in groups"
+        :key="g.classification"
+        class="nav-item"
+        :class="{ active: g.classification === current?.classification }"
+        @click="active = g.classification"
+      >
+        <el-icon :size="15"><component :is="sectionIcon[g.classification] || 'Setting'" /></el-icon>
+        <span>{{ g.classification }}</span>
       </div>
-      <el-button type="primary" :loading="saving" @click="save">Save</el-button>
-    </div>
+    </aside>
 
-    <el-card shadow="never" v-for="g in groups" :key="g.classification" class="grp">
-      <template #header><span class="grp-title">{{ g.classification }}</span></template>
-      <div v-for="row in g.items" :key="row.key" class="field">
-        <div class="field-info">
-          <div class="field-key">
-            <code>{{ row.key }}</code>
-            <el-tag v-if="!isEditable(row)" size="small" type="info" effect="plain" class="ro">read-only</el-tag>
-          </div>
-          <div class="field-desc">{{ row.description }}</div>
+    <section class="content">
+      <div class="page-head">
+        <div>
+          <h2 class="page-title">{{ current?.classification || 'Settings' }}</h2>
+          <p class="page-sub">{{ sectionDesc[current?.classification || ''] || 'Platform-level configuration.' }}</p>
         </div>
-        <div class="field-control">
-          <el-input-number
-            v-if="meta[row.key]?.type === 'number'"
-            :model-value="Number(form[row.key])"
-            :min="meta[row.key].min" :max="meta[row.key].max" :step="meta[row.key].step ?? 1"
-            :disabled="!isEditable(row)"
-            @update:model-value="(v: number) => (form[row.key] = String(v))"
-          />
-          <div v-else-if="meta[row.key]?.type === 'pricing'" class="pricing-cell">
-            <span class="pricing-preview">{{ pricingPreview() }}</span>
-            <el-button size="small" @click="openPricingEdit">Edit JSON</el-button>
-          </div>
-          <code v-else class="val">{{ form[row.key] }}</code>
-        </div>
+        <el-button type="primary" :loading="saving" @click="save">Save</el-button>
       </div>
-    </el-card>
 
-    <!-- Pricing editor -->
+      <el-card shadow="never" v-if="current">
+        <div v-for="row in current.items" :key="row.key" class="row">
+          <div class="row-info">
+            <div class="row-title">
+              {{ title(row.key) }}
+              <el-tag v-if="!isEditable(row)" size="small" type="info" effect="plain" class="ro">read-only</el-tag>
+            </div>
+            <div class="row-desc">{{ row.description }}</div>
+          </div>
+          <div class="row-control">
+            <el-input-number
+              v-if="meta[row.key]?.type === 'number'"
+              :model-value="Number(form[row.key])"
+              :min="meta[row.key].min" :max="meta[row.key].max" :step="meta[row.key].step ?? 1"
+              :disabled="!isEditable(row)"
+              @update:model-value="(v: number) => (form[row.key] = String(v))"
+            />
+            <div v-else-if="meta[row.key]?.type === 'pricing'" class="pricing-cell">
+              <span class="pricing-preview">{{ pricingPreview() }}</span>
+              <el-button size="small" @click="openPricingEdit">Edit JSON</el-button>
+            </div>
+            <code v-else class="val">{{ form[row.key] || '—' }}</code>
+          </div>
+        </div>
+      </el-card>
+    </section>
+
     <el-dialog v-model="pricingDialog.visible" title="Model Pricing (JSON)" width="560px">
       <el-input v-model="pricingDialog.text" type="textarea" :rows="12" class="code" />
       <div class="tip mt">Format: {"model": {"input": USD-per-1M-input-tokens, "output": USD-per-1M-output-tokens}}, e.g. {"deepseek-chat": {"input": 0.14, "output": 0.28}}</div>
@@ -150,70 +204,107 @@ onMounted(load)
 </template>
 
 <style scoped>
+.settings {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.nav {
+  width: 200px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+}
+.nav-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ll-ink);
+  margin-bottom: 10px;
+  padding-left: 10px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--ll-muted);
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-item:hover {
+  background: var(--ll-hover);
+  color: var(--ll-ink);
+}
+.nav-item.active {
+  background: var(--ll-soft);
+  color: var(--ll-ink);
+  font-weight: 600;
+}
+.content {
+  flex: 1;
+  min-width: 0;
+}
 .page-head {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
-.title {
-  font-size: 16px;
+.page-title {
+  margin: 0;
+  font-size: 18px;
   font-weight: 700;
   color: var(--ll-ink);
 }
-.sub {
-  font-size: 12px;
+.page-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
   color: var(--ll-muted);
-  margin-top: 2px;
 }
-.grp {
-  margin-bottom: 14px;
-}
-.grp-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-.field {
+.row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 12px 2px;
-  border-top: 1px solid var(--ll-soft);
+  gap: 24px;
+  padding: 14px 0;
+  border-top: 1px solid var(--ll-border);
 }
-.field:first-of-type {
+.row:first-of-type {
   border-top: none;
+  padding-top: 2px;
 }
-.field-info {
+.row-info {
   min-width: 0;
 }
-.field-key {
+.row-title {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.field-key code {
-  font-size: 13px;
-  color: var(--ll-ink);
+  font-size: 14px;
   font-weight: 600;
+  color: var(--ll-ink);
 }
 .ro {
   transform: scale(0.85);
 }
-.field-desc {
-  font-size: 12px;
+.row-desc {
+  font-size: 12.5px;
   color: var(--ll-muted);
   margin-top: 3px;
+  line-height: 1.5;
 }
-.field-control {
+.row-control {
   flex-shrink: 0;
 }
 .val {
   font-size: 12px;
   color: var(--ll-muted);
   word-break: break-all;
-  max-width: 360px;
+  max-width: 340px;
 }
 .pricing-cell {
   display: flex;
