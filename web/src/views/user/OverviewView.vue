@@ -43,36 +43,7 @@ const totalCards = computed(() => [
   { label: 'Total cost ($)', value: money(overview.value?.total.cost), icon: 'Money' },
 ])
 
-// 共享池账本：可调用次数 / 金额余额 / 上传下载（消费与贡献）
-const ledgerCards = computed(() => {
-  const m = me.value
-  const callBal = m?.calls_balance ?? 0
-  const creditBal = m?.credit_balance ?? 0
-  return [
-    {
-      label: 'Calls balance', value: String(callBal),
-      sub: `spent ${m?.calls_spent ?? 0} · earned ${m?.calls_earned ?? 0} · floor ${m?.debt_floor_calls ?? 0}`,
-      color: callBal < 0 ? '#c9808a' : '#6f9a86', bg: callBal < 0 ? 'rgba(201,128,138,.16)' : 'rgba(111,154,134,.15)',
-      icon: 'Odometer',
-    },
-    {
-      label: 'Credit balance ($)', value: creditBal.toFixed(4),
-      sub: `spent $${(m?.credit_spent ?? 0).toFixed(4)} · earned $${(m?.credit_earned ?? 0).toFixed(4)} · floor $${(m?.debt_floor_credit ?? 0).toFixed(2)}`,
-      color: creditBal < 0 ? '#c9808a' : '#6f9a86', bg: creditBal < 0 ? 'rgba(201,128,138,.16)' : 'rgba(111,154,134,.15)',
-      icon: 'Wallet',
-    },
-    {
-      label: 'Upload tokens (used)', value: humanNum(m?.in_spent),
-      sub: `served to others ${humanNum(m?.in_served)}`,
-      color: '#7a93b8', bg: 'rgba(122,147,184,.16)', icon: 'Upload',
-    },
-    {
-      label: 'Download tokens (used)', value: humanNum(m?.out_spent),
-      sub: `served to others ${humanNum(m?.out_served)}`,
-      color: '#b18a4f', bg: 'rgba(177,138,79,.16)', icon: 'Download',
-    },
-  ]
-})
+
 
 onMounted(load)
 </script>
@@ -89,23 +60,6 @@ onMounted(load)
             <div class="stat-meta">
               <div class="stat-num">{{ s.value }}<span v-if="s.sub" class="sub">{{ s.sub }}</span></div>
               <div class="stat-label">{{ s.label }}</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="14">
-      <el-col v-for="s in ledgerCards" :key="s.label" :xs="12" :md="6">
-        <el-card shadow="never" class="stat-card">
-          <div class="stat-row">
-            <div class="stat-icon" :style="{ background: s.bg, color: s.color }">
-              <el-icon :size="20"><component :is="s.icon" /></el-icon>
-            </div>
-            <div class="stat-meta">
-              <div class="stat-num" :style="{ color: s.color }">{{ s.value }}</div>
-              <div class="stat-label">{{ s.label }}</div>
-              <div class="stat-sub">{{ s.sub }}</div>
             </div>
           </div>
         </el-card>

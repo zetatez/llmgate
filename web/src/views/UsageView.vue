@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { logsApi } from '../api'
-import type { UserModelUsage } from '../api'
+import { logsApi, usersApi } from '../api'
+import type { User, UserModelUsage } from '../api'
 
-const raw = ref<UserModelUsage[]>([])
+const usage = ref<UserModelUsage[]>([])
+const users = ref<User[]>([])
 const loading = ref(false)
 const days = ref(7)
 
@@ -19,59 +20,82 @@ function money(v: number): string {
   return (v ?? 0).toFixed(4)
 }
 
-interface UserRow {
+interface Row {
   user_id: number
   user_name: string
   requests: number
   prompt: number
   completion: number
-  total: number
   cost: number
+  calls_spent: number
+  calls_earned: number
+  calls_balance: number
+  credit_spent: number
+  credit_earned: number
+  credit_balance: number
+  debt_floor_calls: number
+  debt_floor_credit: number
   models: UserModelUsage[]
 }
 
-const perUser = computed<UserRow[]>(() => {
-  const m = new Map<number, UserRow>()
-  for (const r of raw.value) {
-    let u = m.get(r.user_id)
-    if (!u) {
-      u = { user_id: r.user_id, user_name: r.user_name, requests: 0, prompt: 0, completion: 0, total: 0, cost: 0, models: [] }
-      m.set(r.user_id, u)
-    }
-    u.requests += r.requests
-    u.prompt += r.prompt_tokens
-    u.completion += r.completion_tokens
-    u.total += r.total_tokens
-    u.cost += r.cost
-    u.models.push(r)
+const rows = computed<Row[]>(() => {
+  const m = new Map<number, Row>()
+  for (const u of users.value) {
+    m.set(u.id, {
+      user_id: u.id, user_name: u.name || u.username,
+      requests: 0, prompt: 0, completion: 0, cost: 0,
+      calls_spent: u.calls_spent, calls_earned: u.calls_earned, calls_balance: u.calls_balance,
+      credit_spent: u.credit_spent, credit_earned: u.credit_earned, credit_balance: u.credit_balance,
+      debt_floor_calls: u.debt_floor_calls, debt_floor_credit: u.debt_floor_credit,
+      models: [],
+    })
   }
-  return [...m.values()].sort((a, b) => b.total - a.total)
+  for (const r of usage.value) {
+    let row = m.get(r.user_id)
+    if (!row) {
+      row = {
+        user_id: r.user_id, user_name: r.user_name || `#${r.user_id}`,
+        requests: 0, prompt: 0, completion: 0, cost: 0,
+        calls_spent: 0, calls_earned: 0, calls_balance: 0,
+        credit_spent: 0, credit_earned: 0, credit_balance: 0,
+        debt_floor_calls: 0, debt_floor_credit: 0, models: [],
+      }
+      m.set(r.user_id, row)
+    }
+    row.requests += r.requests
+    row.prompt += r.prompt_tokens
+    row.completion += r.completion_tokens
+    row.cost += r.cost
+    row.models.push(r)
+  }
+  return [...m.values()].sort((a, b) => b.cost - a.cost || b.calls_spent - a.calls_spent)
 })
 
 const totals = computed(() =>
-  perUser.value.reduce((s, u) => ({
+  rows.value.reduce((s, u) => ({
     users: s.users + 1,
     requests: s.requests + u.requests,
     prompt: s.prompt + u.prompt,
     completion: s.completion + u.completion,
-    total: s.total + u.total,
     cost: s.cost + u.cost,
-  }), { users: 0, requests: 0, prompt: 0, completion: 0, total: 0, cost: 0 }),
+    callsBalance: s.callsBalance + u.calls_balance,
+    creditBalance: s.creditBalance + u.credit_balance,
+  }), { users: 0, requests: 0, prompt: 0, completion: 0, cost: 0, callsBalance: 0, creditBalance: 0 }),
 )
-
-const rangeLabel = computed(() => (days.value === 0 ? 'All time' : days.value === 1 ? 'Today' : `Last ${days.value} days`))
 
 async function load() {
   loading.value = true
   try {
-    raw.value = await logsApi.usageByUserModel(days.value)
+    const [u, us] = await Promise.all([logsApi.usageByUserModel(days.value), usersApi.list()])
+    usage.value = u
+    users.value = us
   } finally {
     loading.value = false
   }
 }
 
-function modelRows(u: UserRow): UserModelUsage[] {
-  return [...u.models].sort((a, b) => b.total_tokens - a.total_tokens)
+function modelRows(r: Row): UserModelUsage[] {
+  return [...r.models].sort((a, b) => b.total_tokens - a.total_tokens)
 }
 
 onMounted(load)
@@ -87,94 +111,71 @@ onMounted(load)
           <el-radio-button :value="30">30 days</el-radio-button>
           <el-radio-button :value="0">All</el-radio-button>
         </el-radio-group>
-        <span class="range-hint">{{ rangeLabel }}</span>
+        <span class="hint">Usage is per selected range; balances are running totals.</span>
       </div>
     </el-card>
 
     <el-row :gutter="14" class="mt">
-      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ totals.users }}</div><div class="sum-label">Users</div></el-card></el-col>
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(totals.requests) }}</div><div class="sum-label">Requests</div></el-card></el-col>
-      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(totals.total) }}</div><div class="sum-label">Tokens (in {{ humanNum(totals.prompt) }} / out {{ humanNum(totals.completion) }})</div></el-card></el-col>
-      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">${{ totals.cost.toFixed(2) }}</div><div class="sum-label">Cost</div></el-card></el-col>
+      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(totals.prompt) }} / {{ humanNum(totals.completion) }}</div><div class="sum-label">Upload / Download tokens</div></el-card></el-col>
+      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.callsBalance < 0 }">{{ totals.callsBalance }}</div><div class="sum-label">Calls balance (all users)</div></el-card></el-col>
+      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.creditBalance < 0 }">${{ totals.creditBalance.toFixed(2) }}</div><div class="sum-label">Credit balance (all users)</div></el-card></el-col>
     </el-row>
 
     <el-card shadow="never" class="mt">
-      <el-table :data="perUser" size="small" row-key="user_id">
+      <el-table :data="rows" size="small" row-key="user_id">
         <el-table-column type="expand">
           <template #default="{ row }">
             <el-table :data="modelRows(row)" size="small" class="inner-table">
               <el-table-column prop="model" label="Model" min-width="180" show-overflow-tooltip />
               <el-table-column prop="requests" label="Requests" width="110" align="right" />
-              <el-table-column label="Upload tokens" width="140" align="right">
-                <template #default="{ row: m }">{{ humanNum(m.prompt_tokens) }}</template>
-              </el-table-column>
-              <el-table-column label="Download tokens" width="150" align="right">
-                <template #default="{ row: m }">{{ humanNum(m.completion_tokens) }}</template>
-              </el-table-column>
-              <el-table-column label="Total tokens" width="130" align="right">
-                <template #default="{ row: m }">{{ humanNum(m.total_tokens) }}</template>
-              </el-table-column>
-              <el-table-column label="Cost ($)" width="110" align="right">
-                <template #default="{ row: m }">{{ money(m.cost) }}</template>
-              </el-table-column>
+              <el-table-column label="Upload" width="120" align="right"><template #default="{ row: m }">{{ humanNum(m.prompt_tokens) }}</template></el-table-column>
+              <el-table-column label="Download" width="120" align="right"><template #default="{ row: m }">{{ humanNum(m.completion_tokens) }}</template></el-table-column>
+              <el-table-column label="Total" width="110" align="right"><template #default="{ row: m }">{{ humanNum(m.total_tokens) }}</template></el-table-column>
+              <el-table-column label="Cost ($)" width="110" align="right"><template #default="{ row: m }">{{ money(m.cost) }}</template></el-table-column>
             </el-table>
           </template>
         </el-table-column>
-        <el-table-column label="User" min-width="180">
+        <el-table-column label="User" min-width="170">
           <template #default="{ row }">{{ row.user_name || `#${row.user_id}` }}</template>
         </el-table-column>
-        <el-table-column prop="requests" label="Requests" width="110" align="right" sortable />
-        <el-table-column label="Upload tokens" width="150" align="right" sortable>
+        <el-table-column prop="requests" label="Requests" width="100" align="right" sortable />
+        <el-table-column label="Upload" width="110" align="right" sortable>
           <template #default="{ row }">{{ humanNum(row.prompt) }}</template>
         </el-table-column>
-        <el-table-column label="Download tokens" width="160" align="right" sortable>
+        <el-table-column label="Download" width="110" align="right" sortable>
           <template #default="{ row }">{{ humanNum(row.completion) }}</template>
         </el-table-column>
-        <el-table-column label="Total tokens" width="140" align="right" sortable>
-          <template #default="{ row }">{{ humanNum(row.total) }}</template>
-        </el-table-column>
-        <el-table-column label="Cost ($)" width="120" align="right" sortable>
+        <el-table-column label="Cost ($)" width="100" align="right" sortable>
           <template #default="{ row }">{{ money(row.cost) }}</template>
         </el-table-column>
+        <el-table-column label="Calls (bal)" width="110" align="right" sortable>
+          <template #default="{ row }">
+            <span :class="{ neg: row.calls_balance < 0 }">{{ row.calls_balance }}</span>
+            <div class="sub">{{ row.calls_spent }} / {{ row.calls_earned }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="Credit (bal)" width="120" align="right" sortable>
+          <template #default="{ row }">
+            <span :class="{ neg: row.credit_balance < 0 }">${{ row.credit_balance.toFixed(4) }}</span>
+            <div class="sub">${{ row.credit_spent.toFixed(4) }} / ${{ row.credit_earned.toFixed(4) }}</div>
+          </template>
+        </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && !perUser.length" description="No usage in the selected range" />
+      <el-empty v-if="!loading && !rows.length" description="No users yet" />
     </el-card>
   </div>
 </template>
 
 <style scoped>
-.toolbar-card {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-}
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.range-hint {
-  font-size: 12px;
-  color: var(--ll-muted);
-}
-.sum {
-  margin-bottom: 14px;
-}
-.sum-num {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ll-ink);
-}
-.sum-label {
-  font-size: 12px;
-  color: var(--ll-muted);
-  margin-top: 2px;
-}
-.inner-table {
-  margin: 4px 12px;
-}
-.mt {
-  margin-top: 14px;
-}
+.toolbar-card { background: transparent; border: none; box-shadow: none; padding: 0; }
+.toolbar { display: flex; align-items: center; gap: 12px; }
+.hint { font-size: 12px; color: var(--ll-muted); }
+.sum { margin-bottom: 14px; }
+.sum-num { font-size: 22px; font-weight: 700; color: var(--ll-ink); }
+.sum-label { font-size: 12px; color: var(--ll-muted); margin-top: 2px; }
+.neg { color: #c9808a; }
+.sub { font-size: 11px; color: var(--ll-muted); }
+.inner-table { margin: 4px 12px; }
+.mt { margin-top: 14px; }
 </style>
