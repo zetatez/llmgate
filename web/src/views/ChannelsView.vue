@@ -269,22 +269,22 @@ onMounted(() => {
       </template>
       <el-table v-loading="loading" :data="list" size="small" highlight-current-row @current-change="(row: Channel) => row && selectChannel(row)">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="Name" width="150" />
-        <el-table-column prop="base_url" label="Base URL" min-width="210" show-overflow-tooltip />
+        <el-table-column prop="name" label="Name" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="base_url" label="Base URL" min-width="260" show-overflow-tooltip />
         <el-table-column label="Owner" width="130" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="row.user_id" size="small" type="success" effect="light">{{ ownerName(row.user_id) }}</el-tag>
             <span v-else class="dim">Admin</span>
           </template>
         </el-table-column>
-        <el-table-column label="Status" width="70">
+        <el-table-column label="Status" width="90">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled === 1" @change="toggleChannel(row)" />
           </template>
         </el-table-column>
         <el-table-column prop="priority" label="Priority" width="80" />
         <el-table-column prop="weight" label="Weight" width="80" />
-        <el-table-column label="Health" width="90">
+        <el-table-column label="Health" width="100">
           <template #default="{ row }">
             <el-tag :type="row.health_state === 'cooldown' ? 'danger' : 'success'" size="small">{{ row.health_state === 'cooldown' ? 'Cooling' : 'OK' }}</el-tag>
           </template>

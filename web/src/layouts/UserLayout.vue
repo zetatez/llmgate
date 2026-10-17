@@ -88,11 +88,13 @@ onMounted(async () => {
       </div>
     </header>
     <main class="main">
-      <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
+      <div class="page">
+        <router-view v-slot="{ Component }">
+          <transition name="fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
+      </div>
     </main>
 
     <el-dialog v-model="pwDialog.visible" title="Change Password" width="420px">
@@ -195,7 +197,12 @@ onMounted(async () => {
 }
 .main {
   flex: 1;
-  padding: 16px;
+  padding: 16px 24px;
   background: var(--ll-bg);
+}
+.page {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 </style>

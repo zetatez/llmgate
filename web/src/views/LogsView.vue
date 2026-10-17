@@ -70,11 +70,11 @@ onMounted(load)
       <el-table-column label="Time" width="165" class-name="nowrap">
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column prop="display_model" label="Model" width="150" show-overflow-tooltip />
+      <el-table-column prop="display_model" label="Model" width="170" show-overflow-tooltip />
       <el-table-column label="User" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ row.user_name || (row.user_id ? `#${row.user_id}` : '—') }}</template>
       </el-table-column>
-      <el-table-column label="Channel" width="120" show-overflow-tooltip>
+      <el-table-column label="Channel" width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ row.channel_name || `#${row.channel_id}` }}</template>
       </el-table-column>
       <el-table-column label="Upstream" min-width="140" show-overflow-tooltip>
@@ -91,7 +91,7 @@ onMounted(load)
           <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="error_code" label="Error" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="error_code" label="Error" min-width="170" show-overflow-tooltip />
     </el-table>
 
     <div class="pager">

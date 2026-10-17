@@ -190,7 +190,7 @@ onMounted(() => {
       </template>
       <el-table v-loading="loading" :data="list" size="small">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="User" min-width="160">
+        <el-table-column label="User" min-width="220">
           <template #default="{ row }">
             <div class="u-name">{{ row.username }}</div>
             <div v-if="row.name && row.name !== row.username" class="u-sub">{{ row.name }}</div>
@@ -212,7 +212,7 @@ onMounted(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Quota ($)" width="150">
+        <el-table-column label="Quota ($)" width="160">
           <template #default="{ row }">
             <span>{{ row.quota_used.toFixed(4) }} / {{ row.quota_limit ? row.quota_limit : 'unlimited' }}</span>
           </template>
