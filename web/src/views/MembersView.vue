@@ -35,6 +35,13 @@ const filtered = computed(() => {
   return list.value.filter((m) => m.username.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q))
 })
 
+// 全站 token 总量，用于计算成员占比条
+const tokenTotal = computed(() => list.value.reduce((s, m) => s + m.in_spent + m.out_spent, 0) || 1)
+
+function tokenShare(m: MemberStat): number {
+  return ((m.in_spent + m.out_spent) / tokenTotal.value) * 100
+}
+
 const summary = computed(() => {
   const weekAgo = Date.now() / 1000 - 7 * 86400
   return {
@@ -88,14 +95,18 @@ onMounted(load)
       </template>
       <el-table :data="filtered" size="small" :row-class-name="rowClass" :default-sort="{ prop: 'calls_spent', order: 'descending' }">
         <el-table-column type="index" label="#" width="50" />
-        <el-table-column label="Member" min-width="170">
+        <el-table-column label="Member" min-width="220">
           <template #default="{ row }">
             <div class="member">
               <span class="u">{{ row.username }}</span>
               <span v-if="isUser && row.id === myID" class="you">you</span>
             </div>
             <div v-if="row.name && row.name !== row.username" class="sub">{{ row.name }}</div>
+            <div class="bar"><div class="bar-inner" :style="{ width: tokenShare(row) + '%' }"></div></div>
           </template>
+        </el-table-column>
+        <el-table-column label="Share" width="80" align="right" sortable :sort-by="(row: MemberStat) => row.in_spent + row.out_spent">
+          <template #default="{ row }">{{ tokenShare(row).toFixed(1) }}%</template>
         </el-table-column>
         <el-table-column label="Joined" width="120">
           <template #default="{ row }">{{ fmtDate(row.created_at) }}</template>
@@ -141,6 +152,8 @@ onMounted(load)
 .u { font-weight: 600; color: var(--ll-ink); }
 .you { font-size: 10px; padding: 0 5px; border-radius: 4px; background: rgba(139, 147, 214, .2); color: #aeb5ee; }
 .sub { font-size: 11px; color: var(--ll-muted); }
+.bar { height: 4px; border-radius: 2px; background: var(--ll-soft); margin-top: 5px; overflow: hidden; max-width: 260px; }
+.bar-inner { height: 100%; border-radius: 2px; background: linear-gradient(90deg, #8b93d6, #b5a7dd); }
 .neg { color: #c9808a; }
 :deep(.me-row) { background: rgba(139, 147, 214, .08); }
 </style>

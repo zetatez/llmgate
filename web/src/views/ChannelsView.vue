@@ -192,10 +192,11 @@ const keyStats = computed(() => {
 })
 
 function toKeyItem(k: UserKey): ChannelKeyItem {
+  const channelOn = selected.value?.enabled === 1
   return {
     id: k.id, channel_id: k.channel_id, user_id: myID.value, owner_name: 'You',
     name: k.name, source: k.source, remark: k.remark, masked: k.masked, key_tail: k.key_tail,
-    enabled: k.enabled, effective_enabled: k.enabled, weight: 1, last_used_at: k.last_used_at,
+    enabled: k.enabled, effective_enabled: k.enabled === 1 && channelOn ? 1 : 0, weight: 1, last_used_at: k.last_used_at,
   }
 }
 

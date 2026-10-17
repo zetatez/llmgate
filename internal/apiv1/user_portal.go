@@ -354,8 +354,9 @@ func userAddKeys(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if ch == nil || ch.Enabled != 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "channel not found or disabled"})
+		// 渠道被禁用时仍允许登记 Key（只是暂不参与路由），便于提前准备密钥。
+		if ch == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "channel not found"})
 			return
 		}
 		entries, err := parseKeyEntries(b.Keys)

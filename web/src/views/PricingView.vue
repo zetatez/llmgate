@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { portalApi, pricingApi } from '../api'
-import type { ModelPrice } from '../api'
+import { portalApi, pricingApi, logsApi } from '../api'
+import type { ModelPrice, ModelUsage } from '../api'
+import { PALETTE, AXIS_TOOLTIP, ITEM_TOOLTIP } from '../utils/chart'
+import { usageVendorOf } from '../utils/vendor'
 
 const props = defineProps<{ readonly?: boolean }>()
 
@@ -55,6 +58,179 @@ function fmtPrice(v: number): string {
   if (!v) return '$0'
   return '$' + (+v).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
 }
+
+// 单次调用成本：标准请求 1K 输入 + 1K 输出 + 每次附加费
+function callCost(r: Pick<ModelPrice, 'input' | 'output' | 'call'>): number {
+  return (r.input || 0) * 0.001 + (r.output || 0) * 0.001 + (r.call || 0)
+}
+
+// $100 可调用次数
+function callsPer100(r: Pick<ModelPrice, 'input' | 'output' | 'call'>): number {
+  const c = callCost(r)
+  return c > 0 ? 100 / c : 0
+}
+
+const chartEl = ref<HTMLDivElement>()
+let chart: echarts.ECharts | null = null
+
+// 价格公示页的条形图：按 $100 可调用次数排序（受搜索过滤影响）
+const chartRows = computed(() =>
+  viewList.value
+    .map((r) => ({ model: r.model, calls: callsPer100(r), perCall: callCost(r) }))
+    .filter((r) => r.calls > 0)
+    .sort((a, b) => b.calls - a.calls),
+)
+// 固定窗口高度，窗口内通过 dataZoom 上下滑动查看全部模型
+const CHART_VIEW_HEIGHT = 420
+const VISIBLE_ROWS = 16
+
+async function renderChart() {
+  await nextTick()
+  if (!chartEl.value || !chartRows.value.length) {
+    chart?.dispose()
+    chart = null
+    return
+  }
+  const data = [...chartRows.value]
+  const end = Math.min(VISIBLE_ROWS - 1, data.length - 1)
+  chart?.dispose()
+  chart = echarts.init(chartEl.value)
+  chart.setOption({
+    tooltip: {
+      ...AXIS_TOOLTIP,
+      formatter: (params: any[]) => {
+        const p = params[0]
+        const row = data[p.dataIndex]
+        return `${p.name}<br/>calls per $100: ${Math.round(row.calls).toLocaleString()}<br/>cost per call: $${row.perCall.toFixed(6)}`
+      },
+    },
+    grid: { left: 8, right: 34, top: 8, bottom: 8, containLabel: true },
+    dataZoom: [
+      {
+        type: 'slider', yAxisIndex: 0, right: 4, width: 10,
+        startValue: 0, endValue: end, zoomLock: true, brushSelect: false,
+        showDetail: false, showDataShadow: false, handleSize: 0, moveHandleSize: 0,
+        borderColor: 'transparent',
+        backgroundColor: 'rgba(255,255,255,.05)',
+        fillerColor: 'rgba(139,147,214,.55)',
+        textStyle: { color: '#8b909c' },
+      },
+      { type: 'inside', yAxisIndex: 0, startValue: 0, endValue: end, zoomOnMouseWheel: false, moveOnMouseWheel: true },
+    ],
+    xAxis: { type: 'value', axisLabel: { color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
+    yAxis: { type: 'category', inverse: true, data: data.map((d) => d.model), axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c', width: 230, overflow: 'truncate' } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 16,
+      data: data.map((d) => d.calls),
+      itemStyle: {
+        borderRadius: [0, 3, 3, 0],
+        color: (p: any) => PALETTE[p.dataIndex % PALETTE.length],
+      },
+    }],
+  })
+  chart.resize()
+}
+
+function onResize() {
+  chart?.resize()
+  vendorChart?.resize()
+}
+
+watch([chartRows, tab], () => renderChart())
+
+// 实际使用占比：最近 30 天按厂商聚合 token
+const usageModels = ref<ModelUsage[]>([])
+const usageDays = 30
+const vendorEl = ref<HTMLDivElement>()
+let vendorChart: echarts.ECharts | null = null
+
+const vendorUsage = computed(() => {
+  const m = new Map<string, number>()
+  for (const r of usageModels.value) {
+    const v = usageVendorOf(r.model)
+    m.set(v, (m.get(v) || 0) + (r.total_tokens || 0))
+  }
+  const arr = [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
+  const top = arr.slice(0, 8)
+  const rest = arr.slice(8).reduce((s, [, v]) => s + v, 0)
+  if (rest > 0) top.push(['Other', rest])
+  return top.map(([name, value]) => ({ name, value }))
+})
+// 模型占比
+const modelUsageShare = computed(() => {
+  const arr = [...usageModels.value].filter((m) => (m.total_tokens || 0) > 0).sort((a, b) => b.total_tokens - a.total_tokens)
+  const top = arr.slice(0, 8).map((m) => ({ name: m.model, value: m.total_tokens }))
+  const rest = arr.slice(8).reduce((s, m) => s + m.total_tokens, 0)
+  if (rest > 0) top.push({ name: 'Other', value: rest })
+  return top
+})
+
+// 实际使用占比切换：按模型 / 按厂商
+const usageMode = ref<'model' | 'vendor'>('model')
+const usageShare = computed(() => (usageMode.value === 'model' ? modelUsageShare.value : vendorUsage.value))
+const usageTotal = computed(() => usageShare.value.reduce((s, d) => s + d.value, 0) || 1)
+
+function humanNum(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '0'
+  const abs = Math.abs(n)
+  if (abs >= 1e9) return +(n / 1e9).toFixed(2) + 'B'
+  if (abs >= 1e6) return +(n / 1e6).toFixed(2) + 'M'
+  if (abs >= 1e3) return +(n / 1e3).toFixed(1) + 'k'
+  return String(n)
+}
+
+async function loadUsage() {
+  try {
+    const d = isAdmin.value ? await logsApi.dashboard(usageDays) : await portalApi.dashboard(usageDays)
+    usageModels.value = d.models || []
+  } catch {
+    usageModels.value = []
+  }
+}
+
+async function renderVendorChart() {
+  await nextTick()
+  if (!vendorEl.value || !usageShare.value.length) {
+    vendorChart?.dispose()
+    vendorChart = null
+    return
+  }
+  const total = usageTotal.value
+  vendorChart?.dispose()
+  vendorChart = echarts.init(vendorEl.value)
+  vendorChart.setOption({
+    tooltip: {
+      ...ITEM_TOOLTIP,
+      formatter: (p: any) => `${p.marker}${p.name}: ${humanNum(p.value)} tokens (${((p.value / total) * 100).toFixed(1)}%)`,
+    },
+    legend: {
+      type: 'scroll', orient: 'vertical', right: 0, top: 'center',
+      itemWidth: 9, itemHeight: 9, itemGap: 8,
+      textStyle: { color: '#8b909c', fontSize: 11 },
+      formatter: (name: string) => {
+        const d = usageShare.value.find((v) => v.name === name)
+        const raw = d ? (d.value / total) * 100 : 0
+        const pct = raw > 0 && raw < 1 ? raw.toFixed(2) : raw.toFixed(1)
+        const label = name.length > 24 ? name.slice(0, 23) + '…' : name
+        return `${label}  ${pct}%`
+      },
+    },
+    series: [{
+      type: 'pie',
+      radius: ['52%', '78%'],
+      center: ['34%', '50%'],
+      itemStyle: { borderColor: 'rgba(18,22,32,.9)', borderWidth: 2 },
+      label: { show: false },
+      labelLine: { show: false },
+      color: PALETTE,
+      data: usageShare.value,
+    }],
+  })
+  vendorChart.resize()
+}
+
+watch([usageShare, usageMode], () => renderVendorChart())
 
 function syncDraft() {
   draft.value = rows.value.map((r) => ({ ...r, dirty: false }))
@@ -219,7 +395,18 @@ async function submitBatch() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await Promise.all([load(), loadUsage()])
+  await nextTick()
+  renderChart()
+  renderVendorChart()
+  window.addEventListener('resize', onResize)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  chart?.dispose()
+  vendorChart?.dispose()
+})
 </script>
 
 <template>
@@ -246,6 +433,36 @@ onMounted(load)
         <el-button v-if="isAdmin" type="primary" size="small" class="ml-auto" @click="openManage">Manage</el-button>
       </div>
 
+      <el-row :gutter="14" class="mb">
+        <el-col :xs="24" :lg="14" class="col-gap">
+          <el-card shadow="never" class="fill">
+            <template #header>
+              <div class="head">
+                <span>Calls per $100</span>
+                <span class="hint">1K input + 1K output per call</span>
+              </div>
+            </template>
+            <div v-if="chartRows.length" ref="chartEl" :style="{ height: CHART_VIEW_HEIGHT + 'px' }"></div>
+            <el-empty v-else description="No usable prices" :image-size="50" />
+          </el-card>
+        </el-col>
+        <el-col :xs="24" :lg="10">
+          <el-card shadow="never" class="fill">
+            <template #header>
+              <div class="head">
+                <span>Usage share <span class="hint">last 30 days · tokens</span></span>
+                <el-radio-group v-model="usageMode" size="small">
+                  <el-radio-button value="model">Model</el-radio-button>
+                  <el-radio-button value="vendor">Vendor</el-radio-button>
+                </el-radio-group>
+              </div>
+            </template>
+            <div v-if="usageShare.length" ref="vendorEl" :style="{ height: CHART_VIEW_HEIGHT + 'px' }"></div>
+            <el-empty v-else description="No usage yet" :image-size="50" />
+          </el-card>
+        </el-col>
+      </el-row>
+
       <el-card shadow="never">
         <el-table :data="viewPaged" size="small" row-key="model">
           <el-table-column prop="model" label="Model" min-width="280" show-overflow-tooltip />
@@ -257,6 +474,11 @@ onMounted(load)
           </el-table-column>
           <el-table-column label="Per-call ($)" width="130" align="right">
             <template #default="{ row }"><span class="price">{{ fmtPrice(row.call) }}</span></template>
+          </el-table-column>
+          <el-table-column label="Calls / $100" width="140" align="right" sortable :sort-by="(row: EditRow) => callsPer100(row)">
+            <template #default="{ row }">
+              <span class="price">{{ callsPer100(row) ? Math.round(callsPer100(row)).toLocaleString() : '—' }}</span>
+            </template>
           </el-table-column>
         </el-table>
         <el-empty v-if="!loading && !viewList.length" description="No model prices yet" />
@@ -379,6 +601,12 @@ onMounted(load)
 .hint { font-size: 12px; color: var(--ll-muted); }
 .ml-auto { margin-left: auto; }
 .mt { margin-top: 6px; }
+.mb { margin-bottom: 12px; }
+.fill { height: 100%; }
+.head { display: flex; justify-content: space-between; align-items: center; }
+@media (max-width: 1199px) {
+  .col-gap { margin-bottom: 12px; }
+}
 .price-input { width: 140px; }
 .price { font-variant-numeric: tabular-nums; color: var(--ll-ink); }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }

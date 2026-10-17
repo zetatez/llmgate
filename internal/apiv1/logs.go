@@ -134,11 +134,14 @@ type dashboardPayload struct {
 	Days           int                           `json:"days"`
 	Week           []store.UsagePoint            `json:"week"`
 	WeekModels     []store.UsageModelPoint       `json:"week_models"`
+	Models         []store.ModelUsage            `json:"models"`      // 区间内按模型聚合
+	ModelsPrev     []store.ModelUsage            `json:"models_prev"` // 上一等长区间，用于环比
 	Hours          []store.UsageHourPoint        `json:"hours"`
 	Today          store.UsageSummary            `json:"today"`
 	Periods        map[string]store.UsageSummary `json:"periods"` // today / week / month
 	ChannelStats   []store.ChannelDayStats       `json:"channel_stats"`
-	Failures       []*models.RequestLog          `json:"failures"` // 最近失败明细
+	ChannelUsage   []store.ChannelUsage          `json:"channel_usage"` // 区间内按渠道聚合
+	Failures       []*models.RequestLog          `json:"failures"`      // 最近失败明细
 	RecentFailures int                           `json:"recent_failures"`
 }
 
@@ -166,8 +169,11 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 		var (
 			week         []store.UsagePoint
 			weekModels   []store.UsageModelPoint
+			modelStats   []store.ModelUsage
+			modelPrev    []store.ModelUsage
 			hours        []store.UsageHourPoint
 			channelStats []store.ChannelDayStats
+			channelUsage []store.ChannelUsage
 			today        store.UsageSummary
 			weekSum      store.UsageSummary
 			monthSum     store.UsageSummary
@@ -176,10 +182,18 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 		)
 		now := time.Now()
 		dayStartT := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		curFrom := dayStartT.AddDate(0, 0, -(days - 1)).Unix()
+		prevFrom := dayStartT.AddDate(0, 0, -(2*days - 1)).Unix()
 		if userID > 0 {
 			week, err = store.UserUsageByDay(a.DB, userID, days)
 			if err == nil {
 				weekModels, err = store.UserUsageModelByDay(a.DB, userID, days)
+			}
+			if err == nil {
+				modelStats, err = store.UserUsageByModel(a.DB, userID, curFrom, 0)
+			}
+			if err == nil {
+				modelPrev, err = store.UserUsageByModel(a.DB, userID, prevFrom, curFrom)
 			}
 			if err == nil {
 				hours, err = store.UserUsageByHour(a.DB, userID, 24)
@@ -194,6 +208,9 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 				monthSum, err = store.UserUsageSummary(a.DB, userID, dayStartT.AddDate(0, 0, -29).Unix())
 			}
 			if err == nil {
+				channelUsage, err = store.UserUsageByChannel(a.DB, userID, curFrom, 0)
+			}
+			if err == nil {
 				channelStats, err = store.UserChannelStatsToday(a.DB, userID)
 			}
 			if err == nil {
@@ -203,6 +220,12 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 			week, err = store.UsageByDay(a.DB, days)
 			if err == nil {
 				weekModels, err = store.UsageModelByDay(a.DB, days)
+			}
+			if err == nil {
+				modelStats, err = store.UsageByModel(a.DB, curFrom, 0)
+			}
+			if err == nil {
+				modelPrev, err = store.UsageByModel(a.DB, prevFrom, curFrom)
 			}
 			if err == nil {
 				hours, err = store.UsageByHour(a.DB, 24)
@@ -215,6 +238,9 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 			}
 			if err == nil {
 				monthSum, err = store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -29).Unix())
+			}
+			if err == nil {
+				channelUsage, err = store.UsageByChannel(a.DB, curFrom, 0)
 			}
 			if err == nil {
 				channelStats, err = store.ChannelStatsToday(a.DB)
@@ -230,9 +256,11 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"data": dashboardPayload{
 			Days: days,
 			Week: week, WeekModels: weekModels, Hours: hours,
+			Models: modelStats, ModelsPrev: modelPrev,
 			Today:        today,
 			Periods:      map[string]store.UsageSummary{"today": today, "week": weekSum, "month": monthSum},
-			ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
+			ChannelStats: channelStats, ChannelUsage: channelUsage,
+			Failures: fails, RecentFailures: len(fails),
 		}})
 	}
 }

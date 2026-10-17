@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import * as echarts from 'echarts'
 import { logsApi, portalApi, usersApi } from '../api'
 import type { PortalUser, User, UserModelUsage } from '../api'
+import { PALETTE, AXIS_TOOLTIP } from '../utils/chart'
 
 const props = defineProps<{ scope?: 'admin' | 'user' }>()
 const isUser = computed(() => props.scope === 'user')
@@ -123,6 +125,7 @@ async function load() {
     }
   } finally {
     loading.value = false
+    await renderChart()
   }
 }
 
@@ -130,7 +133,71 @@ function modelRows(r: Row): UserModelUsage[] {
   return [...r.models].sort((a, b) => b.total_tokens - a.total_tokens)
 }
 
-onMounted(load)
+// 区间内按模型聚合（跨用户），用于 Top Models 图表
+const modelAgg = computed(() => {
+  const m = new Map<string, { tokens: number; cost: number; requests: number }>()
+  for (const r of usage.value) {
+    const c = m.get(r.model) || { tokens: 0, cost: 0, requests: 0 }
+    c.tokens += r.total_tokens
+    c.cost += r.cost
+    c.requests += r.requests
+    m.set(r.model, c)
+  }
+  return [...m.entries()].map(([model, v]) => ({ model, ...v })).sort((a, b) => b.tokens - a.tokens).slice(0, 12)
+})
+
+const chartEl = ref<HTMLDivElement>()
+let chart: echarts.ECharts | null = null
+
+async function renderChart() {
+  await nextTick()
+  if (mode.value !== 'range' || !chartEl.value || !modelAgg.value.length) {
+    chart?.dispose()
+    chart = null
+    return
+  }
+  const data = [...modelAgg.value].reverse()
+  chart?.dispose()
+  chart = echarts.init(chartEl.value)
+  chart.setOption({
+    tooltip: {
+      ...AXIS_TOOLTIP,
+      formatter: (params: any[]) => {
+        const p = params[0]
+        const row = data[p.dataIndex]
+        return `${p.name}<br/>tokens: ${humanNum(row.tokens)}<br/>requests: ${row.requests}<br/>cost: $${row.cost.toFixed(4)}`
+      },
+    },
+    grid: { left: 8, right: 24, top: 8, bottom: 8, containLabel: true },
+    xAxis: { type: 'value', axisLabel: { color: '#8b909c', formatter: (v: number) => humanNum(v) }, splitLine: { lineStyle: { color: '#23252c' } } },
+    yAxis: { type: 'category', data: data.map((d) => d.model), axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c', width: 200, overflow: 'truncate' } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 16,
+      data: data.map((d) => d.tokens),
+      itemStyle: {
+        borderRadius: [0, 3, 3, 0],
+        color: (p: any) => PALETTE[p.dataIndex % PALETTE.length],
+      },
+    }],
+  })
+  chart.resize()
+}
+
+function onResize() {
+  chart?.resize()
+}
+
+watch(mode, () => renderChart())
+
+onMounted(async () => {
+  await load()
+  window.addEventListener('resize', onResize)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  chart?.dispose()
+})
 </script>
 
 <template>
@@ -161,6 +228,13 @@ onMounted(load)
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.callsBalance < 0 }">{{ totals.callsBalance }}</div><div class="sum-label">Calls balance{{ isUser ? '' : ' (all users)' }}</div></el-card></el-col>
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.creditBalance < 0 }">${{ totals.creditBalance.toFixed(2) }}</div><div class="sum-label">Credit balance{{ isUser ? '' : ' (all users)' }}</div></el-card></el-col>
     </el-row>
+
+    <el-card v-if="mode === 'range' && modelAgg.length" shadow="never" class="mt">
+      <template #header>
+        <div class="head"><span>Top Models</span><span class="hint">tokens in range</span></div>
+      </template>
+      <div ref="chartEl" style="height: 340px"></div>
+    </el-card>
 
     <el-card shadow="never" class="mt">
       <el-table :data="rows" size="small" row-key="user_id">
@@ -221,6 +295,7 @@ onMounted(load)
 .toolbar-card { background: transparent; border: none; box-shadow: none; padding: 0; }
 .toolbar { display: flex; align-items: center; gap: 12px; }
 .hint { font-size: 12px; color: var(--ll-muted); }
+.head { display: flex; justify-content: space-between; align-items: center; }
 .sum { margin-bottom: 14px; }
 .sum-num { font-size: 22px; font-weight: 700; color: var(--ll-ink); }
 .sum-label { font-size: 12px; color: var(--ll-muted); margin-top: 2px; }

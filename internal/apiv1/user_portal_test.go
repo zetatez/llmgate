@@ -218,6 +218,22 @@ func TestUserPortalKeyIsolation(t *testing.T) {
 	}
 }
 
+// 渠道被禁用时仍允许用户登记 Key（仅暂不参与路由）。
+func TestUserAddKeyToDisabledChannel(t *testing.T) {
+	a := newApp(t)
+	r := newPortalRouter(a)
+	adminCreateUser(t, r, "alice")
+	chID := mustChannel(t, a, "shared-disabled")
+	if _, err := a.DB.Exec(`UPDATE channels SET enabled=0 WHERE id=?`, chID); err != nil {
+		t.Fatal(err)
+	}
+	cookie := userLoginCookie(t, r, "alice", "secret1")
+	body := fmt.Sprintf(`{"channel_id":%d,"keys":[{"name":"prepared","key":"sk-disabled001"}]}`, chID)
+	if w := doCookie(r, http.MethodPost, "/api/user/keys", body, cookie); w.Code != http.StatusOK {
+		t.Fatalf("add key to disabled channel = %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestUserPortalTokens(t *testing.T) {
 	a := newApp(t)
 	r := newPortalRouter(a)

@@ -6,6 +6,8 @@ import { logsApi, portalApi, settingsApi } from '../api'
 import type { DashboardPayload } from '../api'
 import { ElMessage } from 'element-plus'
 import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
+import { usageVendorOf } from '../utils/vendor'
+import { PALETTE, AXIS_TOOLTIP, ITEM_TOOLTIP } from '../utils/chart'
 
 const router = useRouter()
 const payload = ref<DashboardPayload | null>(null)
@@ -17,9 +19,14 @@ const channelsPath = computed(() => (isUser.value ? '/user/channels' : '/channel
 const logsPath = computed(() => (isUser.value ? '/user/logs' : '/logs'))
 const chartEl = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
+const shareEl = ref<HTMLDivElement>()
+let shareChart: echarts.ECharts | null = null
+const channelEl = ref<HTMLDivElement>()
+let channelChart: echarts.ECharts | null = null
 const hourEl = ref<HTMLDivElement>()
 let hourChart: echarts.ECharts | null = null
 const hourMode = ref<'cost' | 'tokens'>('cost')
+const shareMode = ref<'model' | 'vendor'>('model')
 const gatewayBase = ref('')
 const days = ref(7)
 
@@ -38,6 +45,18 @@ function humanMoney(n: number | null | undefined): string {
   return n.toFixed(4)
 }
 
+function money(v: number | null | undefined): string {
+  return (v ?? 0).toFixed(4)
+}
+
+// 均价金额格式化：越大越少小数位。
+function money2(v: number): string {
+  if (!v || Number.isNaN(v)) return '0.000'
+  if (v >= 100) return v.toFixed(2)
+  if (v >= 1) return v.toFixed(3)
+  return v.toFixed(4)
+}
+
 async function load() {
   loading.value = true
   try {
@@ -50,6 +69,8 @@ async function load() {
     await nextTick()
     renderChart()
     renderHourChart()
+    renderShareChart()
+    renderChannelChart()
   }
 }
 
@@ -108,7 +129,90 @@ const weekEmpty = computed(() => {
   return w.length === 0 || w.every((p) => p.total_tokens === 0 && p.requests === 0)
 })
 
+// Top 模型排名：区间内按 token 汇总，附厂商、占比与环比变化
+interface ModelRank {
+  model: string
+  vendor: string
+  requests: number
+  tokens: number
+  cost: number
+  share: number
+  change: number | null
+  isNew: boolean
+}
+const modelRanks = computed<ModelRank[]>(() => {
+  const cur = payload.value?.models || []
+  const prevMap = new Map((payload.value?.models_prev || []).map((m) => [m.model, m.total_tokens]))
+  const total = cur.reduce((s, m) => s + m.total_tokens, 0) || 1
+  return [...cur]
+    .sort((a, b) => b.total_tokens - a.total_tokens)
+    .slice(0, 12)
+    .map((m) => {
+      const p = prevMap.get(m.model) ?? 0
+      const isNew = p === 0 && m.total_tokens > 0
+      const change = p > 0 ? ((m.total_tokens - p) / p) * 100 : null
+      return {
+        model: m.model,
+        vendor: usageVendorOf(m.model),
+        requests: m.requests,
+        tokens: m.total_tokens,
+        cost: m.cost,
+        share: (m.total_tokens / total) * 100,
+        change,
+        isNew,
+      }
+    })
+})
 
+// 厂商占比（market share by vendor）
+const vendorShare = computed(() => {
+  const m = new Map<string, number>()
+  for (const r of payload.value?.models || []) {
+    const v = usageVendorOf(r.model)
+    m.set(v, (m.get(v) || 0) + r.total_tokens)
+  }
+  const arr = [...m.entries()].sort((a, b) => b[1] - a[1])
+  const top = arr.slice(0, 8)
+  const rest = arr.slice(8).reduce((s, [, v]) => s + v, 0)
+  if (rest > 0) top.push(['Other', rest])
+  return top.map(([name, value]) => ({ name, value }))
+})
+
+// 模型占比（market share by model）
+const modelShare = computed(() => {
+  const arr = [...(payload.value?.models || [])].sort((a, b) => b.total_tokens - a.total_tokens)
+  const top = arr.slice(0, 8).map((m) => ({ name: m.model, value: m.total_tokens }))
+  const rest = arr.slice(8).reduce((s, m) => s + m.total_tokens, 0)
+  if (rest > 0) top.push({ name: 'Other', value: rest })
+  return top.filter((d) => d.value > 0)
+})
+
+// 渠道占比（market share by channel）
+const channelShare = computed(() => {
+  const arr = [...(payload.value?.channel_usage || [])].sort((a, b) => b.total_tokens - a.total_tokens)
+  const top = arr.slice(0, 8).map((c) => ({ name: c.name, value: c.total_tokens }))
+  const rest = arr.slice(8).reduce((s, c) => s + c.total_tokens, 0)
+  if (rest > 0) top.push({ name: 'Other', value: rest })
+  return top.filter((d) => d.value > 0)
+})
+
+const shareData = computed(() => (shareMode.value === 'model' ? modelShare.value : vendorShare.value))
+
+// 各模型成本：请求 / token / 花费 / 平均每 1M token 成本
+const modelCost = computed(() => {
+  const cur = payload.value?.models || []
+  return [...cur]
+    .filter((m) => m.requests > 0)
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 10)
+    .map((m) => ({
+      model: m.model,
+      requests: m.requests,
+      tokens: m.total_tokens,
+      cost: m.cost,
+      perM: m.total_tokens > 0 ? (m.cost / m.total_tokens) * 1e6 : 0,
+    }))
+})
 
 function renderHourChart() {
   if (!hourEl.value) return
@@ -118,10 +222,7 @@ function renderHourChart() {
   const mode = hourMode.value
   hourChart.setOption({
     tooltip: {
-      trigger: 'axis',
-      backgroundColor: 'rgba(18,22,32,.92)',
-      borderWidth: 0,
-      textStyle: { color: '#fff' },
+      ...AXIS_TOOLTIP,
       valueFormatter: (v: any) => (mode === 'cost' ? '$' + (v || 0).toFixed(4) : humanNum(v) + ' token'),
     },
     grid: { left: 56, right: 16, top: 16, bottom: 26 },
@@ -139,17 +240,7 @@ function renderHourChart() {
 
 watch(hourMode, () => renderHourChart())
 
-// Top 模型（按区间 token 汇总 + 占比条）
-const topModels = computed(() => {
-  const marks = payload.value?.week_models || []
-  const totals = new Map<string, number>()
-  for (const m of marks) totals.set(m.model, (totals.get(m.model) || 0) + m.tokens)
-  const arr = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
-  const sum = arr.reduce((s, [, v]) => s + v, 0) || 1
-  return arr.map(([model, tokens]) => ({ model, tokens, share: (tokens / sum) * 100 }))
-})
-
-const MODEL_COLORS = ['#8b93d6', '#8fae9b', '#d3b27f', '#c98b96', '#7a93b8', '#b5a7dd', '#a3b0c2', '#d9a05f', '#9aa7c9', '#c9c2dc']
+const MODEL_COLORS = PALETTE
 
 function renderChart() {
   if (!payload.value || !chartEl.value) return
@@ -172,11 +263,7 @@ function renderChart() {
   chart = echarts.init(chartEl.value)
   chart.setOption({
     tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      backgroundColor: 'rgba(18,22,32,.92)',
-      borderWidth: 0,
-      textStyle: { color: '#fff' },
+      ...AXIS_TOOLTIP,
       formatter(params: any[]) {
         const p0 = params[0]
         let html = p0.axisValue + '<br/>'
@@ -194,7 +281,7 @@ function renderChart() {
     },
     legend: { type: 'scroll', top: 0, left: 0, right: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 12, textStyle: { color: '#8b909c', fontSize: 11 } },
     grid: { left: 48, right: 48, top: 40, bottom: 26 },
-    xAxis: { type: 'category', data: daysLabel, axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c' } },
+    xAxis: { type: 'category', boundaryGap: false, data: daysLabel, axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c' } },
     yAxis: [
       { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
       { type: 'value', axisLabel: { formatter: (v: number) => '$' + humanMoney(v), color: '#b18a4f' }, splitLine: { show: false } },
@@ -202,18 +289,20 @@ function renderChart() {
     series: [
       ...topModelsArr.map((m, i) => ({
         name: m,
-        type: 'bar',
+        type: 'line',
         stack: 'models',
-        barMaxWidth: 26,
+        smooth: 0.3,
+        symbol: 'none',
+        lineStyle: { width: 1, color: MODEL_COLORS[i % MODEL_COLORS.length] },
+        areaStyle: { color: MODEL_COLORS[i % MODEL_COLORS.length], opacity: 0.55 },
         data: daysLabel.map((_, j) => seriesByModel.get(m)![j] || 0),
-        itemStyle: { color: MODEL_COLORS[i % MODEL_COLORS.length], borderRadius: i === topModelsArr.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0] },
       })),
       {
         name: 'Spend ($)',
         type: 'line',
         yAxisIndex: 1,
         smooth: true,
-        symbolSize: 5,
+        symbol: 'none',
         data: costs,
         lineStyle: { width: 2, color: '#b18a4f' },
         itemStyle: { color: '#b18a4f' },
@@ -222,9 +311,107 @@ function renderChart() {
   })
 }
 
+async function renderShareChart() {
+  await nextTick()
+  if (!shareEl.value) {
+    shareChart?.dispose()
+    shareChart = null
+    return
+  }
+  const data = shareData.value
+  if (!data.length) {
+    shareChart?.dispose()
+    shareChart = null
+    return
+  }
+  shareChart?.dispose()
+  shareChart = echarts.init(shareEl.value)
+  const total = data.reduce((s, d) => s + d.value, 0) || 1
+  shareChart.setOption({
+    tooltip: {
+      ...ITEM_TOOLTIP,
+      formatter: (p: any) => `${p.marker}${p.name}: ${humanNum(p.value)} token (${((p.value / total) * 100).toFixed(1)}%)`,
+    },
+    legend: {
+      type: 'scroll', orient: 'vertical', right: 0, top: 'center',
+      itemWidth: 9, itemHeight: 9, itemGap: 8,
+      textStyle: { color: '#8b909c', fontSize: 11 },
+      formatter: (name: string) => {
+        const d = shareData.value.find((v) => v.name === name)
+        const raw = d ? (d.value / total) * 100 : 0
+        const pct = raw > 0 && raw < 1 ? raw.toFixed(2) : raw.toFixed(1)
+        const label = name.length > 24 ? name.slice(0, 23) + '…' : name
+        return `${label}  ${pct}%`
+      },
+    },
+    series: [{
+      type: 'pie',
+      radius: ['52%', '78%'],
+      center: ['32%', '50%'],
+      avoidLabelOverlap: true,
+      itemStyle: { borderColor: 'rgba(18,22,32,.9)', borderWidth: 2 },
+      label: { show: false },
+      labelLine: { show: false },
+      color: PALETTE,
+      data: data.map((d) => ({ name: d.name, value: d.value })),
+    }],
+  })
+  shareChart.resize()
+}
+
+async function renderChannelChart() {
+  await nextTick()
+  if (!channelEl.value) {
+    channelChart?.dispose()
+    channelChart = null
+    return
+  }
+  const data = channelShare.value
+  if (!data.length) {
+    channelChart?.dispose()
+    channelChart = null
+    return
+  }
+  channelChart?.dispose()
+  channelChart = echarts.init(channelEl.value)
+  const total = data.reduce((s, d) => s + d.value, 0) || 1
+  channelChart.setOption({
+    tooltip: {
+      ...ITEM_TOOLTIP,
+      formatter: (p: any) => `${p.marker}${p.name}: ${humanNum(p.value)} token (${((p.value / total) * 100).toFixed(1)}%)`,
+    },
+    legend: {
+      type: 'scroll', orient: 'vertical', right: 0, top: 'center',
+      itemWidth: 9, itemHeight: 9, itemGap: 8,
+      textStyle: { color: '#8b909c', fontSize: 11 },
+      formatter: (name: string) => {
+        const d = channelShare.value.find((v) => v.name === name)
+        const raw = d ? (d.value / total) * 100 : 0
+        const pct = raw > 0 && raw < 1 ? raw.toFixed(2) : raw.toFixed(1)
+        return `${name}  ${pct}%`
+      },
+    },
+    series: [{
+      type: 'pie',
+      radius: ['52%', '78%'],
+      center: ['32%', '50%'],
+      itemStyle: { borderColor: 'rgba(18,22,32,.9)', borderWidth: 2 },
+      label: { show: false },
+      labelLine: { show: false },
+      color: PALETTE,
+      data: data.map((d) => ({ name: d.name, value: d.value })),
+    }],
+  })
+  channelChart.resize()
+}
+
+watch(shareMode, () => renderShareChart())
+
 function onResize() {
   chart?.resize()
   hourChart?.resize()
+  shareChart?.resize()
+  channelChart?.resize()
 }
 
 onMounted(async () => {
@@ -235,6 +422,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   chart?.dispose()
   hourChart?.dispose()
+  shareChart?.dispose()
+  channelChart?.dispose()
 })
 </script>
 
@@ -307,24 +496,90 @@ onBeforeUnmount(() => {
       </el-col>
     </el-row>
 
-    <!-- 底部三栏：Top 模型 / 渠道 / 失败 -->
+    <!-- 排名 + 厂商占比 -->
     <el-row :gutter="14" class="mt">
-      <el-col :xs="24" :md="8">
-        <el-card shadow="never">
-          <template #header>Top Models</template>
-          <template v-if="topModels.length">
-            <div v-for="m in topModels" :key="m.model" class="model-item">
-              <div class="model-head">
-                <span class="model-name" :title="m.model">{{ m.model }}</span>
-                <span class="model-val">{{ humanNum(m.tokens) }} <span class="dim">tok</span></span>
+      <el-col :xs="24" :lg="14">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="head">
+              <span>Top Models</span>
+              <span class="week-sum">vs previous period</span>
+            </div>
+          </template>
+          <template v-if="modelRanks.length">
+            <div v-for="(m, i) in modelRanks" :key="m.model" class="rank-item">
+              <span class="rank-no">{{ i + 1 }}</span>
+              <div class="rank-body">
+                <div class="rank-head">
+                  <span class="model-name" :title="m.model">{{ m.model }}</span>
+                  <span class="vendor">{{ m.vendor }}</span>
+                  <span class="rank-val">{{ humanNum(m.tokens) }} <span class="dim">tok</span></span>
+                  <span class="rank-share">{{ m.share.toFixed(1) }}%</span>
+                  <span v-if="m.isNew" class="change new">new</span>
+                  <span v-else-if="m.change !== null" class="change" :class="m.change >= 0 ? 'up' : 'down'">
+                    {{ m.change >= 0 ? '▲' : '▼' }}{{ Math.abs(m.change).toFixed(0) }}%
+                  </span>
+                  <span v-else class="change dim">—</span>
+                </div>
+                <div class="bar"><div class="bar-inner" :style="{ width: m.share + '%', background: PALETTE[i % PALETTE.length] }"></div></div>
               </div>
-              <div class="bar"><div class="bar-inner" :style="{ width: m.share + '%' }"></div></div>
             </div>
           </template>
           <el-empty v-else description="No model usage yet" :image-size="50" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :md="8">
+      <el-col :xs="24" :lg="10">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="head">
+              <span>Market share</span>
+              <el-radio-group v-model="shareMode" size="small">
+                <el-radio-button value="model">Model</el-radio-button>
+                <el-radio-button value="vendor">Vendor</el-radio-button>
+              </el-radio-group>
+            </div>
+          </template>
+          <template v-if="shareData.length">
+            <div ref="shareEl" style="height: 300px"></div>
+          </template>
+          <el-empty v-else description="No usage yet" :image-size="60" />
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 模型成本 -->
+    <el-row :gutter="14" class="mt">
+      <el-col :span="24">
+        <el-card shadow="never">
+          <template #header>
+            <div class="head"><span>Model cost</span><span class="week-sum">selected period</span></div>
+          </template>
+          <el-table :data="modelCost" size="small">
+            <el-table-column label="Model" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span>{{ row.model }}</span>
+                <el-tag class="ml" size="small" effect="plain">{{ usageVendorOf(row.model) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="requests" label="Requests" width="110" align="right" sortable />
+            <el-table-column label="Tokens" width="120" align="right" sortable>
+              <template #default="{ row }">{{ humanNum(row.tokens) }}</template>
+            </el-table-column>
+            <el-table-column label="Cost ($)" width="120" align="right" sortable>
+              <template #default="{ row }">{{ money(row.cost) }}</template>
+            </el-table-column>
+            <el-table-column label="Avg $ / 1M" width="130" align="right" sortable>
+              <template #default="{ row }">${{ money2(row.perM) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!modelCost.length" description="No usage yet" :image-size="50" />
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 底部三栏：渠道 / 渠道占比 / 失败 -->
+    <el-row :gutter="14" class="mt">
+      <el-col :xs="24" :md="10">
         <el-card shadow="never">
           <template #header>
             <div class="head"><span>Channels</span><el-button link type="primary" size="small" @click="router.push(channelsPath)">Manage</el-button></div>
@@ -344,7 +599,18 @@ onBeforeUnmount(() => {
           <el-alert v-if="!payload?.channel_stats?.length" class="mt" title="No channels configured" type="info" :closable="false" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :md="8">
+      <el-col :xs="24" :md="7">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="head"><span>Share by channel</span><span class="week-sum">tokens</span></div>
+          </template>
+          <template v-if="channelShare.length">
+            <div ref="channelEl" style="height: 300px"></div>
+          </template>
+          <el-empty v-else description="No usage yet" :image-size="60" />
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :md="7">
         <el-card shadow="never">
           <template #header>
             <div class="head">
@@ -451,12 +717,27 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--ll-muted);
 }
-.model-item {
-  margin-bottom: 12px;
-}
-.model-head {
+.rank-item {
   display: flex;
-  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 5px 0;
+}
+.rank-no {
+  width: 20px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--ll-muted);
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+.rank-body {
+  flex: 1;
+  min-width: 0;
+}
+.rank-head {
+  display: flex;
+  align-items: center;
   gap: 8px;
   font-size: 13px;
 }
@@ -465,11 +746,38 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
-.model-val {
+.vendor {
+  font-size: 11px;
   color: var(--ll-muted);
+  border: 1px solid var(--ll-soft);
+  border-radius: 4px;
+  padding: 0 5px;
   white-space: nowrap;
 }
+.rank-val {
+  color: var(--ll-ink);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.rank-share {
+  width: 46px;
+  text-align: right;
+  color: var(--ll-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.change {
+  width: 54px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.change.up { color: #6f9a86; }
+.change.down { color: #c9808a; }
+.change.new { color: var(--el-color-primary); }
 .bar {
   height: 6px;
   border-radius: 3px;
@@ -480,7 +788,7 @@ onBeforeUnmount(() => {
 .bar-inner {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, #8b93d6, #b5a7dd);
+  transition: width .3s ease;
 }
 .mt {
   margin-top: 12px;
@@ -495,5 +803,6 @@ onBeforeUnmount(() => {
 .dim {
   font-weight: normal;
   font-size: 12px;
+  color: var(--ll-muted);
 }
 </style>
