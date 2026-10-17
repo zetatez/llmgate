@@ -61,6 +61,7 @@ export const portalApi = {
     userApi.put<DataEnvelope<string>>(`/routes/${id}`, d).then(unwrap),
   removeRoute: (id: number) => userApi.delete(`/routes/${id}`),
   teamUsage: (days: number) => userApi.get<DataEnvelope<TeamUsage[]>>('/usage/by-user', { params: { days } }).then(unwrap),
+  teamUsageByModel: (days: number) => userApi.get<DataEnvelope<UserModelUsage[]>>('/usage/by-user-model', { params: { days } }).then(unwrap),
   keys: () => userApi.get<DataEnvelope<UserKey[]>>('/keys').then(unwrap),
   addKeys: (channelId: number, keys: Array<{ name?: string; source?: string; remark?: string; key: string }>) =>
     userApi.post<DataEnvelope<{ added: number }>>('/keys', { channel_id: channelId, keys }).then(unwrap),

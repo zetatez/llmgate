@@ -29,6 +29,7 @@ func RegisterUserResourceRoutes(g *gin.RouterGroup, a *app.App) {
 	g.DELETE("/routes/:id", userDeleteRoute(a))
 
 	g.GET("/usage/by-user", userUsageByUser(a))
+	g.GET("/usage/by-user-model", userUsageByUserModel(a))
 }
 
 // ---------------- 渠道（套餐） ----------------
@@ -414,6 +415,28 @@ func userUsageByUser(a *app.App) gin.HandlerFunc {
 			from = dayStartOffset(days - 1)
 		}
 		list, err := store.UsageByUser(a.DB, from, 0)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": list})
+	}
+}
+
+// userUsageByUserModel 返回 用户×模型 的用量明细（所有人可见），供 Team Usage 下钻。
+func userUsageByUserModel(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		days := 7
+		if v := c.Query("days"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 365 {
+				days = n
+			}
+		}
+		var from int64
+		if days > 0 {
+			from = dayStartOffset(days - 1)
+		}
+		list, err := store.UsageByUserModel(a.DB, from, 0)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

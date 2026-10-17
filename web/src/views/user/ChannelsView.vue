@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { portalApi } from '../../api'
 import type { UserChannel } from '../../api'
 
+const router = useRouter()
 const list = ref<UserChannel[]>([])
 const loading = ref(false)
 
@@ -46,6 +48,10 @@ async function remove(c: UserChannel) {
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
 }
 
+function openKeys(c: UserChannel) {
+  router.push({ path: '/user/keys', query: { channel: String(c.id) } })
+}
+
 onMounted(load)
 </script>
 
@@ -78,8 +84,9 @@ onMounted(load)
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="Actions" width="130" fixed="right">
+      <el-table-column label="Actions" width="190" fixed="right">
         <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="openKeys(row)">Keys</el-button>
           <template v-if="row.is_mine">
             <el-button link type="primary" size="small" @click="openEdit(row)">Edit</el-button>
             <el-button link type="danger" size="small" @click="remove(row)">Delete</el-button>

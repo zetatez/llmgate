@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { portalApi } from '../../api'
-import type { TeamUsage } from '../../api'
+import type { TeamUsage, UserModelUsage } from '../../api'
 
 const rows = ref<TeamUsage[]>([])
+const byModel = ref<UserModelUsage[]>([])
 const loading = ref(false)
 const days = ref(7)
 
@@ -31,9 +32,19 @@ const totals = computed(() =>
   }), { users: 0, requests: 0, success: 0, prompt: 0, completion: 0, total: 0, cost: 0 }),
 )
 
+function modelsFor(userID: number): UserModelUsage[] {
+  return byModel.value.filter((m) => m.user_id === userID).sort((a, b) => b.total_tokens - a.total_tokens)
+}
+
 async function load() {
   loading.value = true
-  try { rows.value = await portalApi.teamUsage(days.value) } finally { loading.value = false }
+  try {
+    const [u, m] = await Promise.all([portalApi.teamUsage(days.value), portalApi.teamUsageByModel(days.value)])
+    rows.value = u
+    byModel.value = m
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(load)
@@ -61,7 +72,27 @@ onMounted(load)
     </el-row>
 
     <el-card shadow="never" class="mt">
-      <el-table :data="rows" size="small">
+      <el-table :data="rows" size="small" row-key="user_id">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <el-table :data="modelsFor(row.user_id)" size="small" class="inner-table">
+              <el-table-column prop="model" label="Model" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="requests" label="Requests" width="110" align="right" />
+              <el-table-column label="Upload tokens" width="140" align="right">
+                <template #default="{ row: m }">{{ humanNum(m.prompt_tokens) }}</template>
+              </el-table-column>
+              <el-table-column label="Download tokens" width="150" align="right">
+                <template #default="{ row: m }">{{ humanNum(m.completion_tokens) }}</template>
+              </el-table-column>
+              <el-table-column label="Total tokens" width="130" align="right">
+                <template #default="{ row: m }">{{ humanNum(m.total_tokens) }}</template>
+              </el-table-column>
+              <el-table-column label="Cost ($)" width="110" align="right">
+                <template #default="{ row: m }">{{ money(m.cost) }}</template>
+              </el-table-column>
+            </el-table>
+          </template>
+        </el-table-column>
         <el-table-column label="User" min-width="160">
           <template #default="{ row }">{{ row.user_name || `#${row.user_id}` }}</template>
         </el-table-column>
@@ -92,5 +123,6 @@ onMounted(load)
 .sum { margin-bottom: 14px; }
 .sum-num { font-size: 22px; font-weight: 700; color: var(--ll-ink); }
 .sum-label { font-size: 12px; color: var(--ll-muted); margin-top: 2px; }
+.inner-table { margin: 4px 12px; }
 .mt { margin-top: 14px; }
 </style>

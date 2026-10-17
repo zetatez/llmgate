@@ -2,6 +2,7 @@
 
 export interface Channel {
   id: number
+  user_id: number
   name: string
   base_url: string
   adapter: string

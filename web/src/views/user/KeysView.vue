@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { portalApi } from '../../api'
 import type { UserChannel, UserKey } from '../../api'
 
+const route = useRoute()
 const keys = ref<UserKey[]>([])
 const channels = ref<UserChannel[]>([])
 const loading = ref(false)
@@ -119,7 +121,14 @@ async function test(k: UserKey) {
 
 const hasChannels = computed(() => channels.value.length > 0)
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  const q = Number(route.query.channel)
+  if (q && channels.value.some((c) => c.id === q)) {
+    openAdd()
+    dialog.channel_id = q
+  }
+})
 </script>
 
 <template>

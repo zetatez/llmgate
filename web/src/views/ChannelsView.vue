@@ -235,6 +235,11 @@ async function loadUsers() {
   try { users.value = await usersApi.list() } catch { /* keep empty */ }
 }
 
+function ownerName(id: number): string {
+  const u = users.value.find((x) => x.id === id)
+  return u ? (u.name || u.username) : `#${id}`
+}
+
 onMounted(() => {
   load()
   loadUsers()
@@ -266,6 +271,12 @@ onMounted(() => {
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="Name" width="150" />
         <el-table-column prop="base_url" label="Base URL" min-width="210" show-overflow-tooltip />
+        <el-table-column label="Owner" width="130" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag v-if="row.user_id" size="small" type="success" effect="light">{{ ownerName(row.user_id) }}</el-tag>
+            <span v-else class="dim">Admin</span>
+          </template>
+        </el-table-column>
         <el-table-column label="Status" width="70">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled === 1" @change="toggleChannel(row)" />
