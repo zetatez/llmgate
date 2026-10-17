@@ -61,6 +61,18 @@ export interface User {
   token_tail: string
   token_expires_at: number
   token_last_used_at: number
+  calls_spent: number
+  calls_earned: number
+  calls_balance: number
+  in_spent: number
+  out_spent: number
+  in_served: number
+  out_served: number
+  credit_spent: number
+  credit_earned: number
+  credit_balance: number
+  debt_floor_calls: number
+  debt_floor_credit: number
   last_login_at: number
   created_at: number
 }
@@ -85,6 +97,19 @@ export interface PortalUser {
   status: number
   last_login_at: number
   gateway_prefix: string
+  // 共享池账本
+  calls_spent: number
+  calls_earned: number
+  calls_balance: number
+  in_spent: number
+  out_spent: number
+  in_served: number
+  out_served: number
+  credit_spent: number
+  credit_earned: number
+  credit_balance: number
+  debt_floor_calls: number
+  debt_floor_credit: number
 }
 
 /** 用户端：渠道（套餐，所有人可见；本人可改） */
@@ -119,7 +144,7 @@ export interface UserRoute {
   is_mine: boolean
 }
 
-/** 共享统计：每个用户的用量（所有人可见，含费用） */
+/** 共享统计：每个用户的用量（消费 + 贡献），所有人可见 */
 export interface TeamUsage {
   user_id: number
   user_name: string
@@ -129,6 +154,10 @@ export interface TeamUsage {
   completion_tokens: number
   total_tokens: number
   cost: number
+  earned_calls: number
+  earned_in_tokens: number
+  earned_out_tokens: number
+  earned_cost: number
 }
 
 /** 用户端：本人录入的 API Key */

@@ -63,6 +63,19 @@ func gatewayAuth(a *app.App, rl *RateLimiter) gin.HandlerFunc {
 			})
 			return
 		}
+		// 共享池账本门槛：允许透支到债务下限（负数）
+		if user.CallsEarned-user.CallsSpent <= user.DebtFloorCalls {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": gin.H{"message": "call credits exhausted", "type": "calls_exhausted"},
+			})
+			return
+		}
+		if user.CreditEarned-user.CreditSpent <= user.DebtFloorCredit {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": gin.H{"message": "credit exhausted", "type": "credit_exhausted"},
+			})
+			return
+		}
 		// 按用户限流：并发额度覆盖整条请求（含流式），QPS 秒窗口计数
 		if rl != nil && rl.Enabled() {
 			if !rl.Acquire(user.ID) {
@@ -233,6 +246,7 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 	if res != nil {
 		logEntry.ChannelID = res.Channel.ID
 		logEntry.KeyID = res.KeyID
+		logEntry.KeyOwnerID = res.KeyOwnerID
 		logEntry.UpstreamModel = res.Route.UpstreamModel
 		logEntry.Status = successOrError(res.StatusCode)
 		if logEntry.Status == "error" {
@@ -241,7 +255,7 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 		parseUsage(res.Body, logEntry)
 		finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
 		if logEntry.Status == "success" {
-			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
 		}
 		touchChannelKey(a.DB, res.KeyID)
 		c.Data(res.StatusCode, contentType(res), res.Body)
@@ -287,6 +301,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	if sr != nil {
 		logEntry.ChannelID = sr.Channel.ID
 		logEntry.KeyID = sr.KeyID
+		logEntry.KeyOwnerID = sr.KeyOwnerID
 		logEntry.UpstreamModel = sr.Route.UpstreamModel
 	}
 	if sr.Passthrough != nil {
@@ -297,7 +312,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 		}
 		finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
 		if logEntry.Status == "success" {
-			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
 		}
 		ct := sr.ContentType
 		if ct == "" {
@@ -375,7 +390,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	parseUsageFromSSE(usageBuf.Bytes(), logEntry)
 	finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
 	if logEntry.Status == "success" {
-		_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+		_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
 	}
 	touchChannelKey(a.DB, logEntry.KeyID)
 }

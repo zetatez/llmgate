@@ -7,12 +7,16 @@ import (
 	"llmgate/internal/models"
 )
 
-const userCols = `id, name, remark, username, password_hash, token_hash, token_enc, token_expires_at, token_last_used_at, quota_limit, quota_used, status, last_login_at, created_at, updated_at`
+const userCols = `id, name, remark, username, password_hash, token_hash, token_enc, token_expires_at, token_last_used_at, quota_limit, quota_used, status,
+	calls_spent, calls_earned, in_spent, out_spent, in_served, out_served, credit_spent, credit_earned, debt_floor_calls, debt_floor_credit,
+	last_login_at, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*models.User, error) {
 	u := &models.User{}
 	err := row.Scan(&u.ID, &u.Name, &u.Remark, &u.Username, &u.PasswordHash, &u.TokenHash, &u.TokenEnc,
-		&u.TokenExpiresAt, &u.TokenLastUsed, &u.QuotaLimit, &u.QuotaUsed, &u.Status, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
+		&u.TokenExpiresAt, &u.TokenLastUsed, &u.QuotaLimit, &u.QuotaUsed, &u.Status,
+		&u.CallsSpent, &u.CallsEarned, &u.InSpent, &u.OutSpent, &u.InServed, &u.OutServed, &u.CreditSpent, &u.CreditEarned, &u.DebtFloorCalls, &u.DebtFloorCredit,
+		&u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -85,11 +89,13 @@ func CreateUser(db *sql.DB, u *models.User) (int64, error) {
 	return res.LastInsertId()
 }
 
-// UpdateUser 更新用户基本信息（name/remark/username/password_hash/quota_limit/status）。
+// UpdateUser 更新用户基本信息（name/remark/username/password_hash/quota_limit/status/债务下限）。
 func UpdateUser(db *sql.DB, u *models.User) error {
 	res, err := db.Exec(`
-		UPDATE users SET name=?, remark=?, username=?, password_hash=?, quota_limit=?, status=?, updated_at=? WHERE id=?`,
-		u.Name, u.Remark, u.Username, u.PasswordHash, u.QuotaLimit, u.Status, models.Now(), u.ID)
+		UPDATE users SET name=?, remark=?, username=?, password_hash=?, quota_limit=?, status=?,
+			debt_floor_calls=?, debt_floor_credit=?, updated_at=? WHERE id=?`,
+		u.Name, u.Remark, u.Username, u.PasswordHash, u.QuotaLimit, u.Status,
+		u.DebtFloorCalls, u.DebtFloorCredit, models.Now(), u.ID)
 	if err != nil {
 		return err
 	}
@@ -146,6 +152,33 @@ func DeleteUser(db *sql.DB, id int64) error {
 		return fmt.Errorf("user %d not found", id)
 	}
 	return nil
+}
+
+// ApplyUsage 在同一事务内记账：消费者累加 *_spent，贡献者（Key 归属）累加 *_earned。
+// 自用（consumer==owner）时两侧相抵（净 0）。
+func ApplyUsage(db *sql.DB, consumerID, ownerID int64, prompt, completion int64, cost float64) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE users SET
+			calls_spent = calls_spent + 1,
+			in_spent = in_spent + ?, out_spent = out_spent + ?,
+			credit_spent = credit_spent + ?, quota_used = quota_used + ?
+		WHERE id=?`, prompt, completion, cost, cost, consumerID); err != nil {
+		return err
+	}
+	if ownerID > 0 {
+		if _, err := tx.Exec(`UPDATE users SET
+				calls_earned = calls_earned + 1,
+				in_served = in_served + ?, out_served = out_served + ?,
+				credit_earned = credit_earned + ?
+			WHERE id=?`, prompt, completion, cost, ownerID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // AddUserQuota 累加用户已用额度。设了上限时在事务性条件内累加，

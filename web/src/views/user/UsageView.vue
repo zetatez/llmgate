@@ -110,6 +110,15 @@ onMounted(load)
         <el-table-column label="Cost ($)" width="110" align="right" sortable>
           <template #default="{ row }">{{ money(row.cost) }}</template>
         </el-table-column>
+        <el-table-column label="Earned calls" width="120" align="right" sortable>
+          <template #default="{ row }">{{ row.earned_calls }}</template>
+        </el-table-column>
+        <el-table-column label="Served in/out" width="150" align="right">
+          <template #default="{ row }">{{ humanNum(row.earned_in_tokens) }} / {{ humanNum(row.earned_out_tokens) }}</template>
+        </el-table-column>
+        <el-table-column label="Earned ($)" width="110" align="right" sortable>
+          <template #default="{ row }">{{ money(row.earned_cost) }}</template>
+        </el-table-column>
       </el-table>
       <el-empty v-if="!loading && !rows.length" description="No usage in the selected range" />
     </el-card>

@@ -438,6 +438,7 @@ type Result struct {
 	Channel     models.Channel
 	Route       models.ModelRoute
 	KeyID       int64
+	KeyOwnerID  int64
 	Retries     int
 }
 
@@ -485,8 +486,7 @@ func (r *Router) Candidates(ctx context.Context, displayModel string) ([]Candida
 		FROM model_routes mr
 		JOIN channels ch ON ch.id = mr.channel_id
 		WHERE mr.display_name = ? AND mr.enabled = 1 AND ch.enabled = 1
-			AND EXISTS (SELECT 1 FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.user_id = ? AND ck.enabled = 1)
-		ORDER BY mr.priority ASC, ch.priority ASC, mr.id ASC`, displayModel, r.userID)
+		ORDER BY mr.priority ASC, ch.priority ASC, mr.id ASC`, displayModel)
 	if err != nil {
 		return nil, err
 	}
@@ -555,11 +555,10 @@ func (r *Router) pickBest(cands []Candidate, excludedCh map[int64]bool, displayM
 	})
 }
 
-// pickKey 从"归属该用户"的渠道启用 Key 中加权随机选一个（跳过熔断中/该模型被拒权的 Key）并解密。
-// 多租户 BYOK：请求方只能使用自己录入的 Key（user_id = 请求用户），
-// 管理员/全局 Key（user_id=0）不参与普通用户路由。
+// pickKey 从渠道启用 Key 中加权随机选一个（跳过熔断中的 Key）并解密。
+// 共享池：所有用户的 Key 都参与路由；选中 Key 的归属用户作为"贡献者"由调用方记账。
 func (r *Router) pickKey(channelID int64, displayModel string, failedKeys map[int64]bool) (*models.ChannelKey, string, error) {
-	keys, err := store.ListChannelKeysByUser(r.db, channelID, r.userID)
+	keys, err := store.ListChannelKeys(r.db, channelID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -615,6 +614,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	var protoChannel models.Channel
 	var protoRoute models.ModelRoute
 	var protoKeyID int64
+	var protoKeyOwnerID int64
 	protoProvided := false
 	networkAttempts := 0
 	maxNetworkAttempts := 5
@@ -742,6 +742,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			protoChannel = cand.Channel
 			protoRoute = cand.Route
 			protoKeyID = key.ID
+			protoKeyOwnerID = key.UserID
 			protoProvided = true
 			continue
 		case code == http.StatusBadRequest || code == http.StatusNotFound:
@@ -760,20 +761,20 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			r.recoverChannel(&cand.Channel)
 			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			r.pen.ClearModelDeniedKey(key.ID, displayModel)
-			return &Result{StatusCode: code, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
+			return &Result{StatusCode: code, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, KeyOwnerID: key.UserID, Retries: networkAttempts}, nil
 		default:
 			// 成功（2xx）或上游 3xx：清除该渠道熔断并恢复，透传真实状态码
 			r.recoverChannel(&cand.Channel)
 			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			r.pen.ClearModelDeniedKey(key.ID, displayModel)
-			return &Result{StatusCode: resp.StatusCode, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
+			return &Result{StatusCode: resp.StatusCode, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, KeyOwnerID: key.UserID, Retries: networkAttempts}, nil
 		}
 	}
 
 	if protoProvided {
 		// 确定性协议错误：把上游 400 原样透传，客户端看到明确原因即停止无谓重试。
 		return &Result{StatusCode: http.StatusBadRequest, Body: protoBody, ContentType: protoCtype,
-			Channel: protoChannel, Route: protoRoute, KeyID: protoKeyID, Retries: networkAttempts}, nil
+			Channel: protoChannel, Route: protoRoute, KeyID: protoKeyID, KeyOwnerID: protoKeyOwnerID, Retries: networkAttempts}, nil
 	}
 	if networkAttempts > 0 {
 		if lastNetworkErr {
@@ -802,6 +803,7 @@ type StreamResult struct {
 	Channel     models.Channel
 	Route       models.ModelRoute
 	KeyID       int64
+	KeyOwnerID  int64
 	Retries     int
 }
 
@@ -822,6 +824,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	var protoChannel models.Channel
 	var protoRoute models.ModelRoute
 	var protoKeyID int64
+	var protoKeyOwnerID int64
 	protoProvided := false
 	networkAttempts := 0
 	maxNetworkAttempts := 5
@@ -885,6 +888,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				protoChannel = cand.Channel
 				protoRoute = cand.Route
 				protoKeyID = key.ID
+				protoKeyOwnerID = key.UserID
 				protoProvided = true
 				continue
 			case code == http.StatusTooManyRequests || code == http.StatusPaymentRequired || code == http.StatusForbidden:
@@ -924,7 +928,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 				r.pen.ClearModelDeniedKey(key.ID, displayModel)
 				return &StreamResult{StatusCode: code, ContentType: se.HeaderMap["Content-Type"], Passthrough: se.Body,
-					Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
+					Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, KeyOwnerID: key.UserID, Retries: networkAttempts}, nil
 			}
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -969,13 +973,13 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 		r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 		r.pen.ClearModelDeniedKey(key.ID, displayModel)
 		return &StreamResult{StatusCode: http.StatusOK, Stream: rc, Buffered: firstBuf,
-			Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, Retries: networkAttempts}, nil
+			Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, KeyOwnerID: key.UserID, Retries: networkAttempts}, nil
 	}
 
 	if protoProvided {
 		// 确定性协议错误：把上游 400 原样透传，客户端看到明确原因即停止无谓重试。
 		return &StreamResult{StatusCode: http.StatusBadRequest, ContentType: protoCtype, Passthrough: protoBody,
-			Channel: protoChannel, Route: protoRoute, KeyID: protoKeyID, Retries: networkAttempts}, nil
+			Channel: protoChannel, Route: protoRoute, KeyID: protoKeyID, KeyOwnerID: protoKeyOwnerID, Retries: networkAttempts}, nil
 	}
 	if networkAttempts > 0 {
 		if lastNetworkErr {

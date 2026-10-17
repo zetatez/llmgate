@@ -11,11 +11,11 @@ import (
 
 const logCols = `id, user_id, display_model, channel_id, key_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
 
-// queryLogSelect 附带渠道名（联表，仅查询用）
-const queryLogSelect = `lg.id, lg.user_id, COALESCE(u.name,''), lg.display_model, lg.channel_id, lg.key_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
+// queryLogSelect 附带渠道名/用户名（联表，仅查询用）
+const queryLogSelect = `lg.id, lg.user_id, COALESCE(u.name,''), lg.display_model, lg.channel_id, lg.key_id, lg.key_owner_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
 
 // insertLogCols 不含 id，交由 AUTOINCREMENT 分配。
-const insertLogCols = `user_id, display_model, channel_id, key_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
+const insertLogCols = `user_id, display_model, channel_id, key_id, key_owner_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
 
 // LogFilter 请求日志查询条件。
 type LogFilter struct {
@@ -35,14 +35,14 @@ func InsertLogs(db *sql.DB, logs []*models.RequestLog) error {
 		return nil
 	}
 	var sb strings.Builder
-	args := make([]any, 0, len(logs)*14)
+	args := make([]any, 0, len(logs)*15)
 	sb.WriteString(`INSERT INTO request_logs (` + insertLogCols + `) VALUES `)
 	for i, l := range logs {
 		if i > 0 {
 			sb.WriteString(",")
 		}
-		sb.WriteString("(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-		args = append(args, l.UserID, l.DisplayModel, l.ChannelID, l.KeyID, l.UpstreamModel,
+		sb.WriteString("(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+		args = append(args, l.UserID, l.DisplayModel, l.ChannelID, l.KeyID, l.KeyOwnerID, l.UpstreamModel,
 			l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.Cost, l.LatencyMS,
 			l.Status, l.ErrorCode, l.Stream, l.CreatedAt)
 	}
@@ -93,7 +93,7 @@ func QueryLogs(db *sql.DB, f LogFilter) ([]*models.RequestLog, error) {
 	var out []*models.RequestLog
 	for rows.Next() {
 		l := &models.RequestLog{}
-		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.ChannelName, &l.UpstreamModel,
+		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.KeyOwnerID, &l.ChannelName, &l.UpstreamModel,
 			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
 			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
 			return nil, err
@@ -476,6 +476,46 @@ func UsageByUser(db *sql.DB, from, to int64) ([]UserUsage, error) {
 	return out, rows.Err()
 }
 
+// UsageEarned 某用户作为"贡献者"在区间内被他人使用的聚合。
+type UsageEarned struct {
+	Calls int64   `json:"calls"`
+	In    int64   `json:"in_tokens"`
+	Out   int64   `json:"out_tokens"`
+	Cost  float64 `json:"cost"`
+}
+
+// UsageEarnedByUser 按贡献者(key_owner_id)聚合区间 [from,to) 的成功请求。
+func UsageEarnedByUser(db *sql.DB, from, to int64) (map[int64]UsageEarned, error) {
+	q := `SELECT key_owner_id, COUNT(*), SUM(prompt_tokens), SUM(completion_tokens), SUM(cost)
+		FROM request_logs WHERE status='success' AND key_owner_id > 0`
+	args := []any{}
+	if from > 0 {
+		q += ` AND created_at >= ?`
+		args = append(args, from)
+	}
+	if to > 0 {
+		q += ` AND created_at < ?`
+		args = append(args, to)
+	}
+	q += ` GROUP BY key_owner_id`
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]UsageEarned{}
+	for rows.Next() {
+		var id int64
+		var calls, in, oc sql.NullInt64
+		var cost sql.NullFloat64
+		if err := rows.Scan(&id, &calls, &in, &oc, &cost); err != nil {
+			return nil, err
+		}
+		out[id] = UsageEarned{Calls: calls.Int64, In: in.Int64, Out: oc.Int64, Cost: cost.Float64}
+	}
+	return out, rows.Err()
+}
+
 // ChannelDayStats 各渠道当日请求/错误数（用于健康卡片）。
 type ChannelDayStats struct {
 	ChannelID int64  `json:"channel_id"`
@@ -537,7 +577,7 @@ func RecentFailures(db *sql.DB, n int) ([]*models.RequestLog, error) {
 	var out []*models.RequestLog
 	for rows.Next() {
 		l := &models.RequestLog{}
-		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.ChannelName, &l.UpstreamModel,
+		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.KeyOwnerID, &l.ChannelName, &l.UpstreamModel,
 			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
 			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
 			return nil, err

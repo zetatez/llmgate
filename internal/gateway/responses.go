@@ -103,6 +103,7 @@ func responsesPlain(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rout
 	if res != nil {
 		logEntry.ChannelID = res.Channel.ID
 		logEntry.KeyID = res.KeyID
+		logEntry.KeyOwnerID = res.KeyOwnerID
 		logEntry.UpstreamModel = res.Route.UpstreamModel
 		logEntry.Status = successOrError(res.StatusCode)
 		if logEntry.Status == "error" {
@@ -162,7 +163,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 		}
 		finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
 		if logEntry.Status == "success" {
-			_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
 		}
 		ct := sr.ContentType
 		if ct == "" {
@@ -174,6 +175,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 	if sr != nil {
 		logEntry.ChannelID = sr.Channel.ID
 		logEntry.KeyID = sr.KeyID
+		logEntry.KeyOwnerID = sr.KeyOwnerID
 		logEntry.UpstreamModel = sr.Route.UpstreamModel
 	}
 
@@ -285,7 +287,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 
 	finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
 	if logEntry.Status == "success" {
-		_ = store.AddUserQuota(a.DB, logEntry.UserID, logEntry.Cost)
+		_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
 	}
 	touchChannelKey(a.DB, logEntry.KeyID)
 }

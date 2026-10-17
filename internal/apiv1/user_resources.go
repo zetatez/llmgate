@@ -401,7 +401,24 @@ func userDeleteRoute(a *app.App) gin.HandlerFunc {
 
 // ---------------- 共享统计（所有人可见，含费用） ----------------
 
-// userUsageByUser 返回按用户聚合的用量（请求/成功/上传/下载/合计/费用），所有登录用户可见。
+// teamUsageRow 团队统计：消费 + 贡献两个方向。
+type teamUsageRow struct {
+	UserID           int64   `json:"user_id"`
+	UserName         string  `json:"user_name"`
+	Requests         int64   `json:"requests"`
+	Success          int64   `json:"success"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	Cost             float64 `json:"cost"`
+	EarnedCalls      int64   `json:"earned_calls"`
+	EarnedIn         int64   `json:"earned_in_tokens"`
+	EarnedOut        int64   `json:"earned_out_tokens"`
+	EarnedCost       float64 `json:"earned_cost"`
+}
+
+// userUsageByUser 返回按用户聚合的用量（消费：请求/成功/上传/下载/合计/费用；
+// 贡献：被他人使用 Key 的次数/token/收益），所有登录用户可见。
 func userUsageByUser(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		days := 7
@@ -414,12 +431,41 @@ func userUsageByUser(a *app.App) gin.HandlerFunc {
 		if days > 0 {
 			from = dayStartOffset(days - 1)
 		}
-		list, err := store.UsageByUser(a.DB, from, 0)
+		consumed, err := store.UsageByUser(a.DB, from, 0)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": list})
+		earned, err := store.UsageEarnedByUser(a.DB, from, 0)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		names := userNames(a)
+		seen := map[int64]bool{}
+		out := make([]teamUsageRow, 0, len(consumed))
+		for _, u := range consumed {
+			seen[u.UserID] = true
+			row := teamUsageRow{
+				UserID: u.UserID, UserName: u.UserName, Requests: u.Requests, Success: u.Success,
+				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, Cost: u.Cost,
+			}
+			if e, ok := earned[u.UserID]; ok {
+				row.EarnedCalls, row.EarnedIn, row.EarnedOut, row.EarnedCost = e.Calls, e.In, e.Out, e.Cost
+			}
+			out = append(out, row)
+		}
+		// 仅有贡献、区间内无消费的用户也列出
+		for id, e := range earned {
+			if seen[id] {
+				continue
+			}
+			out = append(out, teamUsageRow{
+				UserID: id, UserName: names[id],
+				EarnedCalls: e.Calls, EarnedIn: e.In, EarnedOut: e.Out, EarnedCost: e.Cost,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
 	}
 }
 

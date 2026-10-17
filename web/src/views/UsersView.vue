@@ -28,7 +28,7 @@ function copyGatewayBase() {
 
 
 const dialog = reactive({ visible: false, username: '', password: '', name: '', remark: '', quota_limit: 0 })
-const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 0, status: 1 })
+const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 0, status: 1, debt_floor_calls: -50, debt_floor_credit: -5 })
 
 async function load() {
   loading.value = true
@@ -65,13 +65,19 @@ async function toggleUserStatus(u: User) {
 }
 
 function openEdit(u: User) {
-  Object.assign(editDialog, { visible: true, id: u.id, username: u.username, password: '', name: u.name, remark: u.remark, quota_limit: u.quota_limit, status: u.status })
+  Object.assign(editDialog, {
+    visible: true, id: u.id, username: u.username, password: '', name: u.name, remark: u.remark,
+    quota_limit: u.quota_limit, status: u.status,
+    debt_floor_calls: u.debt_floor_calls ?? -50, debt_floor_credit: u.debt_floor_credit ?? -5,
+  })
 }
 
 async function saveEdit() {
   const payload: Record<string, unknown> = {
     username: editDialog.username, name: editDialog.name, remark: editDialog.remark,
     quota_limit: +editDialog.quota_limit || 0, status: editDialog.status,
+    debt_floor_calls: Math.round(+editDialog.debt_floor_calls || 0),
+    debt_floor_credit: +editDialog.debt_floor_credit || 0,
   }
   if (editDialog.password) {
     if (editDialog.password.length < 6) { ElMessage.warning('Password must be at least 6 characters'); return }
@@ -217,6 +223,16 @@ onMounted(() => {
             <span>{{ row.quota_used.toFixed(4) }} / {{ row.quota_limit ? row.quota_limit : 'unlimited' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="Calls" width="90" align="right">
+          <template #default="{ row }">
+            <span :style="{ color: row.calls_balance < 0 ? '#c9808a' : '' }">{{ row.calls_balance }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="Credit ($)" width="110" align="right">
+          <template #default="{ row }">
+            <span :style="{ color: row.credit_balance < 0 ? '#c9808a' : '' }">{{ row.credit_balance.toFixed(4) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="Status" width="80">
           <template #default="{ row }">
             <el-switch :model-value="row.status === 1" @change="toggleUserStatus(row)" />
@@ -258,6 +274,13 @@ onMounted(() => {
         <el-form-item label="Remark"><el-input v-model="editDialog.remark" /></el-form-item>
         <el-form-item label="Quota limit ($)">
           <el-input-number v-model="editDialog.quota_limit" :min="0" :precision="4" />
+        </el-form-item>
+        <el-form-item label="Debt floor (calls)">
+          <el-input-number v-model="editDialog.debt_floor_calls" :min="-100000" :max="0" />
+          <span class="tip">negative = allowed debt</span>
+        </el-form-item>
+        <el-form-item label="Debt floor ($)">
+          <el-input-number v-model="editDialog.debt_floor_credit" :min="-100000" :max="0" :precision="4" />
         </el-form-item>
         <el-form-item label="Status">
           <el-switch v-model="editDialog.status" :active-value="1" :inactive-value="0" active-text="Enabled" inactive-text="Disabled" />

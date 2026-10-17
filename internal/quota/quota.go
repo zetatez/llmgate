@@ -3,10 +3,11 @@ package quota
 
 import "encoding/json"
 
-// ModelPrice 某模型的单价（美元 / 百万 tokens）。
+// ModelPrice 某模型的单价：输入/输出（美元 / 百万 tokens）与可选的单次调用费（美元/次）。
 type ModelPrice struct {
 	Input  float64 `json:"input"`
 	Output float64 `json:"output"`
+	Call   float64 `json:"call,omitempty"`
 }
 
 // ParsePricing 解析 settings 中存量的 model_pricing JSON。
@@ -23,17 +24,23 @@ func ParsePricing(s string) (map[string]ModelPrice, error) {
 }
 
 // EstimateCost 估算一次请求成本，按全局定价（model_pricing，键=对外模型名）。
+// 成本 = 单次调用费(可选) + 输入 token 费 + 输出 token 费。
 func EstimateCost(pricing map[string]ModelPrice, model string, promptTokens, completionTokens int64) float64 {
 	p, ok := pricing[model]
 	if !ok {
 		return 0
 	}
-	return float64(promptTokens)/1e6*p.Input + float64(completionTokens)/1e6*p.Output
+	return p.Call + float64(promptTokens)/1e6*p.Input + float64(completionTokens)/1e6*p.Output
 }
 
 // EstimateCostRoute 估算一次请求成本：路由自定义单价（priceIn/priceOut 非 nil）优先，
-// 否则回退全局定价（model_pricing 按对外模型名）。都没有则 0。
+// 否则回退全局定价（model_pricing 按对外模型名）。单次调用费统一取全局定价的 call。
 func EstimateCostRoute(pricing map[string]ModelPrice, priceIn, priceOut *float64, model string, promptTokens, completionTokens int64) float64 {
+	mp, hasModel := pricing[model]
+	callFee := 0.0
+	if hasModel {
+		callFee = mp.Call
+	}
 	var input, output float64
 	switch {
 	case priceIn != nil && priceOut != nil:
@@ -43,11 +50,10 @@ func EstimateCostRoute(pricing map[string]ModelPrice, priceIn, priceOut *float64
 	case priceOut != nil:
 		output = *priceOut
 	default:
-		p, ok := pricing[model]
-		if !ok {
+		if !hasModel {
 			return 0
 		}
-		input, output = p.Input, p.Output
+		input, output = mp.Input, mp.Output
 	}
-	return float64(promptTokens)/1e6*input + float64(completionTokens)/1e6*output
+	return callFee + float64(promptTokens)/1e6*input + float64(completionTokens)/1e6*output
 }

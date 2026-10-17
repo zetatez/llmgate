@@ -17,9 +17,20 @@ type User struct {
 	QuotaLimit     float64 `json:"quota_limit"`
 	QuotaUsed      float64 `json:"quota_used"`
 	Status         int     `json:"status"` // 1 启用 / 0 禁用
-	LastLoginAt    int64   `json:"last_login_at"`
-	CreatedAt      int64   `json:"created_at"`
-	UpdatedAt      int64   `json:"updated_at"`
+	// 共享池双向账本
+	CallsSpent      int64   `json:"calls_spent"`
+	CallsEarned     int64   `json:"calls_earned"`
+	InSpent         int64   `json:"in_spent"`
+	OutSpent        int64   `json:"out_spent"`
+	InServed        int64   `json:"in_served"`
+	OutServed       int64   `json:"out_served"`
+	CreditSpent     float64 `json:"credit_spent"`
+	CreditEarned    float64 `json:"credit_earned"`
+	DebtFloorCalls  int64   `json:"debt_floor_calls"`
+	DebtFloorCredit float64 `json:"debt_floor_credit"`
+	LastLoginAt     int64   `json:"last_login_at"`
+	CreatedAt       int64   `json:"created_at"`
+	UpdatedAt       int64   `json:"updated_at"`
 }
 
 // Channel 表示一个上游套餐（渠道）。
@@ -80,6 +91,7 @@ type RequestLog struct {
 	DisplayModel     string  `json:"display_model"`
 	ChannelID        int64   `json:"channel_id"`
 	KeyID            int64   `json:"key_id"`
+	KeyOwnerID       int64   `json:"key_owner_id"` // 贡献者（Key 归属用户），0=平台
 	ChannelName      string  `json:"channel_name"` // 查询时联表填充，非存储字段
 	UpstreamModel    string  `json:"upstream_model"`
 	PromptTokens     int64   `json:"prompt_tokens"`
