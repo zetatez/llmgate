@@ -275,3 +275,31 @@ func TestPureBoolToInt(t *testing.T) {
 		t.Fatal("upstreamModelifEmpty wrong")
 	}
 }
+
+// TestListModelsSharedPool 没有本人 Key 时，也应通过共享池看到可用模型。
+func TestListModelsSharedPool(t *testing.T) {
+	srv := chatStub(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	e := newTestEnv(t, srv.URL)
+	// 删除本人 Key，仅保留管理员/其他用户的共享 Key
+	if _, err := e.db.Exec(`DELETE FROM channel_keys`); err != nil {
+		t.Fatal(err)
+	}
+	var chID int64
+	if err := e.db.QueryRow(`SELECT id FROM channels LIMIT 1`).Scan(&chID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`INSERT INTO channel_keys (channel_id,user_id,name,source,remark,api_key_enc,enabled,weight,last_used_at,created_at)
+		VALUES (?, 0, '', '', '', 'shared-enc', 1, 1, 0, 0)`, chID); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.doAuth(http.MethodGet, "/v1/models", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"m"`) {
+		t.Fatalf("expected shared-pool model m, got %s", rec.Body.String())
+	}
+}

@@ -134,14 +134,13 @@ func buildPassHeaders(h http.Header) map[string]string {
 
 func handleListModels(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 只对外暴露"该用户真正可路由"的模型：路由+渠道均启用，且用户在该渠道录入过启用 Key
-		userAny, _ := c.Get(ctxUserKey)
-		user := userAny.(*models.User)
+		// 共享池：只要渠道下有任一启用 Key（含管理员/其他用户的 Key）即可用，
+		// 不要求当前用户自己在该渠道录入过 Key。
 		rows, err := a.DB.Query(`
 			SELECT DISTINCT mr.display_name FROM model_routes mr
 			JOIN channels ch ON ch.id = mr.channel_id
 			WHERE mr.enabled = 1 AND ch.enabled = 1
-				AND EXISTS (SELECT 1 FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.user_id = ? AND ck.enabled = 1)`, user.ID)
+				AND EXISTS (SELECT 1 FROM channel_keys ck WHERE ck.channel_id = ch.id AND ck.enabled = 1)`)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "query models failed"})
 			return
