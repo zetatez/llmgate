@@ -260,7 +260,6 @@ export interface DashboardPayload {
   week_models: UsageModelPoint[]
   models: ModelUsage[]
   models_prev: ModelUsage[]
-  channel_usage: ChannelUsage[]
   hours: UsageHourPoint[]
   today: UsageSummary
   periods: { today: UsageSummary; week: UsageSummary; month: UsageSummary }
@@ -274,15 +273,6 @@ export interface UsageModelPoint {
   model: string
   requests: number
   tokens: number
-}
-
-/** 区间内按渠道聚合的用量。 */
-export interface ChannelUsage {
-  channel_id: number
-  name: string
-  requests: number
-  total_tokens: number
-  cost: number
 }
 
 export interface SettingItem {

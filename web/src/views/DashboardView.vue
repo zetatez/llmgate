@@ -7,7 +7,8 @@ import type { DashboardPayload } from '../api'
 import { ElMessage } from 'element-plus'
 import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
 import { usageVendorOf } from '../utils/vendor'
-import { PALETTE, AXIS_TOOLTIP, ITEM_TOOLTIP } from '../utils/chart'
+import { PALETTE, AXIS_TOOLTIP, buildDailyStack } from '../utils/chart'
+import type { DailyTokenPoint } from '../utils/chart'
 
 const router = useRouter()
 const payload = ref<DashboardPayload | null>(null)
@@ -21,8 +22,6 @@ const chartEl = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 const shareEl = ref<HTMLDivElement>()
 let shareChart: echarts.ECharts | null = null
-const channelEl = ref<HTMLDivElement>()
-let channelChart: echarts.ECharts | null = null
 const hourEl = ref<HTMLDivElement>()
 let hourChart: echarts.ECharts | null = null
 const hourMode = ref<'cost' | 'tokens'>('cost')
@@ -70,7 +69,6 @@ async function load() {
     renderChart()
     renderHourChart()
     renderShareChart()
-    renderChannelChart()
   }
 }
 
@@ -164,39 +162,26 @@ const modelRanks = computed<ModelRank[]>(() => {
     })
 })
 
-// 厂商占比（market share by vendor）
-const vendorShare = computed(() => {
+// 按日份额：模型 / 厂商 / 渠道
+const dailyModelPoints = computed<DailyTokenPoint[]>(() =>
+  (payload.value?.week_models || []).map((p) => ({ date: p.date, name: p.model, tokens: p.tokens })),
+)
+
+const dailyVendorPoints = computed<DailyTokenPoint[]>(() => {
   const m = new Map<string, number>()
-  for (const r of payload.value?.models || []) {
-    const v = usageVendorOf(r.model)
-    m.set(v, (m.get(v) || 0) + r.total_tokens)
+  for (const p of payload.value?.week_models || []) {
+    const key = p.date + '\u0000' + usageVendorOf(p.model)
+    m.set(key, (m.get(key) || 0) + p.tokens)
   }
-  const arr = [...m.entries()].sort((a, b) => b[1] - a[1])
-  const top = arr.slice(0, 8)
-  const rest = arr.slice(8).reduce((s, [, v]) => s + v, 0)
-  if (rest > 0) top.push(['Other', rest])
-  return top.map(([name, value]) => ({ name, value }))
+  return [...m.entries()].map(([k, tokens]) => {
+    const [date, name] = k.split('\u0000')
+    return { date, name, tokens }
+  })
 })
 
-// 模型占比（market share by model）
-const modelShare = computed(() => {
-  const arr = [...(payload.value?.models || [])].sort((a, b) => b.total_tokens - a.total_tokens)
-  const top = arr.slice(0, 8).map((m) => ({ name: m.model, value: m.total_tokens }))
-  const rest = arr.slice(8).reduce((s, m) => s + m.total_tokens, 0)
-  if (rest > 0) top.push({ name: 'Other', value: rest })
-  return top.filter((d) => d.value > 0)
-})
-
-// 渠道占比（market share by channel）
-const channelShare = computed(() => {
-  const arr = [...(payload.value?.channel_usage || [])].sort((a, b) => b.total_tokens - a.total_tokens)
-  const top = arr.slice(0, 8).map((c) => ({ name: c.name, value: c.total_tokens }))
-  const rest = arr.slice(8).reduce((s, c) => s + c.total_tokens, 0)
-  if (rest > 0) top.push({ name: 'Other', value: rest })
-  return top.filter((d) => d.value > 0)
-})
-
-const shareData = computed(() => (shareMode.value === 'model' ? modelShare.value : vendorShare.value))
+const sharePoints = computed(() =>
+  shareMode.value === 'model' ? dailyModelPoints.value : dailyVendorPoints.value,
+)
 
 // 各模型成本：请求 / token / 花费 / 平均每 1M token 成本
 const modelCost = computed(() => {
@@ -311,98 +296,59 @@ function renderChart() {
   })
 }
 
-async function renderShareChart() {
-  await nextTick()
-  if (!shareEl.value) {
-    shareChart?.dispose()
-    shareChart = null
-    return
+// 按日堆叠柱：时间线 + 垂直条形图
+function renderDailyStack(
+  el: HTMLDivElement | undefined,
+  dates: string[],
+  points: DailyTokenPoint[],
+  topN: number,
+  current: echarts.ECharts | null,
+): echarts.ECharts | null {
+  if (!el) {
+    current?.dispose()
+    return null
   }
-  const data = shareData.value
-  if (!data.length) {
-    shareChart?.dispose()
-    shareChart = null
-    return
+  const { names, series } = buildDailyStack(dates, points, topN)
+  if (!dates.length || !names.length) {
+    current?.dispose()
+    return null
   }
-  shareChart?.dispose()
-  shareChart = echarts.init(shareEl.value)
-  const total = data.reduce((s, d) => s + d.value, 0) || 1
-  shareChart.setOption({
+  current?.dispose()
+  const c = echarts.init(el)
+  c.setOption({
     tooltip: {
-      ...ITEM_TOOLTIP,
-      formatter: (p: any) => `${p.marker}${p.name}: ${humanNum(p.value)} token (${((p.value / total) * 100).toFixed(1)}%)`,
-    },
-    legend: {
-      type: 'scroll', orient: 'vertical', right: 0, top: 'center',
-      itemWidth: 9, itemHeight: 9, itemGap: 8,
-      textStyle: { color: '#8b909c', fontSize: 11 },
-      formatter: (name: string) => {
-        const d = shareData.value.find((v) => v.name === name)
-        const raw = d ? (d.value / total) * 100 : 0
-        const pct = raw > 0 && raw < 1 ? raw.toFixed(2) : raw.toFixed(1)
-        const label = name.length > 24 ? name.slice(0, 23) + '…' : name
-        return `${label}  ${pct}%`
+      ...AXIS_TOOLTIP,
+      formatter: (params: any[]) => {
+        const total = params.reduce((s, p) => s + (p.value || 0), 0)
+        let html = (params[0]?.axisValue ?? '') + '<br/>'
+        for (const p of params) {
+          const share = total > 0 ? ((p.value / total) * 100).toFixed(1) : '0'
+          html += `${p.marker}${p.seriesName}: ${humanNum(p.value)} (${share}%)<br/>`
+        }
+        return html + `<b>Total: ${humanNum(total)}</b>`
       },
     },
-    series: [{
-      type: 'pie',
-      radius: ['52%', '78%'],
-      center: ['32%', '50%'],
-      avoidLabelOverlap: true,
-      itemStyle: { borderColor: 'rgba(18,22,32,.9)', borderWidth: 2 },
-      label: { show: false },
-      labelLine: { show: false },
-      color: PALETTE,
-      data: data.map((d) => ({ name: d.name, value: d.value })),
-    }],
+    legend: { type: 'scroll', top: 0, left: 0, right: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 12, textStyle: { color: '#8b909c', fontSize: 11 } },
+    grid: { left: 48, right: 12, top: 34, bottom: 26 },
+    xAxis: { type: 'category', data: dates, axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c', interval: dates.length <= 10 ? 0 : ('auto' as const), formatter: (v: string) => v.slice(5) } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
+    series: names.map((name, i) => ({
+      name,
+      type: 'bar',
+      stack: 'share',
+      barMaxWidth: 26,
+      data: series[i],
+      itemStyle: { color: PALETTE[i % PALETTE.length] },
+    })),
   })
-  shareChart.resize()
+  c.resize()
+  return c
 }
 
-async function renderChannelChart() {
+async function renderShareChart() {
   await nextTick()
-  if (!channelEl.value) {
-    channelChart?.dispose()
-    channelChart = null
-    return
-  }
-  const data = channelShare.value
-  if (!data.length) {
-    channelChart?.dispose()
-    channelChart = null
-    return
-  }
-  channelChart?.dispose()
-  channelChart = echarts.init(channelEl.value)
-  const total = data.reduce((s, d) => s + d.value, 0) || 1
-  channelChart.setOption({
-    tooltip: {
-      ...ITEM_TOOLTIP,
-      formatter: (p: any) => `${p.marker}${p.name}: ${humanNum(p.value)} token (${((p.value / total) * 100).toFixed(1)}%)`,
-    },
-    legend: {
-      type: 'scroll', orient: 'vertical', right: 0, top: 'center',
-      itemWidth: 9, itemHeight: 9, itemGap: 8,
-      textStyle: { color: '#8b909c', fontSize: 11 },
-      formatter: (name: string) => {
-        const d = channelShare.value.find((v) => v.name === name)
-        const raw = d ? (d.value / total) * 100 : 0
-        const pct = raw > 0 && raw < 1 ? raw.toFixed(2) : raw.toFixed(1)
-        return `${name}  ${pct}%`
-      },
-    },
-    series: [{
-      type: 'pie',
-      radius: ['52%', '78%'],
-      center: ['32%', '50%'],
-      itemStyle: { borderColor: 'rgba(18,22,32,.9)', borderWidth: 2 },
-      label: { show: false },
-      labelLine: { show: false },
-      color: PALETTE,
-      data: data.map((d) => ({ name: d.name, value: d.value })),
-    }],
-  })
-  channelChart.resize()
+  const dates = payload.value?.week.map((p) => p.date) || []
+  shareChart = renderDailyStack(shareEl.value, dates, sharePoints.value, 7, shareChart)
 }
 
 watch(shareMode, () => renderShareChart())
@@ -411,7 +357,6 @@ function onResize() {
   chart?.resize()
   hourChart?.resize()
   shareChart?.resize()
-  channelChart?.resize()
 }
 
 onMounted(async () => {
@@ -423,7 +368,6 @@ onBeforeUnmount(() => {
   chart?.dispose()
   hourChart?.dispose()
   shareChart?.dispose()
-  channelChart?.dispose()
 })
 </script>
 
@@ -539,7 +483,7 @@ onBeforeUnmount(() => {
               </el-radio-group>
             </div>
           </template>
-          <template v-if="shareData.length">
+          <template v-if="sharePoints.length">
             <div ref="shareEl" style="height: 300px"></div>
           </template>
           <el-empty v-else description="No usage yet" :image-size="60" />
@@ -577,9 +521,9 @@ onBeforeUnmount(() => {
       </el-col>
     </el-row>
 
-    <!-- 底部三栏：渠道 / 渠道占比 / 失败 -->
+    <!-- 底部两栏：渠道 / 失败 -->
     <el-row :gutter="14" class="mt">
-      <el-col :xs="24" :md="10">
+      <el-col :xs="24" :md="12">
         <el-card shadow="never">
           <template #header>
             <div class="head"><span>Channels</span><el-button link type="primary" size="small" @click="router.push(channelsPath)">Manage</el-button></div>
@@ -599,18 +543,7 @@ onBeforeUnmount(() => {
           <el-alert v-if="!payload?.channel_stats?.length" class="mt" title="No channels configured" type="info" :closable="false" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :md="7">
-        <el-card shadow="never" class="chart-card">
-          <template #header>
-            <div class="head"><span>Share by channel</span><span class="week-sum">tokens</span></div>
-          </template>
-          <template v-if="channelShare.length">
-            <div ref="channelEl" style="height: 300px"></div>
-          </template>
-          <el-empty v-else description="No usage yet" :image-size="60" />
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="7">
+      <el-col :xs="24" :md="12">
         <el-card shadow="never">
           <template #header>
             <div class="head">

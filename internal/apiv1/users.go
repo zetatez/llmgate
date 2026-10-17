@@ -86,12 +86,14 @@ func listUsers(a *app.App) gin.HandlerFunc {
 func createUser(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var b struct {
-			Name       string  `json:"name"`
-			Remark     string  `json:"remark"`
-			Username   string  `json:"username"`
-			Password   string  `json:"password"`
-			QuotaLimit float64 `json:"quota_limit"`
-			Status     *int    `json:"status"`
+			Name            string   `json:"name"`
+			Remark          string   `json:"remark"`
+			Username        string   `json:"username"`
+			Password        string   `json:"password"`
+			QuotaLimit      float64  `json:"quota_limit"`
+			Status          *int     `json:"status"`
+			DebtFloorCalls  *int64   `json:"debt_floor_calls"`
+			DebtFloorCredit *float64 `json:"debt_floor_credit"`
 		}
 		if !decode(c, &b) {
 			return
@@ -133,6 +135,13 @@ func createUser(a *app.App) gin.HandlerFunc {
 		u := &models.User{
 			Name: b.Name, Remark: b.Remark, Username: username, PasswordHash: pwHash,
 			TokenHash: app.HashToken("placeholder:" + placeholder), QuotaLimit: b.QuotaLimit, Status: status,
+			DebtFloorCalls: store.DefaultDebtFloorCalls, DebtFloorCredit: store.DefaultDebtFloorCredit,
+		}
+		if b.DebtFloorCalls != nil {
+			u.DebtFloorCalls = *b.DebtFloorCalls
+		}
+		if b.DebtFloorCredit != nil {
+			u.DebtFloorCredit = *b.DebtFloorCredit
 		}
 		id, err := store.CreateUser(a.DB, u)
 		if err != nil {

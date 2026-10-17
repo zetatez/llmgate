@@ -552,61 +552,6 @@ func ChannelStatsToday(db *sql.DB) ([]ChannelDayStats, error) {
 	return out, rows.Err()
 }
 
-// ChannelUsage 渠道在指定区间内的实际用量（仅成功请求）。
-type ChannelUsage struct {
-	ChannelID int64   `json:"channel_id"`
-	Name      string  `json:"name"`
-	Requests  int64   `json:"requests"`
-	Tokens    int64   `json:"total_tokens"`
-	Cost      float64 `json:"cost"`
-}
-
-func channelUsageRange(db *sql.DB, userID, from, to int64) ([]ChannelUsage, error) {
-	args := []any{from}
-	q := `
-		SELECT ch.id, ch.name, COUNT(*),
-			SUM(lg.total_tokens), SUM(lg.cost)
-		FROM request_logs lg
-		JOIN channels ch ON ch.id = lg.channel_id
-		WHERE lg.status = 'success' AND lg.created_at >= ?`
-	if userID > 0 {
-		q += ` AND lg.user_id = ?`
-		args = append(args, userID)
-	}
-	if to > 0 {
-		q += ` AND lg.created_at < ?`
-		args = append(args, to)
-	}
-	q += ` GROUP BY ch.id ORDER BY SUM(lg.total_tokens) DESC`
-	rows, err := db.Query(q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []ChannelUsage
-	for rows.Next() {
-		var u ChannelUsage
-		var req, tok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&u.ChannelID, &u.Name, &req, &tok, &cost); err != nil {
-			return nil, err
-		}
-		u.Requests, u.Tokens, u.Cost = req.Int64, tok.Int64, cost.Float64
-		out = append(out, u)
-	}
-	return out, rows.Err()
-}
-
-// UsageByChannel 全平台渠道用量（按 token 降序）。
-func UsageByChannel(db *sql.DB, from, to int64) ([]ChannelUsage, error) {
-	return channelUsageRange(db, 0, from, to)
-}
-
-// UserUsageByChannel 某用户在各渠道上的用量（按 token 降序）。
-func UserUsageByChannel(db *sql.DB, userID, from, to int64) ([]ChannelUsage, error) {
-	return channelUsageRange(db, userID, from, to)
-}
-
 // DeleteOldLogs 删除创建时间早于 cutoff 的请求日志，返回删除条数（日志保留清理任务）。
 func DeleteOldLogs(db *sql.DB, cutoff int64) (int64, error) {
 	res, err := db.Exec(`DELETE FROM request_logs WHERE created_at < ?`, cutoff)

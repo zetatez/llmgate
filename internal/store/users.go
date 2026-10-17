@@ -77,13 +77,27 @@ func GetUserByUsername(db *sql.DB, username string) (*models.User, error) {
 	return u, err
 }
 
+// 默认透支额度：允许用户在没有贡献时先使用，避免很快触发 calls/credit exhausted。
+const (
+	DefaultDebtFloorCalls  int64 = -1000
+	DefaultDebtFloorCredit       = -50
+)
+
 // CreateUser 创建用户，返回新 id。
 func CreateUser(db *sql.DB, u *models.User) (int64, error) {
+	floorCalls := u.DebtFloorCalls
+	if floorCalls == 0 {
+		floorCalls = DefaultDebtFloorCalls
+	}
+	floorCredit := u.DebtFloorCredit
+	if floorCredit == 0 {
+		floorCredit = DefaultDebtFloorCredit
+	}
 	res, err := db.Exec(`
-		INSERT INTO users (name, remark, username, password_hash, token_hash, token_enc, token_expires_at, token_last_used_at, quota_limit, quota_used, status, last_login_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?)`,
+		INSERT INTO users (name, remark, username, password_hash, token_hash, token_enc, token_expires_at, token_last_used_at, quota_limit, quota_used, status, debt_floor_calls, debt_floor_credit, last_login_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, ?)`,
 		u.Name, u.Remark, u.Username, u.PasswordHash, u.TokenHash, u.TokenEnc, u.TokenExpiresAt,
-		u.QuotaLimit, u.Status, u.LastLoginAt, models.Now(), models.Now())
+		u.QuotaLimit, u.Status, floorCalls, floorCredit, u.LastLoginAt, models.Now(), models.Now())
 	if err != nil {
 		return 0, err
 	}

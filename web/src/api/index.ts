@@ -1,6 +1,6 @@
 import { adminApi, userApi } from './client'
 import type {
-  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, ChannelUsage, DashboardPayload, MemberStat, ModelPrice, ModelRoute,
+  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelPrice, ModelRoute,
   ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User,
   UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken,
 } from './types'
@@ -33,7 +33,7 @@ export const modelRoutesApi = {
 
 export const usersApi = {
   list: () => adminApi.get<DataEnvelope<User[]>>('/users').then(unwrap),
-  create: (d: { name?: string; remark?: string; username: string; password: string; quota_limit: number }) =>
+  create: (d: { name?: string; remark?: string; username: string; password: string; quota_limit: number; debt_floor_calls?: number; debt_floor_credit?: number }) =>
     adminApi.post<DataEnvelope<User>>('/users', d).then(unwrap),
   update: (id: number, d: Partial<User> & { password?: string }) => adminApi.put<DataEnvelope<User>>(`/users/${id}`, d).then(unwrap),
   remove: (id: number) => adminApi.delete(`/users/${id}`),
@@ -132,4 +132,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, ChannelUsage, DashboardPayload, MemberStat, ModelPrice, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken }
+export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelPrice, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken }

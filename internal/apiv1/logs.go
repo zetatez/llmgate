@@ -140,8 +140,7 @@ type dashboardPayload struct {
 	Today          store.UsageSummary            `json:"today"`
 	Periods        map[string]store.UsageSummary `json:"periods"` // today / week / month
 	ChannelStats   []store.ChannelDayStats       `json:"channel_stats"`
-	ChannelUsage   []store.ChannelUsage          `json:"channel_usage"` // 区间内按渠道聚合
-	Failures       []*models.RequestLog          `json:"failures"`      // 最近失败明细
+	Failures       []*models.RequestLog          `json:"failures"` // 最近失败明细
 	RecentFailures int                           `json:"recent_failures"`
 }
 
@@ -173,7 +172,6 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 			modelPrev    []store.ModelUsage
 			hours        []store.UsageHourPoint
 			channelStats []store.ChannelDayStats
-			channelUsage []store.ChannelUsage
 			today        store.UsageSummary
 			weekSum      store.UsageSummary
 			monthSum     store.UsageSummary
@@ -208,9 +206,6 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 				monthSum, err = store.UserUsageSummary(a.DB, userID, dayStartT.AddDate(0, 0, -29).Unix())
 			}
 			if err == nil {
-				channelUsage, err = store.UserUsageByChannel(a.DB, userID, curFrom, 0)
-			}
-			if err == nil {
 				channelStats, err = store.UserChannelStatsToday(a.DB, userID)
 			}
 			if err == nil {
@@ -240,9 +235,6 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 				monthSum, err = store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -29).Unix())
 			}
 			if err == nil {
-				channelUsage, err = store.UsageByChannel(a.DB, curFrom, 0)
-			}
-			if err == nil {
 				channelStats, err = store.ChannelStatsToday(a.DB)
 			}
 			if err == nil {
@@ -259,8 +251,7 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 			Models: modelStats, ModelsPrev: modelPrev,
 			Today:        today,
 			Periods:      map[string]store.UsageSummary{"today": today, "week": weekSum, "month": monthSum},
-			ChannelStats: channelStats, ChannelUsage: channelUsage,
-			Failures: fails, RecentFailures: len(fails),
+			ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
 		}})
 	}
 }

@@ -290,6 +290,9 @@ func TestUsersCRUD(t *testing.T) {
 	if created.Data.TokenTail != created.Data.Token[len(created.Data.Token)-4:] {
 		t.Fatalf("token tail mismatch: %+v", created.Data)
 	}
+	if created.Data.DebtFloorCalls != -1000 || created.Data.DebtFloorCredit != -50 {
+		t.Fatalf("default overdraft = %d / %v, want -1000 / -50", created.Data.DebtFloorCalls, created.Data.DebtFloorCredit)
+	}
 	uid := created.Data.ID
 
 	// 创建：缺 username / 密码过短 / 重名 / 非法 JSON
@@ -307,7 +310,7 @@ func TestUsersCRUD(t *testing.T) {
 	}
 
 	// 更新（部分字段）
-	w = do(r, http.MethodPut, basePath+"/users/"+fmt.Sprint(uid), `{"name":"bob","status":0}`, tok, "")
+	w = do(r, http.MethodPut, basePath+"/users/"+fmt.Sprint(uid), `{"name":"bob","status":0,"debt_floor_calls":-200,"debt_floor_credit":-10}`, tok, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("update user = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -317,6 +320,9 @@ func TestUsersCRUD(t *testing.T) {
 	decodeBody(t, w, &uv)
 	if uv.Data.Name != "bob" || uv.Data.Status != 0 {
 		t.Fatalf("update result = %+v", uv.Data)
+	}
+	if uv.Data.DebtFloorCalls != -200 || uv.Data.DebtFloorCredit != -10 {
+		t.Fatalf("overdraft update = %d / %v, want -200 / -10", uv.Data.DebtFloorCalls, uv.Data.DebtFloorCredit)
 	}
 
 	if w := do(r, http.MethodPut, basePath+"/users/9999", `{"name":"x"}`, tok, ""); w.Code != http.StatusNotFound {

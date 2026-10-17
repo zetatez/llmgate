@@ -30,3 +30,41 @@ export const AXIS_LABEL = { color: '#8b909c' }
 
 /** 展开 ECharts option 的类型工具。 */
 export type ChartOption = EChartsOption
+
+export interface DailyTokenPoint {
+  date: string
+  name: string
+  tokens: number
+}
+
+/**
+ * 把「日期 × 名称」的 token 点聚合成按日堆叠柱数据：
+ * 取总量前 topN 的名称，其余合并为 Other。
+ */
+export function buildDailyStack(dates: string[], points: DailyTokenPoint[], topN = 7) {
+  const totals = new Map<string, number>()
+  for (const p of points) totals.set(p.name, (totals.get(p.name) || 0) + p.tokens)
+  const top = [...totals.entries()]
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, topN)
+    .map(([n]) => n)
+  const nameIndex = new Map(top.map((n, i) => [n, i]))
+  const dateIndex = new Map(dates.map((d, i) => [d, i]))
+  const series = top.map(() => dates.map(() => 0))
+  const other = dates.map(() => 0)
+  for (const p of points) {
+    const di = dateIndex.get(p.date)
+    if (di === undefined) continue
+    const ni = nameIndex.get(p.name)
+    if (ni === undefined) other[di] += p.tokens
+    else series[ni][di] += p.tokens
+  }
+  const names = [...top]
+  const out = [...series]
+  if (other.some((v) => v > 0)) {
+    names.push('Other')
+    out.push(other)
+  }
+  return { names, series: out }
+}
