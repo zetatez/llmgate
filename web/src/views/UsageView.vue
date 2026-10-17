@@ -7,6 +7,9 @@ const usage = ref<UserModelUsage[]>([])
 const users = ref<User[]>([])
 const loading = ref(false)
 const days = ref(7)
+// lifetime：按 users 表累计计数器展示（从注册至今，日志清理后仍保留）
+// range：按所选时间范围从 request_logs 聚合（可展开查看每模型明细）
+const mode = ref<'lifetime' | 'range'>('lifetime')
 
 function humanNum(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return '0'
@@ -27,6 +30,8 @@ interface Row {
   prompt: number
   completion: number
   cost: number
+  in_spent: number
+  out_spent: number
   calls_spent: number
   calls_earned: number
   calls_balance: number
@@ -42,8 +47,9 @@ const rows = computed<Row[]>(() => {
   const m = new Map<number, Row>()
   for (const u of users.value) {
     m.set(u.id, {
-      user_id: u.id, user_name: u.name || u.username,
+      user_id: u.id, user_name: u.username || u.name,
       requests: 0, prompt: 0, completion: 0, cost: 0,
+      in_spent: u.in_spent, out_spent: u.out_spent,
       calls_spent: u.calls_spent, calls_earned: u.calls_earned, calls_balance: u.calls_balance,
       credit_spent: u.credit_spent, credit_earned: u.credit_earned, credit_balance: u.credit_balance,
       debt_floor_calls: u.debt_floor_calls, debt_floor_credit: u.debt_floor_credit,
@@ -54,8 +60,9 @@ const rows = computed<Row[]>(() => {
     let row = m.get(r.user_id)
     if (!row) {
       row = {
-        user_id: r.user_id, user_name: r.user_name || `#${r.user_id}`,
+        user_id: r.user_id, user_name: r.user_name || '—',
         requests: 0, prompt: 0, completion: 0, cost: 0,
+        in_spent: 0, out_spent: 0,
         calls_spent: 0, calls_earned: 0, calls_balance: 0,
         credit_spent: 0, credit_earned: 0, credit_balance: 0,
         debt_floor_calls: 0, debt_floor_credit: 0, models: [],
@@ -68,16 +75,18 @@ const rows = computed<Row[]>(() => {
     row.cost += r.cost
     row.models.push(r)
   }
-  return [...m.values()].sort((a, b) => b.cost - a.cost || b.calls_spent - a.calls_spent)
+  // 默认按请求数量倒序（Lifetime = 累计调用次数，Range = 区间请求数）
+  const req = (r: Row) => (mode.value === 'lifetime' ? r.calls_spent : r.requests)
+  return [...m.values()].sort((a, b) => req(b) - req(a) || b.cost - a.cost)
 })
 
 const totals = computed(() =>
   rows.value.reduce((s, u) => ({
     users: s.users + 1,
-    requests: s.requests + u.requests,
-    prompt: s.prompt + u.prompt,
-    completion: s.completion + u.completion,
-    cost: s.cost + u.cost,
+    requests: s.requests + (mode.value === 'lifetime' ? u.calls_spent : u.requests),
+    prompt: s.prompt + (mode.value === 'lifetime' ? u.in_spent : u.prompt),
+    completion: s.completion + (mode.value === 'lifetime' ? u.out_spent : u.completion),
+    cost: s.cost + (mode.value === 'lifetime' ? u.credit_spent : u.cost),
     callsBalance: s.callsBalance + u.calls_balance,
     creditBalance: s.creditBalance + u.credit_balance,
   }), { users: 0, requests: 0, prompt: 0, completion: 0, cost: 0, callsBalance: 0, creditBalance: 0 }),
@@ -105,13 +114,21 @@ onMounted(load)
   <div v-loading="loading">
     <el-card shadow="never" class="toolbar-card">
       <div class="toolbar">
-        <el-radio-group v-model="days" size="small" @change="load">
+        <el-radio-group v-model="mode" size="small">
+          <el-radio-button value="lifetime">Lifetime</el-radio-button>
+          <el-radio-button value="range">Range</el-radio-button>
+        </el-radio-group>
+        <el-radio-group v-if="mode === 'range'" v-model="days" size="small" @change="load">
           <el-radio-button :value="1">Today</el-radio-button>
           <el-radio-button :value="7">7 days</el-radio-button>
           <el-radio-button :value="30">30 days</el-radio-button>
           <el-radio-button :value="0">All</el-radio-button>
         </el-radio-group>
-        <span class="hint">Usage is per selected range; balances are running totals.</span>
+        <span class="hint">
+          {{ mode === 'lifetime'
+            ? 'Lifetime totals since registration (kept by counters, unaffected by log cleanup).'
+            : 'Usage in the selected range from request logs; expand for per-model detail.' }}
+        </span>
       </div>
     </el-card>
 
@@ -124,7 +141,7 @@ onMounted(load)
 
     <el-card shadow="never" class="mt">
       <el-table :data="rows" size="small" row-key="user_id">
-        <el-table-column type="expand">
+        <el-table-column v-if="mode === 'range'" type="expand">
           <template #default="{ row }">
             <div class="expand-wrap">
               <el-table v-if="modelRows(row).length" :data="modelRows(row)" size="small" style="width: 100%">
@@ -145,17 +162,19 @@ onMounted(load)
           </template>
         </el-table-column>
         <el-table-column label="User" min-width="170">
-          <template #default="{ row }">{{ row.user_name || `#${row.user_id}` }}</template>
+          <template #default="{ row }">{{ row.user_name || '—' }}</template>
         </el-table-column>
-        <el-table-column prop="requests" label="Requests" width="100" align="right" sortable />
-        <el-table-column label="Upload" width="110" align="right" sortable>
-          <template #default="{ row }">{{ humanNum(row.prompt) }}</template>
+        <el-table-column label="Requests" width="100" align="right">
+          <template #default="{ row }">{{ humanNum(mode === 'lifetime' ? row.calls_spent : row.requests) }}</template>
         </el-table-column>
-        <el-table-column label="Download" width="110" align="right" sortable>
-          <template #default="{ row }">{{ humanNum(row.completion) }}</template>
+        <el-table-column label="Upload" width="110" align="right">
+          <template #default="{ row }">{{ humanNum(mode === 'lifetime' ? row.in_spent : row.prompt) }}</template>
         </el-table-column>
-        <el-table-column label="Cost ($)" width="100" align="right" sortable>
-          <template #default="{ row }">{{ money(row.cost) }}</template>
+        <el-table-column label="Download" width="110" align="right">
+          <template #default="{ row }">{{ humanNum(mode === 'lifetime' ? row.out_spent : row.completion) }}</template>
+        </el-table-column>
+        <el-table-column label="Cost ($)" width="100" align="right">
+          <template #default="{ row }">{{ money(mode === 'lifetime' ? row.credit_spent : row.cost) }}</template>
         </el-table-column>
         <el-table-column label="Calls (bal)" width="110" align="right" sortable>
           <template #default="{ row }">

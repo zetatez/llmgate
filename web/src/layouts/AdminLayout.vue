@@ -11,6 +11,7 @@ const menus = [
   { path: '/dashboard', label: 'Overview', icon: 'Odometer' },
   { path: '/channels', label: 'Channels', icon: 'Connection' },
   { path: '/model-routes', label: 'Routes', icon: 'Share' },
+  { path: '/pricing', label: 'Pricing', icon: 'Coin' },
   { path: '/users', label: 'Users', icon: 'User' },
   { path: '/usage', label: 'Billing', icon: 'Wallet' },
   { path: '/logs', label: 'Logs', icon: 'Document' },

@@ -225,14 +225,14 @@ func TestUserPortalTokens(t *testing.T) {
 	aCookie := userLoginCookie(t, r, "alice", "secret1")
 	bCookie := userLoginCookie(t, r, "bob", "secret1")
 
-	// 初始无令牌
+	// 建号即自动创建令牌
 	w := doCookie(r, http.MethodGet, "/api/user/token", "", aCookie)
 	var gt struct {
 		Data tokenView `json:"data"`
 	}
 	decodeBody(t, w, &gt)
-	if gt.Data.HasToken {
-		t.Fatalf("alice should have no token initially, got %+v", gt.Data)
+	if !gt.Data.HasToken {
+		t.Fatalf("alice should have an auto-created token, got %+v", gt.Data)
 	}
 
 	// 创建/更新（PUT）→ 返回明文
@@ -261,11 +261,11 @@ func TestUserPortalTokens(t *testing.T) {
 		t.Fatalf("upsert should keep secret: %+v", upd.Data)
 	}
 
-	// B 无令牌
+	// B 也有独立令牌（互不相同）
 	wb := doCookie(r, http.MethodGet, "/api/user/token", "", bCookie)
 	decodeBody(t, wb, &gt)
-	if gt.Data.HasToken {
-		t.Fatalf("bob should have no token, got %+v", gt.Data)
+	if !gt.Data.HasToken || gt.Data.TokenTail == created.Data.TokenTail {
+		t.Fatalf("bob should have his own token, got %+v", gt.Data)
 	}
 
 	// 轮换：密钥变化
@@ -278,7 +278,7 @@ func TestUserPortalTokens(t *testing.T) {
 		t.Fatal("rotate should change the secret")
 	}
 
-	// B 删除自己的令牌是幂等的（本来就没有）→ 200
+	// B 删除自己的令牌 → 200
 	if w := doCookie(r, http.MethodDelete, "/api/user/token", "", bCookie); w.Code != http.StatusOK {
 		t.Fatalf("bob delete own (none) = %d", w.Code)
 	}
@@ -420,14 +420,22 @@ func TestAdminUserTokenEndpoints(t *testing.T) {
 	if !cr.Data.HasToken || !strings.HasPrefix(cr.Data.Token, "sk-") {
 		t.Fatalf("admin create token payload = %+v", cr.Data)
 	}
-	// 其它用户没有令牌（隔离）
+	// 隔离：吊销 bob 的令牌后 alice 的不受影响
+	if w := do(r, http.MethodDelete, basePath+"/users/"+fmt.Sprint(uid2)+"/token", "", testAdminToken, ""); w.Code != http.StatusOK {
+		t.Fatalf("revoke bob token = %d", w.Code)
+	}
 	w = do(r, http.MethodGet, basePath+"/users/"+fmt.Sprint(uid2)+"/token", "", testAdminToken, "")
 	var gt struct {
 		Data tokenView `json:"data"`
 	}
 	decodeBody(t, w, &gt)
 	if gt.Data.HasToken {
-		t.Fatalf("bob should have no token, got %+v", gt.Data)
+		t.Fatalf("bob should have no token after revoke, got %+v", gt.Data)
+	}
+	w = do(r, http.MethodGet, basePath+"/users/"+fmt.Sprint(uid)+"/token", "", testAdminToken, "")
+	decodeBody(t, w, &gt)
+	if !gt.Data.HasToken {
+		t.Fatalf("alice token should be unaffected, got %+v", gt.Data)
 	}
 	// 不存在用户 → 404
 	if w := do(r, http.MethodPut, basePath+"/users/9999/token", `{}`, testAdminToken, ""); w.Code != http.StatusNotFound {

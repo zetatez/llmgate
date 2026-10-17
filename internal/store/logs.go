@@ -12,7 +12,7 @@ import (
 const logCols = `id, user_id, display_model, channel_id, key_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
 
 // queryLogSelect 附带渠道名/用户名（联表，仅查询用）
-const queryLogSelect = `lg.id, lg.user_id, COALESCE(u.name,''), lg.display_model, lg.channel_id, lg.key_id, lg.key_owner_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
+const queryLogSelect = `lg.id, lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''), lg.display_model, lg.channel_id, lg.key_id, lg.key_owner_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
 
 // insertLogCols 不含 id，交由 AUTOINCREMENT 分配。
 const insertLogCols = `user_id, display_model, channel_id, key_id, key_owner_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
@@ -384,7 +384,7 @@ type UserModelUsage struct {
 // UsageByUserModel 按 用户×模型 聚合区间 [from,to) 的用量（请求次数 / 上传token / 下载token / 费用）。
 func UsageByUserModel(db *sql.DB, from, to int64) ([]UserModelUsage, error) {
 	q := `
-		SELECT lg.user_id, COALESCE(u.name, ''), lg.display_model,
+		SELECT lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''), lg.display_model,
 			COUNT(*),
 			SUM(lg.prompt_tokens), SUM(lg.completion_tokens), SUM(lg.total_tokens), SUM(lg.cost)
 		FROM request_logs lg
@@ -438,7 +438,7 @@ type UserUsage struct {
 // 供"团队共享统计"使用（所有用户可见）。
 func UsageByUser(db *sql.DB, from, to int64) ([]UserUsage, error) {
 	q := `
-		SELECT lg.user_id, COALESCE(u.name, ''),
+		SELECT lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''),
 			COUNT(*),
 			SUM(CASE WHEN lg.status='success' THEN 1 ELSE 0 END),
 			SUM(lg.prompt_tokens), SUM(lg.completion_tokens), SUM(lg.total_tokens), SUM(lg.cost)

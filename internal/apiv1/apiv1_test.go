@@ -268,7 +268,7 @@ func TestUsersCRUD(t *testing.T) {
 		t.Fatalf("expected empty users, got %d", len(lst.Data))
 	}
 
-	// 创建：username + password 必填，返回账号（不再一次性下发令牌）
+	// 创建：username + password 必填，建号即下发一次性明文 API_KEY
 	cb := `{"name":"alice","remark":"r1","username":"alice","password":"secret1","quota_limit":100,"status":1}`
 	w = do(r, http.MethodPost, basePath+"/users", cb, tok, "")
 	if w.Code != http.StatusOK {
@@ -281,8 +281,11 @@ func TestUsersCRUD(t *testing.T) {
 	if created.Data.Username != "alice" || created.Data.Status != 1 {
 		t.Fatalf("create user result = %+v", created.Data)
 	}
-	if created.Data.HasToken {
-		t.Fatalf("new user should have no token, got %+v", created.Data)
+	if !created.Data.HasToken || !strings.HasPrefix(created.Data.Token, "sk-") {
+		t.Fatalf("new user should have an API_KEY, got %+v", created.Data)
+	}
+	if created.Data.TokenTail != created.Data.Token[len(created.Data.Token)-4:] {
+		t.Fatalf("token tail mismatch: %+v", created.Data)
 	}
 	uid := created.Data.ID
 
@@ -320,7 +323,7 @@ func TestUsersCRUD(t *testing.T) {
 		t.Fatalf("update bad id = %d, want 400", w.Code)
 	}
 
-	// 唯一消费令牌：初始无 → 创建（明文）→ GET 同一条 → 轮换 → 吊销
+	// 唯一消费令牌：建号自动创建 → 更新过期 → GET 同一条 → 轮换 → 吊销
 	w = do(r, http.MethodGet, basePath+"/users/"+fmt.Sprint(uid)+"/token", "", tok, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("get token = %d, body=%s", w.Code, w.Body.String())
@@ -329,12 +332,12 @@ func TestUsersCRUD(t *testing.T) {
 		Data tokenView `json:"data"`
 	}
 	decodeBody(t, w, &gt)
-	if gt.Data.HasToken {
-		t.Fatalf("expected no token initially, got %+v", gt.Data)
+	if !gt.Data.HasToken {
+		t.Fatalf("expected auto-created token, got %+v", gt.Data)
 	}
 	w = do(r, http.MethodPut, basePath+"/users/"+fmt.Sprint(uid)+"/token", `{"expires_in_days":30}`, tok, "")
 	if w.Code != http.StatusOK {
-		t.Fatalf("create token = %d, body=%s", w.Code, w.Body.String())
+		t.Fatalf("update token = %d, body=%s", w.Code, w.Body.String())
 	}
 	var nt struct {
 		Data tokenView `json:"data"`

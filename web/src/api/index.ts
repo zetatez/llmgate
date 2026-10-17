@@ -1,6 +1,6 @@
 import { adminApi, userApi } from './client'
 import type {
-  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute,
+  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelPrice, ModelRoute,
   ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User,
   UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken,
 } from './types'
@@ -81,6 +81,7 @@ export const portalApi = {
   logs: (params: { limit?: number; offset?: number } = {}) =>
     userApi.get<DataEnvelope<RequestLog[]>>('/logs', { params }).then(unwrap),
   logsCount: () => userApi.get<DataEnvelope<number>>('/logs/count').then(unwrap),
+  pricing: () => userApi.get<DataEnvelope<ModelPrice[]>>('/pricing').then(unwrap),
 }
 
 export const logsApi = {
@@ -96,6 +97,14 @@ export const logsApi = {
     adminApi.get<DataEnvelope<UserModelUsage[]>>('/logs/usage/by-user-model', { params: { days } }).then(unwrap),
 }
 
+export const pricingApi = {
+  list: () => adminApi.get<DataEnvelope<ModelPrice[]>>('/pricing').then(unwrap),
+  save: (rows: Array<Pick<ModelPrice, 'model' | 'input' | 'output' | 'call'>>) =>
+    adminApi.put<DataEnvelope<ModelPrice[]>>('/pricing', { data: rows }).then(unwrap),
+  remove: (models: string[]) =>
+    adminApi.post<DataEnvelope<ModelPrice[]>>('/pricing/delete', { models }).then(unwrap),
+}
+
 export const settingsApi = {
   get: () => adminApi.get<DataEnvelope<SettingItem[]>>('/settings').then(unwrap),
   update: (items: SettingValue[]) => adminApi.put<DataEnvelope<string>>('/settings', { data: items }).then(unwrap),
@@ -107,4 +116,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken }
+export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelPrice, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken }

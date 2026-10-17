@@ -217,12 +217,24 @@ func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamP
 }
 
 func finalizeLog(a *app.App, bus *logbus.Bus, logEntry *models.RequestLog, priceIn, priceOut *float64) {
-	pricingStr, _ := a.GetSetting("model_pricing")
-	if pricing, perr := quota.ParsePricing(pricingStr); perr == nil {
-		// 成本计算：路由自定义单价优先，否则回退全局 model_pricing（按对外模型名）
-		logEntry.Cost = quota.EstimateCostRoute(pricing, priceIn, priceOut, logEntry.DisplayModel, logEntry.PromptTokens, logEntry.CompletionTokens)
-	}
+	pricing := globalPricing(a)
+	// 成本计算：路由自定义单价优先，否则回退全局模型价格（按对外模型名）
+	logEntry.Cost = quota.EstimateCostRoute(pricing, priceIn, priceOut, logEntry.DisplayModel, logEntry.PromptTokens, logEntry.CompletionTokens)
 	bus.Write(logEntry)
+}
+
+// globalPricing 读取全局价格表；表为空时回退旧 settings.model_pricing（兼容未迁移的部署）。
+func globalPricing(a *app.App) map[string]quota.ModelPrice {
+	if rows, err := store.ListModelPrices(a.DB); err == nil && len(rows) > 0 {
+		out := make(map[string]quota.ModelPrice, len(rows))
+		for _, p := range rows {
+			out[p.Model] = quota.ModelPrice{Input: p.Input, Output: p.Output, Call: p.Call}
+		}
+		return out
+	}
+	s, _ := a.GetSetting("model_pricing")
+	pricing, _ := quota.ParsePricing(s)
+	return pricing
 }
 
 // oneLine 把多行文本压成单行（用于日志/错误记录，避免换行破坏展示）。

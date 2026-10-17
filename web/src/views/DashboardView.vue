@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { logsApi, settingsApi } from '../api'
@@ -41,6 +41,8 @@ async function load() {
     ElMessage.error('Failed to load overview: ' + (e?.message || e))
   } finally {
     loading.value = false
+    // 等待 v-if 的图表容器渲染完成后再初始化，否则首屏 ref 为空导致图表不显示
+    await nextTick()
     renderChart()
     renderHourChart()
   }
@@ -101,7 +103,8 @@ const weekEmpty = computed(() => {
 function renderHourChart() {
   if (!hourEl.value) return
   const hours = payload.value?.hours || []
-  if (!hourChart) hourChart = echarts.init(hourEl.value)
+  hourChart?.dispose()
+  hourChart = echarts.init(hourEl.value)
   const mode = hourMode.value
   hourChart.setOption({
     tooltip: {
@@ -155,6 +158,7 @@ function renderChart() {
   }
   const costs = daysLabel.map((d) => payload.value!.week.find((x) => x.date === d)?.cost || 0)
 
+  chart?.dispose()
   chart = echarts.init(chartEl.value)
   chart.setOption({
     tooltip: {
@@ -178,8 +182,8 @@ function renderChart() {
         return html
       },
     },
-    legend: { type: 'scroll', bottom: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10 },
-    grid: { left: 48, right: 48, top: 24, bottom: 34 },
+    legend: { type: 'scroll', top: 0, left: 0, right: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 12, textStyle: { color: '#8b909c', fontSize: 11 } },
+    grid: { left: 48, right: 48, top: 40, bottom: 26 },
     xAxis: { type: 'category', data: daysLabel, axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c' } },
     yAxis: [
       { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
@@ -239,7 +243,7 @@ onBeforeUnmount(() => {
         <div class="gateway">
           <span class="gl">Gateway</span>
           <code>{{ gatewayBase }}</code>
-          <el-button link type="primary" size="small" @click="copyGatewayBase"><el-icon :size="14"><CopyDocument /></el-icon>&nbsp;Copy</el-button>
+          <el-button link type="primary" size="small" @click="copyGatewayBase"><el-icon :size="14"><CopyDocument /></el-icon>&nbsp;copy</el-button>
         </div>
       </div>
     </el-card>

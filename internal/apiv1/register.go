@@ -51,6 +51,7 @@ func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any)
 	RegisterUserRoutes(admin.Group("/users"), a)
 	RegisterLogRoutes(admin.Group("/logs"), a)
 	RegisterSettingRoutes(admin.Group("/settings"), a)
+	RegisterPricingRoutes(admin.Group("/pricing"), a)
 }
 
 // setAdminSession 种下（或清除，maxAge<0 时）httpOnly 会话 Cookie。

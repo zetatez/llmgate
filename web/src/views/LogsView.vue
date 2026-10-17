@@ -72,7 +72,7 @@ onMounted(load)
       </el-table-column>
       <el-table-column prop="display_model" label="Model" width="170" show-overflow-tooltip />
       <el-table-column label="User" min-width="130" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.user_name || (row.user_id ? `#${row.user_id}` : '—') }}</template>
+        <template #default="{ row }">{{ row.user_name || '—' }}</template>
       </el-table-column>
       <el-table-column label="Channel" width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ row.channel_name || `#${row.channel_id}` }}</template>

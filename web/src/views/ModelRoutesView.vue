@@ -3,12 +3,14 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { channelsApi, modelRoutesApi } from '../api'
 import type { Channel, ModelRoute } from '../api'
+import { vendorOf } from '../utils/vendor'
 
 const list = ref<ModelRoute[]>([])
 const channels = ref<Channel[]>([])
 const loading = ref(false)
 const search = ref('')
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
+const vendor = ref('all')
 const expandedKeys = ref<string[]>([])
 const activeTab = ref('synced')
 
@@ -27,11 +29,14 @@ interface Group {
   count: number
   enabledCount: number
   defaultChannel: string
+  vendor: string
 }
 
 const groups = computed<Group[]>(() => {
   const m = new Map<string, ModelRoute[]>()
   for (const r of list.value) {
+    // 自定义路由只在 Custom Routes 标签页展示，不混入 Synced Models
+    if (isCustomRoute(r)) continue
     if (!m.has(r.display_name)) m.set(r.display_name, [])
     m.get(r.display_name)!.push(r)
   }
@@ -43,6 +48,7 @@ const groups = computed<Group[]>(() => {
       count: routes.length,
       enabledCount: enabled.length,
       defaultChannel: enabled[0]?.channel_name || routes[0]?.channel_name || '',
+      vendor: vendorOf(name),
     }
   })
 })
@@ -57,9 +63,18 @@ function sortActiveFirst<T extends { display_name: string; enabledCount: number 
   })
 }
 
+const vendors = computed(() => {
+  const m = new Map<string, number>()
+  for (const g of groups.value) m.set(g.vendor, (m.get(g.vendor) || 0) + 1)
+  return [...m.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+})
+
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
   const out = groups.value.filter((g) => {
+    if (vendor.value !== 'all' && g.vendor !== vendor.value) return false
     if (statusFilter.value === 'active' && g.enabledCount === 0) return false
     if (statusFilter.value === 'inactive' && g.enabledCount > 0) return false
     if (!q) return true
@@ -270,6 +285,14 @@ onMounted(load)
               </div>
             </div>
           </template>
+
+          <div class="vendor-bar">
+            <span class="vendor-label">Vendor</span>
+            <el-check-tag :checked="vendor === 'all'" @change="vendor = 'all'">All</el-check-tag>
+            <el-check-tag v-for="v in vendors" :key="v.name" :checked="vendor === v.name" @change="vendor = v.name">
+              {{ v.name }}<span class="vendor-count">{{ v.count }}</span>
+            </el-check-tag>
+          </div>
 
           <el-table
             v-loading="loading"
@@ -496,6 +519,10 @@ onMounted(load)
 
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; }
+.vendor-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+.vendor-bar :deep(.el-check-tag) { font-size: 11px; padding: 2px 7px; line-height: 18px; }
+.vendor-label { font-size: 11px; color: var(--ll-muted); margin-right: 2px; }
+.vendor-count { margin-left: 4px; font-size: 10px; opacity: .7; }
 .mr { margin-right: 8px; }
 .mt { margin-top: 8px; }
 .tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }

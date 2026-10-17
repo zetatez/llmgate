@@ -15,8 +15,9 @@ const menus = [
   { path: '/user/overview', label: 'Overview', icon: 'Odometer' },
   { path: '/user/channels', label: 'Channels', icon: 'Connection' },
   { path: '/user/routes', label: 'Routes', icon: 'Share' },
+  { path: '/user/pricing', label: 'Pricing', icon: 'Coin' },
   { path: '/user/keys', label: 'My API Keys', icon: 'Key' },
-  { path: '/user/tokens', label: 'My Tokens', icon: 'Ticket' },
+  { path: '/user/tokens', label: 'My API_KEY', icon: 'Ticket' },
   { path: '/user/credits', label: 'Credits', icon: 'Wallet' },
   { path: '/user/logs', label: 'My Requests', icon: 'Document' },
 ]

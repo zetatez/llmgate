@@ -58,6 +58,8 @@ export interface User {
   quota_used: number
   status: number
   has_token: boolean
+  /** 仅创建用户时返回一次的网关 API_KEY 明文 */
+  token?: string
   token_tail: string
   token_expires_at: number
   token_last_used_at: number
@@ -297,4 +299,12 @@ export interface UserModelUsage {
   completion_tokens: number
   total_tokens: number
   cost: number
+}
+/** 全局模型单价（USD / 1M tokens；call = USD / 次） */
+export interface ModelPrice {
+  model: string
+  input: number
+  output: number
+  call: number
+  updated_at: number
 }

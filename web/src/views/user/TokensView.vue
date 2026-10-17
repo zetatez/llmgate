@@ -50,9 +50,9 @@ async function save() {
   const wasToken = hasToken.value
   try {
     token.value = await portalApi.upsertToken({ expires_in_days: days.value })
-    ElMessage.success(wasToken ? 'Saved' : 'Token created')
+    ElMessage.success(wasToken ? 'Saved' : 'API_KEY created')
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || 'Failed to save token')
+    ElMessage.error(e?.response?.data?.error || 'Failed to save API_KEY')
   } finally {
     busy.value = false
   }
@@ -60,32 +60,15 @@ async function save() {
 
 async function rotate() {
   try {
-    await ElMessageBox.confirm('Renew the token? The current token stops working immediately.', 'Renew Token', { type: 'warning' })
+    await ElMessageBox.confirm('Refresh the API_KEY? The current one stops working immediately.', 'Refresh API_KEY', { type: 'warning' })
   } catch { return }
   busy.value = true
   try {
     token.value = await portalApi.rotateToken()
     reveal.value = true
-    ElMessage.success('Token renewed')
+    ElMessage.success('API_KEY refreshed')
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || 'Failed to renew')
-  } finally {
-    busy.value = false
-  }
-}
-
-async function revoke() {
-  try {
-    await ElMessageBox.confirm('Revoke the token? Clients using it lose access immediately.', 'Revoke Token', { type: 'warning' })
-  } catch { return }
-  busy.value = true
-  try {
-    await portalApi.removeToken()
-    token.value = { has_token: false, token_tail: '', expires_at: 0, last_used_at: 0 }
-    days.value = 0
-    ElMessage.success('Revoked')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || 'Failed to revoke')
+    ElMessage.error(e?.response?.data?.error || 'Failed to refresh')
   } finally {
     busy.value = false
   }
@@ -99,14 +82,14 @@ onMounted(load)
     <el-alert type="info" :closable="false" class="mb">
       <template #title>
         <span>Gateway Base URL: <code class="base">{{ gatewayBase }}</code></span>
-        <el-button link type="primary" size="small" class="ml" @click="copyBase">Copy</el-button>
+        <el-button link type="primary" size="small" class="ml" @click="copyBase">copy</el-button>
       </template>
     </el-alert>
 
     <el-card shadow="never" v-loading="loading">
 
       <template v-if="!hasToken">
-        <el-empty description="You don't have a token yet." />
+        <el-empty description="You don't have an API_KEY yet." />
         <el-form label-width="120px" class="form">
           <el-form-item label="Expires">
             <el-select v-model="days" style="width: 220px">
@@ -117,18 +100,18 @@ onMounted(load)
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :loading="busy" @click="save">Create Token</el-button>
+            <el-button type="primary" :loading="busy" @click="save">Create API_KEY</el-button>
           </el-form-item>
         </el-form>
       </template>
 
       <template v-else>
         <el-descriptions :column="1" border class="mb">
-          <el-descriptions-item label="Token">
+          <el-descriptions-item label="API_KEY">
             <span class="token">
               <code>{{ reveal && token?.token ? token.token : `sk-****${token?.token_tail}` }}</code>
               <el-button v-if="token?.token" link type="primary" size="small" @click="reveal = !reveal">{{ reveal ? 'Hide' : 'Reveal' }}</el-button>
-              <el-button v-if="token?.token" link type="primary" size="small" @click="copyToken">Copy</el-button>
+              <el-button v-if="token?.token" link type="primary" size="small" @click="copyToken">copy</el-button>
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="Expires">{{ fmt(token?.expires_at) }}</el-descriptions-item>
@@ -147,8 +130,7 @@ onMounted(load)
           </el-form-item>
           <el-form-item>
             <el-button :loading="busy" @click="save">Save</el-button>
-            <el-button type="warning" :loading="busy" @click="rotate">Renew</el-button>
-            <el-button type="danger" :loading="busy" @click="revoke">Revoke</el-button>
+            <el-button type="warning" :loading="busy" @click="rotate">refresh</el-button>
           </el-form-item>
         </el-form>
       </template>

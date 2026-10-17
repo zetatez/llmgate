@@ -69,6 +69,7 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 
 	authed.GET("/logs", userLogs(a))
 	authed.GET("/logs/count", userLogsCount(a))
+	authed.GET("/pricing", listPricing(a))
 	authed.POST("/logout-all", userLogoutAll(a))
 }
 
@@ -89,7 +90,7 @@ func userLogin(a *app.App) gin.HandlerFunc {
 		if !decode(c, &b) {
 			return
 		}
-		username := strings.TrimSpace(b.Username)
+		username := strings.ToLower(strings.TrimSpace(b.Username))
 		key := "user|" + remoteKey(c) + "|" + strings.ToLower(username)
 		if !authLimiter.allow(key) {
 			tooManyLogins(c)

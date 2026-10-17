@@ -115,5 +115,14 @@ type Setting struct {
 	Value string `json:"value"`
 }
 
+// ModelPrice 全局模型单价（对外模型名维度）。
+type ModelPrice struct {
+	Model     string  `json:"model"`
+	Input     float64 `json:"input"`  // USD / 1M input tokens
+	Output    float64 `json:"output"` // USD / 1M output tokens
+	Call      float64 `json:"call"`   // USD / request
+	UpdatedAt int64   `json:"updated_at"`
+}
+
 // Now 返回当前 unix 秒（写入时间字段统一入口）。
 func Now() int64 { return time.Now().Unix() }

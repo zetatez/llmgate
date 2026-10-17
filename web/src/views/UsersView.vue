@@ -40,18 +40,28 @@ function openCreateUser() {
   Object.assign(dialog, { visible: true, username: '', password: '', name: '', remark: '', quota_limit: 0 })
 }
 
+const createdToken = reactive({ visible: false, username: '', token: '' })
+
 async function create() {
   if (!dialog.username.trim()) { ElMessage.warning('Username is required'); return }
   if (dialog.password.length < 6) { ElMessage.warning('Password must be at least 6 characters'); return }
   try {
-    await usersApi.create({
+    const u = await usersApi.create({
       name: dialog.name, remark: dialog.remark, username: dialog.username.trim(),
       password: dialog.password, quota_limit: +dialog.quota_limit || 0,
     })
     ElMessage.success('User created')
     dialog.visible = false
+    if (u.token) {
+      Object.assign(createdToken, { visible: true, username: u.username, token: u.token })
+    }
     load()
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to create') }
+}
+
+function copyCreatedToken() {
+  navigator.clipboard?.writeText(createdToken.token)
+  ElMessage.success('Copied')
 }
 
 // 快捷启用/停用用户
@@ -128,25 +138,14 @@ async function copyUserToken(u: User) {
 
 async function rotateUserToken(u: User) {
   try {
-    await ElMessageBox.confirm('Renew this token? The old token stops working immediately.', 'Renew Token', { type: 'warning' })
+    await ElMessageBox.confirm('Refresh this API_KEY? The old key stops working immediately.', 'Refresh API_KEY', { type: 'warning' })
   } catch { return }
   try {
     const t = await usersApi.rotateToken(u.id)
     if (t.token) await navigator.clipboard?.writeText(t.token)
-    ElMessage.success('Token renewed & copied')
+    ElMessage.success('API_KEY refreshed & copied')
     load()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to renew') }
-}
-
-async function revokeUserToken(u: User) {
-  try {
-    await ElMessageBox.confirm('Revoke this token? Clients using it lose access immediately.', 'Revoke Token', { type: 'warning' })
-  } catch { return }
-  try {
-    await usersApi.removeToken(u.id)
-    ElMessage.success('Token revoked')
-    load()
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to revoke') }
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to refresh') }
 }
 
 
@@ -183,7 +182,7 @@ onMounted(() => {
     <el-alert type="info" :closable="false" class="mb">
       <template #title>
         <span>Base URL: <code class="base">{{ gatewayBase }}</code></span>
-        <el-button link type="primary" size="small" class="ml" @click="copyGatewayBase">Copy</el-button>
+        <el-button link type="primary" size="small" class="ml" @click="copyGatewayBase">copy</el-button>
       </template>
     </el-alert>
 
@@ -195,7 +194,6 @@ onMounted(() => {
         </div>
       </template>
       <el-table v-loading="loading" :data="list" size="small">
-        <el-table-column prop="id" label="ID" width="60" />
         <el-table-column label="User" min-width="220">
           <template #default="{ row }">
             <div class="u-name">{{ row.username }}</div>
@@ -203,16 +201,15 @@ onMounted(() => {
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="Remark" min-width="100" show-overflow-tooltip />
-        <el-table-column label="Token" min-width="300">
+        <el-table-column label="API_KEY" min-width="300">
           <template #default="{ row }">
             <div class="token-cell">
               <template v-if="row.has_token">
                 <el-tooltip :content="`expires: ${row.token_expires_at ? new Date(row.token_expires_at * 1000).toLocaleString() : 'never'}`" placement="top">
                   <code class="key">sk-****{{ row.token_tail }}</code>
                 </el-tooltip>
-                <el-button link type="primary" size="small" @click="copyUserToken(row)">Copy</el-button>
-                <el-button link type="warning" size="small" @click="rotateUserToken(row)">Renew</el-button>
-                <el-button link type="danger" size="small" @click="revokeUserToken(row)">Revoke</el-button>
+                <el-button link type="primary" size="small" @click="copyUserToken(row)">copy</el-button>
+                <el-button link type="warning" size="small" @click="rotateUserToken(row)">refresh</el-button>
               </template>
               <el-button v-else link type="primary" size="small" @click="createUserToken(row)">Create</el-button>
             </div>
@@ -263,6 +260,19 @@ onMounted(() => {
       <template #footer>
         <el-button @click="dialog.visible = false">Cancel</el-button>
         <el-button type="primary" @click="create">Create</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="createdToken.visible" title="User created · API_KEY" width="520px">
+      <p class="tip" style="margin:0 0 10px">
+        Copy this API_KEY now for <b>{{ createdToken.username }}</b>. It is shown only once.
+      </p>
+      <div class="token-cell">
+        <code class="key" style="word-break:break-all">{{ createdToken.token }}</code>
+        <el-button link type="primary" size="small" @click="copyCreatedToken">copy</el-button>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="createdToken.visible = false">Done</el-button>
       </template>
     </el-dialog>
 
@@ -319,10 +329,10 @@ onMounted(() => {
               </el-table>
               <el-empty v-if="!details.data.keys.length" description="No keys" />
             </el-tab-pane>
-            <el-tab-pane label="Token">
+            <el-tab-pane label="API_KEY">
               <template v-if="details.data.token.has_token">
                 <el-descriptions :column="1" border size="small">
-                  <el-descriptions-item label="Token"><code class="key">sk-****{{ details.data.token.token_tail }}</code></el-descriptions-item>
+                  <el-descriptions-item label="API_KEY"><code class="key">sk-****{{ details.data.token.token_tail }}</code></el-descriptions-item>
                   <el-descriptions-item label="Expires">{{ details.data.token.expires_at ? new Date(details.data.token.expires_at * 1000).toLocaleString() : 'never' }}</el-descriptions-item>
                   <el-descriptions-item label="Last used">{{ details.data.token.last_used_at ? new Date(details.data.token.last_used_at * 1000).toLocaleString() : 'never' }}</el-descriptions-item>
                 </el-descriptions>

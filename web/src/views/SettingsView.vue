@@ -27,14 +27,12 @@ const meta: Record<string, SettingMeta> = {
   circuit_fail_window_s: { type: 'number', min: 1, step: 5 },
   circuit_quota_cooldown_s: { type: 'number', min: 1, step: 5 },
   circuit_probe_backoff_s: { type: 'number', min: 1, step: 5 },
-  model_pricing: { type: 'pricing' },
 }
 
 // key -> 友好标题
 const titles: Record<string, string> = {
   default_timeout_ms: 'Default timeout',
   log_retain_days: 'Log retention',
-  model_pricing: 'Model pricing',
   pull_interval_min: 'Pull interval',
   pull_default_priority: 'New route priority',
   pull_default_weight: 'New route weight',
@@ -58,7 +56,6 @@ const sectionIcon: Record<string, string> = {
   'Rate limit': 'Timer',
   'Auto-pull': 'Refresh',
   Logging: 'Document',
-  Pricing: 'Coin',
 }
 const sectionDesc: Record<string, string> = {
   Basic: 'General platform defaults applied when a channel has no override.',
@@ -67,7 +64,6 @@ const sectionDesc: Record<string, string> = {
   'Rate limit': 'Per-user throttling applied at the gateway. 0 disables a limit.',
   'Auto-pull': 'Automatic discovery and sync of upstream models.',
   Logging: 'Request log retention performed on startup.',
-  Pricing: 'Cost estimation used for usage statistics and quotas.',
 }
 
 const groups = computed(() => {
@@ -87,38 +83,6 @@ const current = computed(() => groups.value.find((g) => g.classification === act
 
 function isEditable(row: SettingItem): boolean {
   return !!meta[row.key]
-}
-
-function pricingPreview(): string {
-  try {
-    const obj = JSON.parse(form.model_pricing || '{}')
-    const keys = Object.keys(obj)
-    if (!keys.length) return '(not configured)'
-    return `${keys.length} model(s)`
-  } catch {
-    return '(invalid JSON)'
-  }
-}
-
-const pricingDialog = reactive({ visible: false, text: '' })
-function openPricingEdit() {
-  let text = form.model_pricing || '{}'
-  // 完整显示并格式化为 2 空格缩进（解析失败则保留原文）
-  try {
-    text = JSON.stringify(JSON.parse(text), null, 2)
-  } catch { /* keep raw */ }
-  pricingDialog.text = text
-  pricingDialog.visible = true
-}
-function savePricing() {
-  try {
-    const parsed = JSON.parse(pricingDialog.text || '{}')
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('must be a JSON object')
-    form.model_pricing = JSON.stringify(parsed)
-    pricingDialog.visible = false
-  } catch (e: any) {
-    ElMessage.error('model_pricing is not valid JSON: ' + e?.message)
-  }
 }
 
 async function load() {
@@ -186,24 +150,11 @@ onMounted(load)
               :disabled="!isEditable(row)"
               @update:model-value="(v: number) => (form[row.key] = String(v))"
             />
-            <div v-else-if="meta[row.key]?.type === 'pricing'" class="pricing-cell">
-              <span class="pricing-preview">{{ pricingPreview() }}</span>
-              <el-button size="small" @click="openPricingEdit">Edit JSON</el-button>
-            </div>
             <code v-else class="val">{{ form[row.key] || '—' }}</code>
           </div>
         </div>
       </el-card>
     </section>
-
-    <el-dialog v-model="pricingDialog.visible" title="Model Pricing (JSON)" width="680px">
-      <el-input v-model="pricingDialog.text" type="textarea" :autosize="{ minRows: 12, maxRows: 30 }" class="code" spellcheck="false" />
-      <div class="tip mt">Full JSON, formatted (2-space indent). Format: {"model": {"input": USD-per-1M, "output": USD-per-1M}}, e.g. {"deepseek-chat": {"input": 0.14, "output": 0.28}}</div>
-      <template #footer>
-        <el-button @click="pricingDialog.visible = false">Cancel</el-button>
-        <el-button type="primary" @click="savePricing">OK</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 

@@ -227,7 +227,6 @@ type settingDef struct {
 var settingsCatalog = []settingDef{
 	{classification: "Basic", key: "default_timeout_ms", description: "Default request timeout (ms) used when a channel has no per-channel timeout", def: "60000", mutable: true},
 	{classification: "Logging", key: "log_retain_days", description: "Request logs older than this many days are cleaned up on startup (0 = disabled)", def: "30", mutable: true},
-	{classification: "Pricing", key: "model_pricing", description: "Model prices (USD per 1M tokens, JSON) with optional per-call fee via \"call\"; per-route prices take precedence", def: "{}", mutable: true},
 	{classification: "Auto-pull", key: "pull_interval_min", description: "Interval for auto-pulling upstream models (minutes); 0 = disabled", def: "60", mutable: true},
 	{classification: "Auto-pull", key: "pull_default_priority", description: "Default priority for routes created by auto-pull (lower = preferred)", def: "0", mutable: true},
 	{classification: "Auto-pull", key: "pull_default_weight", description: "Default weight for routes created by auto-pull", def: "1", mutable: true},

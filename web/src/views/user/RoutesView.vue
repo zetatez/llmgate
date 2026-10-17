@@ -3,12 +3,49 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { portalApi } from '../../api'
 import type { UserChannel, UserRoute } from '../../api'
+import { vendorOf } from '../../utils/vendor'
 
 const routes = ref<UserRoute[]>([])
 const channels = ref<UserChannel[]>([])
 const loading = ref(false)
+const search = ref('')
+const vendor = ref('all')
 
 const myChannels = computed(() => channels.value.filter((c) => c.is_mine))
+
+// 自定义路由：显示名与上游不同名，且不是“厂商前缀/上游名”的自动别名
+function isCustomRoute(r: UserRoute): boolean {
+  return r.display_name !== r.upstream_model && !r.display_name.endsWith('/' + r.upstream_model)
+}
+function routeVendor(r: UserRoute): string {
+  return isCustomRoute(r) ? 'CustomRoutes' : vendorOf(r.display_name)
+}
+
+const vendors = computed(() => {
+  const m = new Map<string, number>()
+  const seen = new Set<string>()
+  for (const r of routes.value) {
+    // 同一显示名的多个映射只计一次
+    if (seen.has(r.display_name)) continue
+    seen.add(r.display_name)
+    const v = routeVendor(r)
+    m.set(v, (m.get(v) || 0) + 1)
+  }
+  return [...m.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+})
+
+const filteredRoutes = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  return routes.value.filter((r) => {
+    if (vendor.value !== 'all' && routeVendor(r) !== vendor.value) return false
+    if (!q) return true
+    return r.display_name.toLowerCase().includes(q) ||
+      (r.upstream_model || '').toLowerCase().includes(q) ||
+      (r.channel_name || '').toLowerCase().includes(q)
+  })
+})
 
 async function load() {
   loading.value = true
@@ -71,7 +108,14 @@ onMounted(load)
       </div>
     </template>
     <el-alert v-if="!myChannels.length" type="info" :closable="false" class="mb" title="Create a channel first — routes are added under your own channels." />
-    <el-table v-loading="loading" :data="routes" size="small">
+    <div class="route-toolbar">
+      <el-check-tag :checked="vendor === 'all'" @change="vendor = 'all'">All</el-check-tag>
+      <el-check-tag v-for="v in vendors" :key="v.name" :checked="vendor === v.name" @change="vendor = v.name">
+        {{ v.name }}<span class="vendor-count">{{ v.count }}</span>
+      </el-check-tag>
+      <el-input v-model="search" placeholder="Search model / channel / upstream" clearable size="small" class="route-search" />
+    </div>
+    <el-table v-loading="loading" :data="filteredRoutes" size="small">
       <el-table-column prop="display_name" label="Model Name" min-width="170" show-overflow-tooltip />
       <el-table-column prop="channel_name" label="Channel" min-width="140" show-overflow-tooltip />
       <el-table-column prop="upstream_model" label="Upstream Model" min-width="160" show-overflow-tooltip />
@@ -93,6 +137,7 @@ onMounted(load)
       </el-table-column>
     </el-table>
     <el-empty v-if="!loading && !routes.length" description="No routes yet" />
+    <el-empty v-else-if="!loading && !filteredRoutes.length" description="No routes match the current filter" />
   </el-card>
 
   <el-dialog v-model="dialog.visible" :title="dialog.editing ? 'Edit Route' : 'New Route'" width="520px">
@@ -116,6 +161,10 @@ onMounted(load)
 </template>
 
 <style scoped>
+.route-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.route-toolbar :deep(.el-check-tag) { font-size: 11px; padding: 2px 7px; line-height: 18px; }
+.vendor-count { margin-left: 4px; font-size: 10px; opacity: .7; }
+.route-search { width: 260px; margin-left: auto; }
 .head { display: flex; justify-content: space-between; align-items: center; }
 .dim { color: var(--ll-muted); font-size: 12px; }
 .tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }

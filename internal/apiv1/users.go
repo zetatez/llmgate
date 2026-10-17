@@ -35,6 +35,7 @@ type userView struct {
 	Status         int     `json:"status"`
 	HasToken       bool    `json:"has_token"`
 	TokenTail      string  `json:"token_tail"`
+	Token          string  `json:"token,omitempty"` // 仅创建时返回一次的明文
 	TokenExpiresAt int64   `json:"token_expires_at"`
 	TokenLastUsed  int64   `json:"token_last_used_at"`
 	// 共享池账本
@@ -95,7 +96,7 @@ func createUser(a *app.App) gin.HandlerFunc {
 		if !decode(c, &b) {
 			return
 		}
-		username := strings.TrimSpace(b.Username)
+		username := strings.ToLower(strings.TrimSpace(b.Username))
 		if username == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
 			return
@@ -123,7 +124,7 @@ func createUser(a *app.App) gin.HandlerFunc {
 		if b.Status != nil {
 			status = *b.Status
 		}
-		// 遗留字段 token_hash 为 NOT NULL UNIQUE：放一个不可用的占位哈希，鉴权已改用 user_tokens
+		// 遗留字段 token_hash 为 NOT NULL UNIQUE：先放占位哈希，随后写入真实 API_KEY 哈希
 		placeholder, err := app.GenSecret(24)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -139,10 +140,23 @@ func createUser(a *app.App) gin.HandlerFunc {
 			return
 		}
 		u.ID = id
+		// 建号即生成消费 API_KEY，管理员可一次性复制转交
+		plain, enc, terr := a.NewGatewayToken()
+		if terr == nil {
+			if err := store.SetUserToken(a.DB, id, app.HashToken(plain), enc, 0); err == nil {
+				u.TokenEnc = enc
+			} else {
+				plain = ""
+			}
+		} else {
+			plain = ""
+		}
 		if got, err := store.GetUser(a.DB, id); err == nil && got != nil {
 			u = got
 		}
-		c.JSON(http.StatusOK, gin.H{"data": toUserView(a, u)})
+		v := toUserView(a, u)
+		v.Token = plain // 仅创建时返回一次
+		c.JSON(http.StatusOK, gin.H{"data": v})
 	}
 }
 
@@ -185,9 +199,9 @@ func updateUser(a *app.App) gin.HandlerFunc {
 		if b.DebtFloorCredit != nil {
 			cur.DebtFloorCredit = *b.DebtFloorCredit
 		}
-		newUsername := strings.TrimSpace(cur.Username)
+		newUsername := strings.ToLower(strings.TrimSpace(cur.Username))
 		if b.Username != nil {
-			newUsername = strings.TrimSpace(*b.Username)
+			newUsername = strings.ToLower(strings.TrimSpace(*b.Username))
 			if newUsername == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "username is required"})
 				return

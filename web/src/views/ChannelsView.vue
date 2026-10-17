@@ -237,7 +237,7 @@ async function loadUsers() {
 
 function ownerName(id: number): string {
   const u = users.value.find((x) => x.id === id)
-  return u ? (u.name || u.username) : `#${id}`
+  return u ? (u.username || u.name) : '—'
 }
 
 onMounted(() => {
@@ -338,7 +338,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="Owner" width="120" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag v-if="row.user_id" size="small" type="success">{{ row.owner_name || `#${row.user_id}` }}</el-tag>
+            <el-tag v-if="row.user_id" size="small" type="success">{{ row.owner_name || '—' }}</el-tag>
             <el-tag v-else size="small" type="info">Admin</el-tag>
           </template>
         </el-table-column>

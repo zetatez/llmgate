@@ -125,7 +125,7 @@ onMounted(load)
           </template>
         </el-table-column>
         <el-table-column label="User" min-width="150">
-          <template #default="{ row }">{{ row.user_name || `#${row.user_id}` }}</template>
+          <template #default="{ row }">{{ row.user_name || '—' }}</template>
         </el-table-column>
         <el-table-column prop="requests" label="Requests" width="100" align="right" sortable />
         <el-table-column prop="success" label="Success" width="90" align="right" sortable />
