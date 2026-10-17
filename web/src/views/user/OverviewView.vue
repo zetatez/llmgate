@@ -137,15 +137,15 @@ onMounted(load)
 </template>
 
 <style scoped>
-.stat-card { margin-bottom: 14px; }
-.stat-row { display: flex; align-items: center; gap: 14px; padding: 4px 2px; }
-.stat-icon { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.stat-card { margin-bottom: 12px; }
+.stat-row { display: flex; align-items: center; gap: 10px; }
+.stat-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .stat-icon.plain { width: 38px; height: 38px; background: var(--ll-soft); color: var(--ll-muted); }
 .stat-meta { min-width: 0; }
-.stat-num { font-size: 22px; font-weight: 700; color: var(--ll-ink); line-height: 1.2; white-space: nowrap; }
+.stat-num { font-size: 20px; font-weight: 700; color: var(--ll-ink); line-height: 1.2; white-space: nowrap; }
 .stat-num.neg { color: #c9808a; }
 .stat-label { color: var(--ll-muted); font-size: 13px; margin-top: 2px; white-space: nowrap; }
 .stat-sub { color: var(--ll-muted); font-size: 11.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .neg { color: #c9808a; }
-.mt { margin-top: 14px; }
+.mt { margin-top: 12px; }
 </style>

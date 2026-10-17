@@ -261,33 +261,37 @@ onBeforeUnmount(() => {
       </el-col>
     </el-row>
 
-    <!-- 按小时（最近 24h） -->
-    <el-card shadow="never" class="mt">
-      <template #header>
-        <div class="head">
-          <span>Hourly (last 24h)</span>
-          <el-radio-group v-model="hourMode" size="small">
-            <el-radio-button value="cost">Cost</el-radio-button>
-            <el-radio-button value="tokens">Tokens</el-radio-button>
-          </el-radio-group>
-        </div>
-      </template>
-      <div ref="hourEl" style="height: 240px"></div>
-    </el-card>
-
-    <!-- 用量趋势 -->
-    <el-card shadow="never" class="mt">
-      <template #header>
-        <div class="head">
-          <span>Usage trend</span>
-          <span class="week-sum">{{ humanNum(range.tokens) }} tokens · ${{ range.cost.toFixed(2) }}</span>
-        </div>
-      </template>
-      <template v-if="!weekEmpty">
-        <div ref="chartEl" style="height: 280px"></div>
-      </template>
-      <el-empty v-else description="No usage in the selected period" :image-size="70" />
-    </el-card>
+    <!-- 图表并排：按小时 + 用量趋势 -->
+    <el-row :gutter="14" class="mt">
+      <el-col :xs="24" :lg="10">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="head">
+              <span>Hourly (last 24h)</span>
+              <el-radio-group v-model="hourMode" size="small">
+                <el-radio-button value="cost">Cost</el-radio-button>
+                <el-radio-button value="tokens">Tokens</el-radio-button>
+              </el-radio-group>
+            </div>
+          </template>
+          <div ref="hourEl" style="height: 208px"></div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :lg="14">
+        <el-card shadow="never" class="chart-card">
+          <template #header>
+            <div class="head">
+              <span>Usage trend</span>
+              <span class="week-sum">{{ humanNum(range.tokens) }} tokens · ${{ range.cost.toFixed(2) }}</span>
+            </div>
+          </template>
+          <template v-if="!weekEmpty">
+            <div ref="chartEl" style="height: 208px"></div>
+          </template>
+          <el-empty v-else description="No usage in the selected period" :image-size="60" />
+        </el-card>
+      </el-col>
+    </el-row>
 
     <!-- 底部三栏：Top 模型 / 渠道 / 失败 -->
     <el-row :gutter="14" class="mt">
@@ -354,6 +358,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.chart-card { height: 100%; }
+.chart-card :deep(.el-card__body) { padding: 8px 12px 4px; }
 .toolbar-card {
   background: transparent;
   border: none;
@@ -385,18 +391,17 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .stat-card {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 .stat-row {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 4px 2px;
+  gap: 10px;
 }
 .stat-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -406,7 +411,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .stat-num {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--ll-ink);
   line-height: 1.2;
@@ -464,7 +469,7 @@ onBeforeUnmount(() => {
   background: linear-gradient(90deg, #8b93d6, #b5a7dd);
 }
 .mt {
-  margin-top: 14px;
+  margin-top: 12px;
 }
 .ml {
   margin-left: 6px;
