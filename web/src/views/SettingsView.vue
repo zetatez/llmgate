@@ -102,13 +102,18 @@ function pricingPreview(): string {
 
 const pricingDialog = reactive({ visible: false, text: '' })
 function openPricingEdit() {
-  pricingDialog.text = form.model_pricing || '{}'
+  let text = form.model_pricing || '{}'
+  // 完整显示并格式化为 2 空格缩进（解析失败则保留原文）
+  try {
+    text = JSON.stringify(JSON.parse(text), null, 2)
+  } catch { /* keep raw */ }
+  pricingDialog.text = text
   pricingDialog.visible = true
 }
 function savePricing() {
   try {
     const parsed = JSON.parse(pricingDialog.text || '{}')
-    if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('must be a JSON object')
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('must be a JSON object')
     form.model_pricing = JSON.stringify(parsed)
     pricingDialog.visible = false
   } catch (e: any) {
@@ -191,9 +196,9 @@ onMounted(load)
       </el-card>
     </section>
 
-    <el-dialog v-model="pricingDialog.visible" title="Model Pricing (JSON)" width="560px">
-      <el-input v-model="pricingDialog.text" type="textarea" :rows="12" class="code" />
-      <div class="tip mt">Format: {"model": {"input": USD-per-1M-input-tokens, "output": USD-per-1M-output-tokens}}, e.g. {"deepseek-chat": {"input": 0.14, "output": 0.28}}</div>
+    <el-dialog v-model="pricingDialog.visible" title="Model Pricing (JSON)" width="680px">
+      <el-input v-model="pricingDialog.text" type="textarea" :autosize="{ minRows: 12, maxRows: 30 }" class="code" spellcheck="false" />
+      <div class="tip mt">Full JSON, formatted (2-space indent). Format: {"model": {"input": USD-per-1M, "output": USD-per-1M}}, e.g. {"deepseek-chat": {"input": 0.14, "output": 0.28}}</div>
       <template #footer>
         <el-button @click="pricingDialog.visible = false">Cancel</el-button>
         <el-button type="primary" @click="savePricing">OK</el-button>
@@ -317,6 +322,9 @@ onMounted(load)
 }
 .code :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre;
 }
 </style>
