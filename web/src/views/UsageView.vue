@@ -126,14 +126,22 @@ onMounted(load)
       <el-table :data="rows" size="small" row-key="user_id">
         <el-table-column type="expand">
           <template #default="{ row }">
-            <el-table :data="modelRows(row)" size="small" class="inner-table">
-              <el-table-column prop="model" label="Model" min-width="180" show-overflow-tooltip />
-              <el-table-column prop="requests" label="Requests" width="110" align="right" />
-              <el-table-column label="Upload" width="120" align="right"><template #default="{ row: m }">{{ humanNum(m.prompt_tokens) }}</template></el-table-column>
-              <el-table-column label="Download" width="120" align="right"><template #default="{ row: m }">{{ humanNum(m.completion_tokens) }}</template></el-table-column>
-              <el-table-column label="Total" width="110" align="right"><template #default="{ row: m }">{{ humanNum(m.total_tokens) }}</template></el-table-column>
-              <el-table-column label="Cost ($)" width="110" align="right"><template #default="{ row: m }">{{ money(m.cost) }}</template></el-table-column>
-            </el-table>
+            <div class="expand-wrap">
+              <el-table v-if="modelRows(row).length" :data="modelRows(row)" size="small" style="width: 100%">
+                <el-table-column prop="model" label="Model" min-width="200" show-overflow-tooltip />
+                <el-table-column prop="requests" label="Requests" width="100" align="right" />
+                <el-table-column label="Upload / Download" width="200" align="right">
+                  <template #default="{ row: m }">{{ humanNum(m.prompt_tokens) }} / {{ humanNum(m.completion_tokens) }}</template>
+                </el-table-column>
+                <el-table-column label="Total" width="110" align="right">
+                  <template #default="{ row: m }">{{ humanNum(m.total_tokens) }}</template>
+                </el-table-column>
+                <el-table-column label="Cost ($)" width="110" align="right">
+                  <template #default="{ row: m }">{{ money(m.cost) }}</template>
+                </el-table-column>
+              </el-table>
+              <el-empty v-else description="No usage in this range" :image-size="40" />
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="User" min-width="170">
@@ -176,6 +184,6 @@ onMounted(load)
 .sum-label { font-size: 12px; color: var(--ll-muted); margin-top: 2px; }
 .neg { color: #c9808a; }
 .sub { font-size: 11px; color: var(--ll-muted); }
-.inner-table { margin: 4px 12px; }
+.expand-wrap { padding: 8px 16px 12px; }
 .mt { margin-top: 14px; }
 </style>

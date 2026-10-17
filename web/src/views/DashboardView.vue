@@ -5,7 +5,7 @@ import * as echarts from 'echarts'
 import { logsApi, settingsApi } from '../api'
 import type { DashboardPayload } from '../api'
 import { ElMessage } from 'element-plus'
-import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Plus, User, Refresh } from '@element-plus/icons-vue'
+import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const payload = ref<DashboardPayload | null>(null)
@@ -96,23 +96,7 @@ const weekEmpty = computed(() => {
   return w.length === 0 || w.every((p) => p.total_tokens === 0 && p.requests === 0)
 })
 
-// 用量条：Today / 7 days / 30 days（按 token 归一化）
-const usagePeriods = computed(() => {
-  const p = payload.value?.periods
-  const items = [
-    { label: 'Today', s: p?.today },
-    { label: 'Last 7 days', s: p?.week },
-    { label: 'Last 30 days', s: p?.month },
-  ]
-  const max = Math.max(1, ...items.map((i) => i.s?.total_tokens || 0))
-  return items.map((i) => ({
-    label: i.label,
-    tokens: i.s?.total_tokens || 0,
-    cost: i.s?.cost || 0,
-    req: i.s?.total_requests || 0,
-    pct: ((i.s?.total_tokens || 0) / max) * 100,
-  }))
-})
+
 
 function renderHourChart() {
   if (!hourEl.value) return
@@ -277,41 +261,25 @@ onBeforeUnmount(() => {
       </el-col>
     </el-row>
 
-    <!-- 用量条 + 按小时 -->
-    <el-row :gutter="14" class="mt">
-      <el-col :xs="24" :md="9">
-        <el-card shadow="never">
-          <template #header>Usage</template>
-          <div v-for="p in usagePeriods" :key="p.label" class="usage-item">
-            <div class="usage-head">
-              <span class="usage-label">{{ p.label }}</span>
-              <span class="usage-val">{{ humanNum(p.tokens) }} tok · {{ p.req }} req · ${{ p.cost.toFixed(2) }}</span>
-            </div>
-            <div class="bar"><div class="bar-inner" :style="{ width: p.pct + '%' }"></div></div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="15">
-        <el-card shadow="never">
-          <template #header>
-            <div class="head">
-              <span>Hourly (last 24h)</span>
-              <el-radio-group v-model="hourMode" size="small">
-                <el-radio-button value="cost">Cost</el-radio-button>
-                <el-radio-button value="tokens">Tokens</el-radio-button>
-              </el-radio-group>
-            </div>
-          </template>
-          <div ref="hourEl" style="height: 224px"></div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- 按小时（最近 24h） -->
+    <el-card shadow="never" class="mt">
+      <template #header>
+        <div class="head">
+          <span>Hourly (last 24h)</span>
+          <el-radio-group v-model="hourMode" size="small">
+            <el-radio-button value="cost">Cost</el-radio-button>
+            <el-radio-button value="tokens">Tokens</el-radio-button>
+          </el-radio-group>
+        </div>
+      </template>
+      <div ref="hourEl" style="height: 240px"></div>
+    </el-card>
 
     <!-- 用量趋势 -->
     <el-card shadow="never" class="mt">
       <template #header>
         <div class="head">
-          <span>Usage</span>
+          <span>Usage trend</span>
           <span class="week-sum">{{ humanNum(range.tokens) }} tokens · ${{ range.cost.toFixed(2) }}</span>
         </div>
       </template>
@@ -382,15 +350,6 @@ onBeforeUnmount(() => {
         </el-card>
       </el-col>
     </el-row>
-
-    <!-- 快捷操作 -->
-    <el-card shadow="never" class="mt">
-      <div class="quick">
-        <el-button type="primary" plain @click="router.push('/channels')"><el-icon class="btn-icon"><Plus /></el-icon>Add Channel</el-button>
-        <el-button plain @click="router.push('/users')"><el-icon class="btn-icon"><User /></el-icon>Users</el-button>
-        <span class="tip">模型路由会自动同步；在 Settings → Auto-pull 调整同步间隔。</span>
-      </div>
-    </el-card>
   </div>
 </template>
 
@@ -503,40 +462,6 @@ onBeforeUnmount(() => {
   height: 100%;
   border-radius: 3px;
   background: linear-gradient(90deg, #8b93d6, #b5a7dd);
-}
-.usage-item {
-  margin-bottom: 14px;
-}
-.usage-item:last-child {
-  margin-bottom: 0;
-}
-.usage-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-.usage-label {
-  color: var(--ll-ink);
-  font-weight: 500;
-}
-.usage-val {
-  color: var(--ll-muted);
-  white-space: nowrap;
-}
-.quick {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.btn-icon {
-  margin-right: 2px;
-}
-.tip {
-  font-size: 12px;
-  color: var(--ll-muted);
 }
 .mt {
   margin-top: 14px;

@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { portalApi } from '../../api'
 import type { PortalUser, UserOverview } from '../../api'
-import { User, Coin, Connection, Money } from '@element-plus/icons-vue'
 
 const me = ref<PortalUser | null>(null)
 const overview = ref<UserOverview | null>(null)
@@ -30,20 +29,51 @@ function humanNum(n?: number): string {
   return String(n)
 }
 
-const cards = computed(() => [
-  { label: 'Account', value: me.value?.username || '—', sub: me.value?.name || '', icon: User, color: 'var(--el-color-primary)', bg: 'rgba(124,134,214,.15)' },
-  { label: 'Quota used ($)', value: money(me.value?.quota_used), sub: `/ ${me.value?.quota_limit ? money(me.value.quota_limit) : 'unlimited'}`, icon: Coin, color: '#6f9a86', bg: 'rgba(111,154,134,.15)' },
-  { label: 'Today requests', value: humanNum(overview.value?.today.total_requests), sub: `${overview.value?.today.total_requests ?? 0}`, icon: Connection, color: '#7a93b8', bg: 'var(--ll-soft)' },
-  { label: 'Today cost ($)', value: money(overview.value?.today.cost), sub: '', icon: Money, color: '#b18a4f', bg: 'rgba(177,138,79,.16)' },
-])
+const cards = computed(() => {
+  const m = me.value
+  const t = overview.value?.today
+  const callBal = m?.calls_balance ?? 0
+  const creditBal = m?.credit_balance ?? 0
+  return [
+    {
+      label: 'Calls balance', value: String(callBal),
+      sub: `spent ${m?.calls_spent ?? 0} · earned ${m?.calls_earned ?? 0}`,
+      neg: callBal < 0, color: callBal < 0 ? '#c9808a' : '#6f9a86', bg: callBal < 0 ? 'rgba(201,128,138,.16)' : 'rgba(111,154,134,.15)', icon: 'Odometer',
+    },
+    {
+      label: 'Credit balance ($)', value: creditBal.toFixed(4),
+      sub: `spent $${(m?.credit_spent ?? 0).toFixed(4)} · earned $${(m?.credit_earned ?? 0).toFixed(4)}`,
+      neg: creditBal < 0, color: creditBal < 0 ? '#c9808a' : '#6f9a86', bg: creditBal < 0 ? 'rgba(201,128,138,.16)' : 'rgba(111,154,134,.15)', icon: 'Wallet',
+    },
+    {
+      label: 'Quota used ($)', value: money(m?.quota_used),
+      sub: `limit ${m?.quota_limit ? money(m.quota_limit) : 'unlimited'}`,
+      neg: false, color: '#b18a4f', bg: 'rgba(177,138,79,.16)', icon: 'Coin',
+    },
+    {
+      label: 'Today requests', value: humanNum(t?.total_requests),
+      sub: `tokens ${humanNum(t?.total_tokens)} · $${(t?.cost ?? 0).toFixed(4)}`,
+      neg: false, color: '#7a93b8', bg: 'rgba(122,147,184,.16)', icon: 'Connection',
+    },
+  ]
+})
 
-const totalCards = computed(() => [
-  { label: 'Total requests', value: humanNum(overview.value?.total.total_requests), icon: 'Connection' },
-  { label: 'Total tokens', value: humanNum(overview.value?.total.total_tokens), icon: 'ChatDotRound' },
-  { label: 'Total cost ($)', value: money(overview.value?.total.cost), icon: 'Money' },
-])
+// 每日上传/下载（completion = total - prompt）
+function upload(p: { prompt_tokens?: number }) {
+  return humanNum(p.prompt_tokens ?? 0)
+}
+function download(p: { total_tokens?: number; prompt_tokens?: number }) {
+  return humanNum((p.total_tokens ?? 0) - (p.prompt_tokens ?? 0))
+}
 
-
+const totalCards = computed(() => {
+  const t = overview.value?.total
+  return [
+    { label: 'Total requests', value: humanNum(t?.total_requests), icon: 'Connection' },
+    { label: 'Total tokens', value: humanNum(t?.total_tokens), sub: `${humanNum(t?.prompt_tokens)} / ${humanNum(t?.completion_tokens)}`, icon: 'ChatDotRound' },
+    { label: 'Total cost ($)', value: money(t?.cost), icon: 'Money' },
+  ]
+})
 
 onMounted(load)
 </script>
@@ -58,8 +88,9 @@ onMounted(load)
               <el-icon :size="20"><component :is="s.icon" /></el-icon>
             </div>
             <div class="stat-meta">
-              <div class="stat-num">{{ s.value }}<span v-if="s.sub" class="sub">{{ s.sub }}</span></div>
+              <div class="stat-num" :class="{ neg: s.neg }">{{ s.value }}</div>
               <div class="stat-label">{{ s.label }}</div>
+              <div class="stat-sub">{{ s.sub }}</div>
             </div>
           </div>
         </el-card>
@@ -69,16 +100,19 @@ onMounted(load)
     <el-card shadow="never" class="mt">
       <template #header><span>Last 7 days</span></template>
       <el-table :data="overview?.week ?? []" size="small">
-        <el-table-column prop="date" label="Date" width="140" />
-        <el-table-column prop="requests" label="Requests" width="110" sortable />
-        <el-table-column prop="success" label="Success" width="110" sortable />
-        <el-table-column label="Errors" width="100" sortable>
-          <template #default="{ row }">
-            <span :class="{ err: row.errors > 0 }">{{ row.errors }}</span>
-          </template>
+        <el-table-column prop="date" label="Date" width="130" />
+        <el-table-column prop="requests" label="Requests" width="100" align="right" sortable />
+        <el-table-column prop="success" label="Success" width="100" align="right" sortable />
+        <el-table-column label="Errors" width="90" align="right" sortable>
+          <template #default="{ row }"><span :class="{ neg: row.errors > 0 }">{{ row.errors }}</span></template>
         </el-table-column>
-        <el-table-column prop="total_tokens" label="Tokens" width="140" sortable />
-        <el-table-column label="Cost ($)" sortable>
+        <el-table-column label="Upload" width="110" align="right" sortable>
+          <template #default="{ row }">{{ upload(row) }}</template>
+        </el-table-column>
+        <el-table-column label="Download" width="110" align="right" sortable>
+          <template #default="{ row }">{{ download(row) }}</template>
+        </el-table-column>
+        <el-table-column label="Cost ($)" align="right" sortable>
           <template #default="{ row }">{{ money(row.cost) }}</template>
         </el-table-column>
       </el-table>
@@ -93,6 +127,7 @@ onMounted(load)
             <div class="stat-meta">
               <div class="stat-num">{{ s.value }}</div>
               <div class="stat-label">{{ s.label }}</div>
+              <div v-if="s.sub" class="stat-sub">{{ s.sub }}</div>
             </div>
           </div>
         </el-card>
@@ -102,65 +137,15 @@ onMounted(load)
 </template>
 
 <style scoped>
-.stat-card {
-  margin-bottom: 14px;
-}
-.stat-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 4px 2px;
-}
-.stat-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.stat-icon.plain {
-  width: 38px;
-  height: 38px;
-  background: var(--ll-soft);
-  color: var(--ll-muted);
-}
-.stat-meta {
-  min-width: 0;
-}
-.stat-num {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ll-ink);
-  line-height: 1.2;
-  white-space: nowrap;
-}
-.sub {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--ll-muted);
-  margin-left: 4px;
-}
-.stat-label {
-  color: var(--ll-muted);
-  font-size: 13px;
-  margin-top: 2px;
-  white-space: nowrap;
-}
-.stat-sub {
-  color: var(--ll-muted);
-  font-size: 11.5px;
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.err {
-  color: #e11d48;
-  font-weight: 600;
-}
-.mt {
-  margin-top: 14px;
-}
+.stat-card { margin-bottom: 14px; }
+.stat-row { display: flex; align-items: center; gap: 14px; padding: 4px 2px; }
+.stat-icon { width: 46px; height: 46px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.stat-icon.plain { width: 38px; height: 38px; background: var(--ll-soft); color: var(--ll-muted); }
+.stat-meta { min-width: 0; }
+.stat-num { font-size: 22px; font-weight: 700; color: var(--ll-ink); line-height: 1.2; white-space: nowrap; }
+.stat-num.neg { color: #c9808a; }
+.stat-label { color: var(--ll-muted); font-size: 13px; margin-top: 2px; white-space: nowrap; }
+.stat-sub { color: var(--ll-muted); font-size: 11.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.neg { color: #c9808a; }
+.mt { margin-top: 14px; }
 </style>
