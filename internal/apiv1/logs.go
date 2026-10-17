@@ -143,6 +143,19 @@ type dashboardPayload struct {
 }
 
 func usageDashboard(a *app.App) gin.HandlerFunc {
+	return dashboardPayloadHandler(a, 0)
+}
+
+// userDashboard 普通用户仪表盘：与 admin 同结构，但数据仅限本人。
+func userDashboard(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		u := currentUser(c)
+		dashboardPayloadHandler(a, u.ID)(c)
+	}
+}
+
+// dashboardPayloadHandler 生成仪表盘数据；userID=0 表示全平台，>0 表示仅该用户。
+func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		days := 7
 		if v := c.Query("days"); v != "" {
@@ -150,50 +163,74 @@ func usageDashboard(a *app.App) gin.HandlerFunc {
 				days = n
 			}
 		}
-		week, err := store.UsageByDay(a.DB, days)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		weekModels, err := store.UsageModelByDay(a.DB, days)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		hours, err := store.UsageByHour(a.DB, 24)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+		var (
+			week         []store.UsagePoint
+			weekModels   []store.UsageModelPoint
+			hours        []store.UsageHourPoint
+			channelStats []store.ChannelDayStats
+			today        store.UsageSummary
+			weekSum      store.UsageSummary
+			monthSum     store.UsageSummary
+			fails        []*models.RequestLog
+			err          error
+		)
 		now := time.Now()
 		dayStartT := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		today, err := store.UsageSummaryRange(a.DB, dayStartT.Unix())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+		if userID > 0 {
+			week, err = store.UserUsageByDay(a.DB, userID, days)
+			if err == nil {
+				weekModels, err = store.UserUsageModelByDay(a.DB, userID, days)
+			}
+			if err == nil {
+				hours, err = store.UserUsageByHour(a.DB, userID, 24)
+			}
+			if err == nil {
+				today, err = store.UserUsageSummary(a.DB, userID, dayStartT.Unix())
+			}
+			if err == nil {
+				weekSum, err = store.UserUsageSummary(a.DB, userID, dayStartT.AddDate(0, 0, -6).Unix())
+			}
+			if err == nil {
+				monthSum, err = store.UserUsageSummary(a.DB, userID, dayStartT.AddDate(0, 0, -29).Unix())
+			}
+			if err == nil {
+				channelStats, err = store.UserChannelStatsToday(a.DB, userID)
+			}
+			if err == nil {
+				fails, err = store.UserRecentFailures(a.DB, userID, 10)
+			}
+		} else {
+			week, err = store.UsageByDay(a.DB, days)
+			if err == nil {
+				weekModels, err = store.UsageModelByDay(a.DB, days)
+			}
+			if err == nil {
+				hours, err = store.UsageByHour(a.DB, 24)
+			}
+			if err == nil {
+				today, err = store.UsageSummaryRange(a.DB, dayStartT.Unix())
+			}
+			if err == nil {
+				weekSum, err = store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -6).Unix())
+			}
+			if err == nil {
+				monthSum, err = store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -29).Unix())
+			}
+			if err == nil {
+				channelStats, err = store.ChannelStatsToday(a.DB)
+			}
+			if err == nil {
+				fails, err = store.RecentFailures(a.DB, 10)
+			}
 		}
-		weekSum, err := store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -6).Unix())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		monthSum, err := store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -29).Unix())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		channelStats, err := store.ChannelStatsToday(a.DB)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		fails, err := store.RecentFailures(a.DB, 10)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": dashboardPayload{
-			Days: days, Week: week, WeekModels: weekModels, Hours: hours, Today: today,
+			Days: days,
+			Week: week, WeekModels: weekModels, Hours: hours,
+			Today:        today,
 			Periods:      map[string]store.UsageSummary{"today": today, "week": weekSum, "month": monthSum},
 			ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
 		}})

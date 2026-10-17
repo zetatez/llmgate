@@ -3,6 +3,8 @@ package apiv1
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"llmgate/internal/models"
@@ -15,11 +17,13 @@ func adminLoginCookie(t *testing.T, r http.Handler) *http.Cookie {
 	if w.Code != http.StatusOK {
 		t.Fatalf("admin login = %d, body=%s", w.Code, w.Body.String())
 	}
-	cs := w.Result().Cookies()
-	if len(cs) == 0 {
-		t.Fatal("expected admin session cookie")
+	for _, c := range w.Result().Cookies() {
+		if c.Name == adminSessionCookie {
+			return c
+		}
 	}
-	return cs[0]
+	t.Fatal("expected admin session cookie")
+	return nil
 }
 
 func TestSessionProbe(t *testing.T) {
@@ -136,5 +140,77 @@ func TestAdminLogsCountAndUserOverview(t *testing.T) {
 	// 不存在用户 → 404
 	if w := doCookie(r, http.MethodGet, basePath+"/users/9999/overview", "", ac); w.Code != http.StatusNotFound {
 		t.Fatalf("missing user overview = %d, want 404", w.Code)
+	}
+}
+
+// TestLoginSwitchesRole 同一浏览器登录另一类身份时，应吊销并清除旧身份会话，
+// 避免 /api/session 优先级导致页面被带到错误的一端。
+func TestLoginSwitchesRole(t *testing.T) {
+	a := newApp(t)
+	r := newPortalRouter(a)
+	adminCreateUser(t, r, "alice")
+
+	adminCookie := adminLoginCookie(t, r)
+
+	// 模拟浏览器已持有 admin Cookie，再提交用户登录
+	body := `{"username":"alice","password":"secret1"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/user/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("user login = %d, body=%s", w.Code, w.Body.String())
+	}
+	var userCookie *http.Cookie
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == userSessionCookie {
+			userCookie = ck
+		}
+	}
+	if userCookie == nil {
+		t.Fatal("expected user session cookie")
+	}
+
+	// 浏览器同时携带两个 Cookie：admin 会话已被吊销，应返回 user
+	req = httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.AddCookie(adminCookie)
+	req.AddCookie(userCookie)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var sp struct {
+		Role string `json:"role"`
+	}
+	decodeBody(t, w, &sp)
+	if sp.Role != "user" {
+		t.Fatalf("role after user login = %q, want user", sp.Role)
+	}
+
+	// 反向：已持有 user Cookie 时登录 admin，应吊销用户会话
+	req = httptest.NewRequest(http.MethodPost, "/api/admin/login", nil)
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	req.AddCookie(userCookie)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin login = %d, body=%s", w.Code, w.Body.String())
+	}
+	var adminCookie2 *http.Cookie
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == adminSessionCookie {
+			adminCookie2 = ck
+		}
+	}
+	if adminCookie2 == nil {
+		t.Fatal("expected admin session cookie")
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.AddCookie(userCookie)
+	req.AddCookie(adminCookie2)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	decodeBody(t, w, &sp)
+	if sp.Role != "admin" {
+		t.Fatalf("role after admin login = %q, want admin", sp.Role)
 	}
 }

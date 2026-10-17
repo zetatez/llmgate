@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { channelsApi, syncApi, usersApi } from '../api'
-import type { Channel, ChannelKeyItem, User } from '../api'
+import { channelsApi, portalApi, syncApi, usersApi } from '../api'
+import type { Channel, ChannelKeyItem, User, UserChannel, UserKey } from '../api'
+
+// 与 admin 共用同一套页面；scope=user 时使用用户端 API，数据与权限按本人收窄
+const props = defineProps<{ scope?: 'admin' | 'user' }>()
+const isUser = computed(() => props.scope === 'user')
+const myID = ref(0)
+const ownerLabels = ref<Record<number, string>>({})
 
 // ---------- Channel list ----------
 const list = ref<Channel[]>([])
@@ -10,12 +16,23 @@ const loading = ref(false)
 const selected = ref<Channel | null>(null)
 const users = ref<User[]>([])
 
-const channelDialog = reactive({ visible: false, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '' })
+const channelDialog = reactive({ visible: false, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '', mode: 'create' as 'reuse' | 'create', reuseId: 0 })
+
+function toChannel(c: UserChannel): Channel {
+  ownerLabels.value[c.user_id] = c.user_id === 0 ? 'Admin' : (c.owner_name || 'User')
+  return {
+    id: c.id, user_id: c.user_id, name: c.name, base_url: c.base_url, adapter: c.adapter,
+    priority: c.priority, weight: c.weight, timeout_ms: c.timeout_ms || 60000, enabled: c.enabled,
+    health_state: c.health_state, extra_headers: c.extra_headers || '{}', note: c.note, created_at: 0, updated_at: 0,
+  }
+}
 
 async function load() {
   loading.value = true
   try {
-    list.value = await channelsApi.list()
+    list.value = isUser.value
+      ? (await portalApi.channels()).map(toChannel)
+      : await channelsApi.list()
     if (selected.value) {
       const fresh = list.value.find((c) => c.id === selected.value!.id)
       selected.value = fresh ?? null
@@ -30,7 +47,22 @@ function selectChannel(ch: Channel) {
 }
 
 function openCreate() {
-  Object.assign(channelDialog, { visible: true, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '' })
+  Object.assign(channelDialog, {
+    visible: true, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1,
+    timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '',
+    // 普通用户默认引导复用已有渠道：先选渠道加 Key，避免重复建渠道
+    mode: isUser.value ? 'reuse' : 'create',
+    reuseId: isUser.value ? (list.value[0]?.id ?? 0) : 0,
+  })
+}
+
+// 复用已有渠道：选中渠道并直接打开 Add Key
+function continueReuse() {
+  const ch = list.value.find((c) => c.id === channelDialog.reuseId)
+  if (!ch) { ElMessage.warning('Select an existing channel'); return }
+  channelDialog.visible = false
+  selectChannel(ch)
+  openAdd('single')
 }
 
 function openEdit(ch: Channel) {
@@ -75,7 +107,17 @@ async function submitChannel() {
   const extraKeys = parseKeyLines(channelDialog.keys)
   if (extraKeys.length) d.keys = extraKeys
   try {
-    if (channelDialog.editing) await channelsApi.update(channelDialog.id, d)
+    if (isUser.value) {
+      // 用户端只允许维护本人渠道；payload 与管理员端保持一致
+      const payload: any = {
+        name: d.name, base_url: d.base_url, adapter: d.adapter, priority: d.priority,
+        weight: d.weight, timeout_ms: d.timeout_ms, enabled: d.enabled, note: d.note,
+        extra_headers: d.extra_headers,
+      }
+      if (d.keys) payload.keys = d.keys
+      if (channelDialog.editing) await portalApi.updateChannel(channelDialog.id, payload)
+      else await portalApi.createChannel(payload)
+    } else if (channelDialog.editing) await channelsApi.update(channelDialog.id, d)
     else await channelsApi.create(d)
     ElMessage.success('Saved')
     channelDialog.visible = false
@@ -86,7 +128,8 @@ async function submitChannel() {
 async function removeChannel(ch: Channel) {
   await ElMessageBox.confirm(`Delete channel "${ch.name}"? Its keys and routes will also be deleted.`, 'Delete Channel', { type: 'warning' })
   try {
-    await channelsApi.remove(ch.id)
+    if (isUser.value) await portalApi.removeChannel(ch.id)
+    else await channelsApi.remove(ch.id)
     if (selected.value?.id === ch.id) selected.value = null
     ElMessage.success('Deleted')
     load()
@@ -97,7 +140,8 @@ async function removeChannel(ch: Channel) {
 async function toggleChannel(ch: Channel) {
   const d: any = { enabled: ch.enabled ? 0 : 1 }
   try {
-    await channelsApi.update(ch.id, d)
+    if (isUser.value) await portalApi.updateChannel(ch.id, { enabled: d.enabled } as any)
+    else await channelsApi.update(ch.id, d)
     ch.enabled = d.enabled
     ElMessage.success(d.enabled ? 'Channel enabled' : 'Channel disabled')
   } catch (e: any) { ElMessage.error('Operation failed: ' + (e?.response?.data?.error || e)) }
@@ -105,7 +149,7 @@ async function toggleChannel(ch: Channel) {
 
 async function testChannel(ch: Channel) {
   try {
-    const r = await channelsApi.test(ch.id)
+    const r = isUser.value ? await portalApi.testChannel(ch.id) : await channelsApi.test(ch.id)
     if (r.ok) ElMessage.success(`Connection OK (${r.latency_ms}ms)`)
     else ElMessage.error(`Connection failed: ${r.error || `status ${r.status}`}`)
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Test failed') }
@@ -117,7 +161,7 @@ async function syncNow() {
   if (syncing.value) return
   syncing.value = true
   try {
-    const r = await syncApi.now()
+    const r = isUser.value ? await portalApi.syncModels() : await syncApi.now()
     ElMessage.success(`Synced: +${r.created} new, -${r.removed} stale, ${r.skipped} kept${r.errored ? `, ${r.errored} channel(s) failed` : ''} (${r.cost_ms}ms)`)
     if (r.errored > 0) ElMessage.warning(`${r.errored} channel(s) failed to sync — check channel keys/connectivity`)
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Sync failed') } finally { syncing.value = false }
@@ -147,23 +191,40 @@ const keyStats = computed(() => {
   return { total, enabled }
 })
 
+function toKeyItem(k: UserKey): ChannelKeyItem {
+  return {
+    id: k.id, channel_id: k.channel_id, user_id: myID.value, owner_name: 'You',
+    name: k.name, source: k.source, remark: k.remark, masked: k.masked, key_tail: k.key_tail,
+    enabled: k.enabled, effective_enabled: k.enabled, weight: 1, last_used_at: k.last_used_at,
+  }
+}
+
 async function loadKeys() {
   if (!selected.value) return
   keysLoading.value = true
-  try { keys.value = await channelsApi.keys(selected.value.id) } finally { keysLoading.value = false }
+  try {
+    if (isUser.value) {
+      const all = await portalApi.keys()
+      keys.value = all.filter((k) => k.channel_id === selected.value!.id).map(toKeyItem)
+    } else {
+      keys.value = await channelsApi.keys(selected.value.id)
+    }
+  } finally { keysLoading.value = false }
 }
 
 async function toggleKey(k: ChannelKeyItem) {
   const next = k.enabled ? 0 : 1
   try {
-    await channelsApi.updateKey(k.id, { enabled: next })
+    if (isUser.value) await portalApi.updateKey(k.id, { enabled: next })
+    else await channelsApi.updateKey(k.id, { enabled: next })
     k.enabled = next
   } catch (e: any) { ElMessage.error('Operation failed: ' + (e?.response?.data?.error || e)) }
 }
 
 async function updateKeyWeight(k: ChannelKeyItem, weight: number) {
   try {
-    await channelsApi.updateKey(k.id, { weight: +weight || 1 })
+    if (isUser.value) await portalApi.updateKey(k.id, { weight: +weight || 1 } as any)
+    else await channelsApi.updateKey(k.id, { weight: +weight || 1 })
     k.weight = +weight || 1
   } catch (e: any) { ElMessage.error('Failed to save weight') }
 }
@@ -171,7 +232,8 @@ async function updateKeyWeight(k: ChannelKeyItem, weight: number) {
 async function removeKey(k: ChannelKeyItem) {
   await ElMessageBox.confirm(`Delete key "${k.name || k.masked}"?`, 'Delete Key', { type: 'warning' })
   try {
-    await channelsApi.removeKey(k.id)
+    if (isUser.value) await portalApi.removeKey(k.id)
+    else await channelsApi.removeKey(k.id)
     keys.value = keys.value.filter((x) => x.id !== k.id)
     ElMessage.success('Deleted')
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
@@ -192,7 +254,12 @@ async function submitEditKey() {
     const d: any = { name: editKeyDialog.name, remark: editKeyDialog.remark, enabled: editKeyDialog.enabled, weight: +editKeyDialog.weight || 1, user_id: editKeyDialog.user_id || 0 }
     const newKey = editKeyDialog.key.trim()
     if (newKey) d.key = newKey
-    await channelsApi.updateKey(editKeyDialog.id, d)
+    if (isUser.value) {
+      delete d.user_id
+      await portalApi.updateKey(editKeyDialog.id, d)
+    } else {
+      await channelsApi.updateKey(editKeyDialog.id, d)
+    }
     ElMessage.success(newKey ? 'Saved (secret replaced)' : 'Saved')
     editKeyDialog.visible = false
     await loadKeys()
@@ -223,7 +290,9 @@ async function submitAdd() {
       if (!lines.length) { ElMessage.warning('Nothing to add'); return }
       entries.push(...lines.map((l) => ({ name: l.name, key: l.key })))
     }
-    const r = await channelsApi.addKeys(selected.value.id, entries)
+    const r = isUser.value
+      ? await portalApi.addKeys(selected.value.id, entries)
+      : await channelsApi.addKeys(selected.value.id, entries)
     ElMessage.success(`Added ${r.added} key(s)`)
     if (addDialog.mode === 'single') resetAddForm()
     else addDialog.batchText = ''
@@ -236,13 +305,18 @@ async function loadUsers() {
 }
 
 function ownerName(id: number): string {
+  if (isUser.value) return ownerLabels.value[id] || (id === 0 ? 'Admin' : '—')
   const u = users.value.find((x) => x.id === id)
   return u ? (u.username || u.name) : '—'
 }
 
-onMounted(() => {
+onMounted(async () => {
+  if (isUser.value) {
+    try { myID.value = (await portalApi.me()).id } catch { /* ignore */ }
+  } else {
+    loadUsers()
+  }
   load()
-  loadUsers()
 })
 </script>
 
@@ -268,8 +342,8 @@ onMounted(() => {
         </div>
       </template>
       <el-table v-loading="loading" :data="list" size="small" highlight-current-row @current-change="(row: Channel) => row && selectChannel(row)">
-        <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="Name" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="adapter" label="Adapter" width="100" />
         <el-table-column prop="base_url" label="Base URL" min-width="260" show-overflow-tooltip />
         <el-table-column label="Owner" width="130" show-overflow-tooltip>
           <template #default="{ row }">
@@ -279,7 +353,7 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="Status" width="90">
           <template #default="{ row }">
-            <el-switch :model-value="row.enabled === 1" @change="toggleChannel(row)" />
+            <el-switch :model-value="row.enabled === 1" :disabled="isUser && row.user_id !== myID" @change="toggleChannel(row)" />
           </template>
         </el-table-column>
         <el-table-column prop="priority" label="Priority" width="80" />
@@ -292,8 +366,10 @@ onMounted(() => {
         <el-table-column label="Actions" width="230" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click.stop="testChannel(row)">Test</el-button>
-            <el-button link type="primary" size="small" @click.stop="openEdit(row)">Edit</el-button>
-            <el-button link type="danger" size="small" @click.stop="removeChannel(row)">Delete</el-button>
+            <template v-if="!isUser || row.user_id === myID">
+              <el-button link type="primary" size="small" @click.stop="openEdit(row)">Edit</el-button>
+              <el-button link type="danger" size="small" @click.stop="removeChannel(row)">Delete</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -327,7 +403,7 @@ onMounted(() => {
         type="warning"
         :closable="false"
         class="mb"
-        title="This channel is disabled; none of its keys currently participate in routing"
+        title="Channel disabled; its keys are unused."
       />
 
       <!-- 行式表格：一次载入全部，表头冻结，支持快速滚动与搜索 -->
@@ -375,12 +451,28 @@ onMounted(() => {
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!keysLoading && !keys.length" description='No keys yet. Click "Add Key" to create one.' />
+      <el-empty v-if="!keysLoading && !keys.length" description="No keys yet" />
     </el-card>
 
     <!-- Channel edit / create -->
-    <el-dialog v-model="channelDialog.visible" :title="channelDialog.editing ? 'Edit Channel' : 'Add Channel'" width="520px">
-      <el-form label-width="110px">
+    <el-dialog v-model="channelDialog.visible" :title="channelDialog.editing ? 'Edit Channel' : (isUser ? 'Add Channel / Key' : 'Add Channel')" width="560px">
+      <el-radio-group v-if="isUser && !channelDialog.editing" v-model="channelDialog.mode" class="mb">
+        <el-radio-button value="reuse">Use existing channel</el-radio-button>
+        <el-radio-button value="create">Create new channel</el-radio-button>
+      </el-radio-group>
+
+      <template v-if="isUser && !channelDialog.editing && channelDialog.mode === 'reuse'">
+        <el-alert type="info" :closable="false" class="mb" title="Prefer an existing channel — just add your key." />
+        <el-form label-width="110px">
+          <el-form-item label="Channel" required>
+            <el-select v-model="channelDialog.reuseId" style="width: 100%" filterable>
+              <el-option v-for="c in list" :key="c.id" :label="`${c.name} · ${c.base_url}`" :value="c.id" />
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </template>
+
+      <el-form v-else label-width="110px">
         <el-form-item label="Name" required><el-input v-model="channelDialog.name" /></el-form-item>
         <el-form-item label="Base URL" required><el-input v-model="channelDialog.base_url" placeholder="https://api.deepseek.com or .../v1" /></el-form-item>
         <el-form-item label="Protocol"><el-select v-model="channelDialog.adapter" style="width: 100%"><el-option label="OpenAI compatible" value="openai" /></el-select></el-form-item>
@@ -394,12 +486,13 @@ onMounted(() => {
         <el-form-item label="Note"><el-input v-model="channelDialog.note" /></el-form-item>
         <el-form-item label="Extra Headers">
           <el-input v-model="channelDialog.headers" type="textarea" :rows="3" class="code" placeholder='{"x-opencode-session":"your session"}' />
-          <div class="tip">JSON object: extra headers attached to requests to this channel (e.g. x-opencode-session required by opencode); may be left empty</div>
+          <div class="tip">JSON headers sent upstream; optional.</div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="channelDialog.visible = false">Cancel</el-button>
-        <el-button type="primary" @click="submitChannel">Save</el-button>
+        <el-button v-if="isUser && !channelDialog.editing && channelDialog.mode === 'reuse'" type="primary" @click="continueReuse">Add Key</el-button>
+        <el-button v-else type="primary" @click="submitChannel">Save</el-button>
       </template>
     </el-dialog>
 
@@ -429,7 +522,7 @@ onMounted(() => {
         <el-form-item label="Secret">
           <el-input v-model="editKeyDialog.key" type="password" show-password placeholder="Leave empty to keep the current secret" />
         </el-form-item>
-        <el-form-item label="Owner">
+        <el-form-item v-if="!isUser" label="Owner">
           <el-select v-model="editKeyDialog.user_id" style="width: 100%">
             <el-option label="Admin / global (not used by users)" :value="0" />
             <el-option v-for="u in users" :key="u.id" :label="`${u.name || u.username} (#${u.id})`" :value="u.id" />

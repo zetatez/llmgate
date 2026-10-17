@@ -125,7 +125,7 @@ func main() {
 	})
 
 	apiv1.Register(r.Group("/api/admin"), a, modelPuller.SyncNow)
-	apiv1.RegisterUserPortal(r.Group("/api/user"), a)
+	apiv1.RegisterUserPortalWithSync(r.Group("/api/user"), a, modelPuller.SyncNow)
 	r.GET("/api/session", apiv1.SessionProbe(a))
 	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus, pen, gatewayRateLimiter(a))
 

@@ -1,12 +1,17 @@
 package apiv1
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"llmgate/internal/adapter"
 	"llmgate/internal/app"
 	"llmgate/internal/models"
 	"llmgate/internal/store"
@@ -35,19 +40,21 @@ func RegisterUserResourceRoutes(g *gin.RouterGroup, a *app.App) {
 // ---------------- 渠道（套餐） ----------------
 
 type userChannelView struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Adapter     string `json:"adapter"`
-	BaseURL     string `json:"base_url"`
-	Priority    int    `json:"priority"`
-	Weight      int    `json:"weight"`
-	Enabled     int    `json:"enabled"`
-	HealthState string `json:"health_state"`
-	Note        string `json:"note"`
-	UserID      int64  `json:"user_id"`
-	OwnerName   string `json:"owner_name"`
-	IsMine      bool   `json:"is_mine"`
-	MyKeys      int    `json:"my_keys"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Adapter      string `json:"adapter"`
+	BaseURL      string `json:"base_url"`
+	Priority     int    `json:"priority"`
+	Weight       int    `json:"weight"`
+	Enabled      int    `json:"enabled"`
+	HealthState  string `json:"health_state"`
+	TimeoutMS    int    `json:"timeout_ms"`
+	ExtraHeaders string `json:"extra_headers"`
+	Note         string `json:"note"`
+	UserID       int64  `json:"user_id"`
+	OwnerName    string `json:"owner_name"`
+	IsMine       bool   `json:"is_mine"`
+	MyKeys       int    `json:"my_keys"`
 }
 
 func myKeyCounts(a *app.App, userID int64) map[int64]int {
@@ -82,7 +89,8 @@ func userListChannels(a *app.App) gin.HandlerFunc {
 		for _, ch := range list {
 			out = append(out, userChannelView{
 				ID: ch.ID, Name: ch.Name, Adapter: ch.Adapter, BaseURL: ch.BaseURL,
-				Priority: ch.Priority, Weight: ch.Weight, Enabled: ch.Enabled, HealthState: ch.HealthState, Note: ch.Note,
+				Priority: ch.Priority, Weight: ch.Weight, Enabled: ch.Enabled, HealthState: ch.HealthState,
+				TimeoutMS: ch.TimeoutMS, ExtraHeaders: ch.ExtraHeaders, Note: ch.Note,
 				UserID: ch.UserID, OwnerName: owners[ch.UserID], IsMine: ch.UserID == u.ID, MyKeys: counts[ch.ID],
 			})
 		}
@@ -94,12 +102,15 @@ func userCreateChannel(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
 		var b struct {
-			Name     string `json:"name"`
-			BaseURL  string `json:"base_url"`
-			Adapter  string `json:"adapter"`
-			Priority int    `json:"priority"`
-			Weight   int    `json:"weight"`
-			Note     string `json:"note"`
+			Name         string            `json:"name"`
+			BaseURL      string            `json:"base_url"`
+			Adapter      string            `json:"adapter"`
+			Priority     int               `json:"priority"`
+			Weight       int               `json:"weight"`
+			TimeoutMS    int               `json:"timeout_ms"`
+			Note         string            `json:"note"`
+			ExtraHeaders map[string]string `json:"extra_headers"`
+			Keys         json.RawMessage   `json:"keys"`
 		}
 		if !decode(c, &b) {
 			return
@@ -112,15 +123,50 @@ func userCreateChannel(a *app.App) gin.HandlerFunc {
 		if adapter == "" {
 			adapter = "openai"
 		}
+		timeout := b.TimeoutMS
+		if timeout <= 0 {
+			timeout = 60000
+		}
+		headers := "{}"
+		if len(b.ExtraHeaders) > 0 {
+			if raw, err := json.Marshal(b.ExtraHeaders); err == nil {
+				headers = string(raw)
+			}
+		}
 		ch := &models.Channel{
 			UserID: u.ID, Name: strings.TrimSpace(b.Name), BaseURL: strings.TrimSpace(b.BaseURL),
-			Adapter: adapter, Priority: b.Priority, Weight: orInt(b.Weight, 1), TimeoutMS: 60000,
-			Enabled: 1, HealthState: "healthy", Note: b.Note,
+			Adapter: adapter, Priority: b.Priority, Weight: orInt(b.Weight, 1), TimeoutMS: timeout,
+			Enabled: 1, HealthState: "healthy", ExtraHeaders: headers, Note: b.Note,
 		}
 		id, err := store.CreateChannel(a.DB, ch)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		// 与管理员端一致：建渠道时可直接附带本人 Key
+		if len(b.Keys) > 0 {
+			entries, err := parseKeyEntries(b.Keys)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			items := make([]store.KeyInput, 0, len(entries))
+			for _, e := range entries {
+				if strings.TrimSpace(e.Key) == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "key must not be empty"})
+					return
+				}
+				enc, err := a.Secret.Encrypt(strings.TrimSpace(e.Key))
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				items = append(items, store.KeyInput{UserID: u.ID, Name: e.Name, Source: e.Source, Remark: e.Remark, Encrypted: enc})
+			}
+			if err := store.AddChannelKeys(a.DB, id, items); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id}})
 	}
@@ -152,13 +198,15 @@ func userUpdateChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			Name     *string `json:"name"`
-			BaseURL  *string `json:"base_url"`
-			Adapter  *string `json:"adapter"`
-			Priority *int    `json:"priority"`
-			Weight   *int    `json:"weight"`
-			Enabled  *int    `json:"enabled"`
-			Note     *string `json:"note"`
+			Name         *string            `json:"name"`
+			BaseURL      *string            `json:"base_url"`
+			Adapter      *string            `json:"adapter"`
+			Priority     *int               `json:"priority"`
+			Weight       *int               `json:"weight"`
+			TimeoutMS    *int               `json:"timeout_ms"`
+			Enabled      *int               `json:"enabled"`
+			Note         *string            `json:"note"`
+			ExtraHeaders *map[string]string `json:"extra_headers"`
 		}
 		if !decode(c, &b) {
 			return
@@ -178,17 +226,87 @@ func userUpdateChannel(a *app.App) gin.HandlerFunc {
 		if b.Weight != nil && *b.Weight > 0 {
 			cur.Weight = *b.Weight
 		}
+		if b.TimeoutMS != nil && *b.TimeoutMS > 0 {
+			cur.TimeoutMS = *b.TimeoutMS
+		}
 		if b.Enabled != nil {
 			cur.Enabled = *b.Enabled
 		}
 		if b.Note != nil {
 			cur.Note = *b.Note
 		}
+		if b.ExtraHeaders != nil {
+			if raw, err := json.Marshal(*b.ExtraHeaders); err == nil {
+				cur.ExtraHeaders = string(raw)
+			}
+		}
 		if err := store.UpdateChannel(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": cur.ID}})
+	}
+}
+
+// userTestChannel 用当前用户在该渠道下的 Key 做连通性测试（与管理员端同结构）。
+func userTestChannel(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c, "id")
+		if !ok {
+			return
+		}
+		u := currentUser(c)
+		ch, err := store.GetChannel(a.DB, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if ch == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+			return
+		}
+		keys, err := store.ListChannelKeys(a.DB, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var apiKey string
+		for _, k := range keys {
+			if k.UserID == u.ID && k.Enabled == 1 {
+				if plain, derr := a.Secret.Decrypt(k.APIKeyEnc); derr == nil && plain != "" {
+					apiKey = plain
+					break
+				}
+			}
+		}
+		if apiKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "add your own enabled key to this channel first"})
+			return
+		}
+		adpt := adapter.Get(ch.Adapter)
+		if adpt == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown adapter type: " + ch.Adapter})
+			return
+		}
+		timeout := ch.TimeoutMS
+		if timeout <= 0 {
+			timeout = 60000
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(timeout)*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "error": err.Error(), "latency_ms": time.Since(start).Milliseconds()}})
+			return
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "status": resp.StatusCode, "error": truncateStr(string(body), 300), "latency_ms": time.Since(start).Milliseconds()}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": true, "status": resp.StatusCode, "latency_ms": time.Since(start).Milliseconds()}})
 	}
 }
 
@@ -212,17 +330,20 @@ func userDeleteChannel(a *app.App) gin.HandlerFunc {
 // ---------------- 路由（所有人可见；仅本人渠道可改） ----------------
 
 type userRouteView struct {
-	ID               int64  `json:"id"`
-	DisplayName      string `json:"display_name"`
-	ChannelID        int64  `json:"channel_id"`
-	ChannelName      string `json:"channel_name"`
-	ChannelUserID    int64  `json:"channel_user_id"`
-	UpstreamModel    string `json:"upstream_model"`
-	Priority         int    `json:"priority"`
-	Weight           int    `json:"weight"`
-	Enabled          int    `json:"enabled"`
-	EffectiveEnabled int    `json:"effective_enabled"`
-	IsMine           bool   `json:"is_mine"`
+	ID               int64    `json:"id"`
+	DisplayName      string   `json:"display_name"`
+	ChannelID        int64    `json:"channel_id"`
+	ChannelName      string   `json:"channel_name"`
+	ChannelUserID    int64    `json:"channel_user_id"`
+	UpstreamModel    string   `json:"upstream_model"`
+	Priority         int      `json:"priority"`
+	Weight           int      `json:"weight"`
+	Enabled          int      `json:"enabled"`
+	EffectiveEnabled int      `json:"effective_enabled"`
+	ChannelEnabled   int      `json:"channel_enabled"`
+	PriceInput       *float64 `json:"price_input"`
+	PriceOutput      *float64 `json:"price_output"`
+	IsMine           bool     `json:"is_mine"`
 }
 
 func channelMap(a *app.App) (map[int64]*models.Channel, error) {
@@ -256,10 +377,12 @@ func userListRoutes(a *app.App) gin.HandlerFunc {
 			v := userRouteView{
 				ID: r.ID, DisplayName: r.DisplayName, ChannelID: r.ChannelID,
 				UpstreamModel: r.UpstreamModel, Priority: r.Priority, Weight: r.Weight, Enabled: r.Enabled,
+				PriceInput: r.PriceInput, PriceOutput: r.PriceOutput,
 			}
 			if ch != nil {
 				v.ChannelName = ch.Name
 				v.ChannelUserID = ch.UserID
+				v.ChannelEnabled = ch.Enabled
 				v.IsMine = ch.UserID == u.ID
 				if ch.Enabled == 1 && r.Enabled == 1 {
 					v.EffectiveEnabled = 1
@@ -299,12 +422,14 @@ func userCreateRoute(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
 		var b struct {
-			DisplayName   string `json:"display_name"`
-			ChannelID     int64  `json:"channel_id"`
-			UpstreamModel string `json:"upstream_model"`
-			Priority      int    `json:"priority"`
-			Weight        int    `json:"weight"`
-			Enabled       *int   `json:"enabled"`
+			DisplayName   string   `json:"display_name"`
+			ChannelID     int64    `json:"channel_id"`
+			UpstreamModel string   `json:"upstream_model"`
+			Priority      int      `json:"priority"`
+			Weight        int      `json:"weight"`
+			Enabled       *int     `json:"enabled"`
+			PriceInput    *float64 `json:"price_input"`
+			PriceOutput   *float64 `json:"price_output"`
 		}
 		if !decode(c, &b) {
 			return
@@ -329,6 +454,7 @@ func userCreateRoute(a *app.App) gin.HandlerFunc {
 		r := &models.ModelRoute{
 			DisplayName: strings.TrimSpace(b.DisplayName), ChannelID: b.ChannelID,
 			UpstreamModel: strings.TrimSpace(b.UpstreamModel), Priority: b.Priority, Weight: orInt(b.Weight, 1), Enabled: enabled,
+			PriceInput: b.PriceInput, PriceOutput: b.PriceOutput,
 		}
 		id, err := store.CreateModelRoute(a.DB, r)
 		if err != nil {
@@ -350,11 +476,13 @@ func userUpdateRoute(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			DisplayName   *string `json:"display_name"`
-			UpstreamModel *string `json:"upstream_model"`
-			Priority      *int    `json:"priority"`
-			Weight        *int    `json:"weight"`
-			Enabled       *int    `json:"enabled"`
+			DisplayName   *string  `json:"display_name"`
+			UpstreamModel *string  `json:"upstream_model"`
+			Priority      *int     `json:"priority"`
+			Weight        *int     `json:"weight"`
+			Enabled       *int     `json:"enabled"`
+			PriceInput    *float64 `json:"price_input"`
+			PriceOutput   *float64 `json:"price_output"`
 		}
 		if !decode(c, &b) {
 			return
@@ -373,6 +501,12 @@ func userUpdateRoute(a *app.App) gin.HandlerFunc {
 		}
 		if b.Enabled != nil {
 			cur.Enabled = *b.Enabled
+		}
+		if b.PriceInput != nil {
+			cur.PriceInput = b.PriceInput
+		}
+		if b.PriceOutput != nil {
+			cur.PriceOutput = b.PriceOutput
 		}
 		if err := store.UpdateModelRoute(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

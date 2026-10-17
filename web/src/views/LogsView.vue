@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { logsApi } from '../api'
+import { computed, onMounted, ref } from 'vue'
+import { logsApi, portalApi } from '../api'
 import type { RequestLog } from '../api'
+
+const props = defineProps<{ scope?: 'admin' | 'user' }>()
+const isUser = computed(() => props.scope === 'user')
 
 const list = ref<RequestLog[]>([])
 const loading = ref(false)
@@ -16,6 +19,10 @@ function fmtTime(ts: number) {
   const d = new Date(ts * 1000)
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+function money(v: number) {
+  return (v ?? 0).toFixed(4)
 }
 
 function baseParams(): Record<string, string | number> {
@@ -34,8 +41,8 @@ async function load() {
   loading.value = true
   try {
     const params = { ...baseParams(), limit: size.value, offset: (page.value - 1) * size.value }
-    list.value = await logsApi.list(params)
-    total.value = await logsApi.count(baseParams())
+    list.value = isUser.value ? await portalApi.logs(params as any) : await logsApi.list(params)
+    total.value = isUser.value ? await portalApi.logsCount(params as any) : await logsApi.count(baseParams())
   } finally {
     loading.value = false
   }
@@ -71,7 +78,7 @@ onMounted(load)
         <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column prop="display_model" label="Model" width="170" show-overflow-tooltip />
-      <el-table-column label="User" min-width="130" show-overflow-tooltip>
+      <el-table-column v-if="!isUser" label="User" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ row.user_name || '—' }}</template>
       </el-table-column>
       <el-table-column label="Channel" width="130" show-overflow-tooltip>
@@ -84,6 +91,9 @@ onMounted(load)
       </el-table-column>
       <el-table-column label="Tokens" width="90" class-name="nowrap">
         <template #default="{ row }">{{ row.total_tokens }}</template>
+      </el-table-column>
+      <el-table-column label="Cost ($)" width="100" class-name="nowrap">
+        <template #default="{ row }">{{ money(row.cost) }}</template>
       </el-table-column>
       <el-table-column prop="latency_ms" label="Latency (ms)" width="100" class-name="nowrap" />
       <el-table-column label="Status" width="90">

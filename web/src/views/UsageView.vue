@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { logsApi, usersApi } from '../api'
-import type { User, UserModelUsage } from '../api'
+import { logsApi, portalApi, usersApi } from '../api'
+import type { PortalUser, User, UserModelUsage } from '../api'
+
+const props = defineProps<{ scope?: 'admin' | 'user' }>()
+const isUser = computed(() => props.scope === 'user')
 
 const usage = ref<UserModelUsage[]>([])
 const users = ref<User[]>([])
@@ -92,12 +95,32 @@ const totals = computed(() =>
   }), { users: 0, requests: 0, prompt: 0, completion: 0, cost: 0, callsBalance: 0, creditBalance: 0 }),
 )
 
+// 普通用户：复用同一套 Billing 视图，仅展示自己的数据
+function selfToUser(m: PortalUser): User {
+  return {
+    id: m.id, name: m.name, remark: '', username: m.username,
+    quota_limit: m.quota_limit, quota_used: m.quota_used, status: m.status,
+    has_token: true, token_tail: '', token_expires_at: 0, token_last_used_at: 0,
+    calls_spent: m.calls_spent, calls_earned: m.calls_earned, calls_balance: m.calls_balance,
+    in_spent: m.in_spent, out_spent: m.out_spent, in_served: m.in_served, out_served: m.out_served,
+    credit_spent: m.credit_spent, credit_earned: m.credit_earned, credit_balance: m.credit_balance,
+    debt_floor_calls: m.debt_floor_calls, debt_floor_credit: m.debt_floor_credit,
+    last_login_at: m.last_login_at, created_at: 0,
+  }
+}
+
 async function load() {
   loading.value = true
   try {
-    const [u, us] = await Promise.all([logsApi.usageByUserModel(days.value), usersApi.list()])
-    usage.value = u
-    users.value = us
+    if (isUser.value) {
+      const [me, byModel] = await Promise.all([portalApi.me(), portalApi.teamUsageByModel(days.value)])
+      users.value = [selfToUser(me)]
+      usage.value = byModel.filter((r) => r.user_id === me.id)
+    } else {
+      const [u, us] = await Promise.all([logsApi.usageByUserModel(days.value), usersApi.list()])
+      usage.value = u
+      users.value = us
+    }
   } finally {
     loading.value = false
   }
@@ -126,8 +149,8 @@ onMounted(load)
         </el-radio-group>
         <span class="hint">
           {{ mode === 'lifetime'
-            ? 'Lifetime totals since registration (kept by counters, unaffected by log cleanup).'
-            : 'Usage in the selected range from request logs; expand for per-model detail.' }}
+            ? 'Lifetime totals.'
+            : 'Selected range.' }}
         </span>
       </div>
     </el-card>
@@ -135,8 +158,8 @@ onMounted(load)
     <el-row :gutter="14" class="mt">
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(totals.requests) }}</div><div class="sum-label">Requests</div></el-card></el-col>
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(totals.prompt) }} / {{ humanNum(totals.completion) }}</div><div class="sum-label">Upload / Download tokens</div></el-card></el-col>
-      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.callsBalance < 0 }">{{ totals.callsBalance }}</div><div class="sum-label">Calls balance (all users)</div></el-card></el-col>
-      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.creditBalance < 0 }">${{ totals.creditBalance.toFixed(2) }}</div><div class="sum-label">Credit balance (all users)</div></el-card></el-col>
+      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.callsBalance < 0 }">{{ totals.callsBalance }}</div><div class="sum-label">Calls balance{{ isUser ? '' : ' (all users)' }}</div></el-card></el-col>
+      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.creditBalance < 0 }">${{ totals.creditBalance.toFixed(2) }}</div><div class="sum-label">Credit balance{{ isUser ? '' : ' (all users)' }}</div></el-card></el-col>
     </el-row>
 
     <el-card shadow="never" class="mt">

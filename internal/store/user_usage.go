@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"time"
+
+	"llmgate/internal/models"
 )
 
 // UserUsageByDay 返回某用户最近 days 天（含今天）每天聚合，不足的日期补零。
@@ -116,6 +118,128 @@ func UserUsageByModel(db *sql.DB, userID, from, to int64) ([]ModelUsage, error) 
 		m.Requests, m.TotalTokens, m.PromptTokens, m.CompletionToks = req.Int64, ttok.Int64, ptok.Int64, ctok.Int64
 		m.Cost = cost.Float64
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// UserUsageModelByDay 返回某用户最近 days 天按「日期 × 模型」拆分的用量。
+func UserUsageModelByDay(db *sql.DB, userID int64, days int) ([]UsageModelPoint, error) {
+	if days <= 0 {
+		days = 7
+	}
+	rows, err := db.Query(`
+		SELECT strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS day,
+			COALESCE(display_model, 'unknown'),
+			COUNT(*), SUM(total_tokens)
+		FROM request_logs
+		WHERE user_id = ? AND created_at >= ?
+		GROUP BY day, display_model
+		ORDER BY day ASC, display_model ASC`, userID, unixDayStart(days-1))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UsageModelPoint{}
+	for rows.Next() {
+		var p UsageModelPoint
+		var reqs, tok sql.NullInt64
+		if err := rows.Scan(&p.Date, &p.Model, &reqs, &tok); err != nil {
+			return nil, err
+		}
+		p.Requests, p.Tokens = reqs.Int64, tok.Int64
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// UserUsageByHour 返回某用户最近 hours 小时按小时聚合，缺失补零。
+func UserUsageByHour(db *sql.DB, userID int64, hours int) ([]UsageHourPoint, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	now := time.Now()
+	start := now.Add(time.Duration(-(hours - 1)) * time.Hour)
+	startHour := time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, start.Location())
+	rows, err := db.Query(`
+		SELECT strftime('%Y-%m-%d %H', created_at, 'unixepoch', 'localtime') AS hr,
+			COUNT(*), SUM(total_tokens), SUM(cost)
+		FROM request_logs WHERE user_id = ? AND created_at >= ? GROUP BY hr`, userID, startHour.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]UsageHourPoint{}
+	for rows.Next() {
+		var hr string
+		var req, tok sql.NullInt64
+		var cost sql.NullFloat64
+		if err := rows.Scan(&hr, &req, &tok, &cost); err != nil {
+			return nil, err
+		}
+		m[hr] = UsageHourPoint{Requests: req.Int64, Tokens: tok.Int64, Cost: cost.Float64}
+	}
+	out := make([]UsageHourPoint, 0, hours)
+	for i := 0; i < hours; i++ {
+		t := startHour.Add(time.Duration(i) * time.Hour)
+		p := m[t.Format("2006-01-02 15")]
+		p.Hour = t.Format("15:00")
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// UserChannelStatsToday 返回某用户今日使用过的渠道统计（按请求数降序）。
+func UserChannelStatsToday(db *sql.DB, userID int64) ([]ChannelDayStats, error) {
+	rows, err := db.Query(`
+		SELECT ch.id, ch.name, ch.health_state,
+			SUM(CASE WHEN lg.created_at >= ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN lg.created_at >= ? AND lg.status != 'success' THEN 1 ELSE 0 END)
+		FROM request_logs lg
+		JOIN channels ch ON ch.id = lg.channel_id
+		WHERE lg.user_id = ?
+		GROUP BY ch.id
+		ORDER BY SUM(CASE WHEN lg.created_at >= ? THEN 1 ELSE 0 END) DESC, ch.id ASC`,
+		dayStart(), dayStart(), userID, dayStart())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ChannelDayStats
+	for rows.Next() {
+		var s ChannelDayStats
+		var req, errs sql.NullInt64
+		if err := rows.Scan(&s.ChannelID, &s.Name, &s.Health, &req, &errs); err != nil {
+			return nil, err
+		}
+		s.TodayReq, s.TodayErr = req.Int64, errs.Int64
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// UserRecentFailures 返回某用户最近 N 条失败日志。
+func UserRecentFailures(db *sql.DB, userID int64, n int) ([]*models.RequestLog, error) {
+	if n <= 0 || n > 50 {
+		n = 10
+	}
+	rows, err := db.Query(`SELECT `+queryLogSelect+` FROM request_logs lg
+		LEFT JOIN channels ch ON ch.id = lg.channel_id
+		LEFT JOIN users u ON u.id = lg.user_id
+		WHERE lg.user_id = ? AND lg.status != 'success'
+		ORDER BY lg.id DESC LIMIT ?`, userID, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.RequestLog
+	for rows.Next() {
+		l := &models.RequestLog{}
+		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.KeyOwnerID, &l.ChannelName, &l.UpstreamModel,
+			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
+			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
 	}
 	return out, rows.Err()
 }

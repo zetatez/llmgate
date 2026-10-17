@@ -15,11 +15,12 @@ const router = createRouter({
       redirect: '/dashboard',
       meta: { area: 'admin' },
       children: [
-        { path: 'dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: 'Overview', area: 'admin' } },
+        { path: 'dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue'), props: { scope: 'admin' }, meta: { title: 'Overview', area: 'admin' } },
         { path: 'channels', name: 'channels', component: () => import('../views/ChannelsView.vue'), meta: { title: 'Channels', area: 'admin' } },
         { path: 'model-routes', name: 'model-routes', component: () => import('../views/ModelRoutesView.vue'), meta: { title: 'Routes', area: 'admin' } },
         { path: 'pricing', name: 'pricing', component: () => import('../views/PricingView.vue'), props: { readonly: false }, meta: { title: 'Pricing', area: 'admin' } },
         { path: 'users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: 'Users', area: 'admin' } },
+        { path: 'members', name: 'members', component: () => import('../views/MembersView.vue'), props: { scope: 'admin' }, meta: { title: 'Members', area: 'admin' } },
         { path: 'usage', name: 'usage', component: () => import('../views/UsageView.vue'), meta: { title: 'Billing', area: 'admin' } },
         { path: 'logs', name: 'logs', component: () => import('../views/LogsView.vue'), meta: { title: 'Logs', area: 'admin' } },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: 'Settings', area: 'admin' } },
@@ -31,14 +32,15 @@ const router = createRouter({
       redirect: '/user/overview',
       meta: { area: 'user' },
       children: [
-        { path: 'overview', name: 'user-overview', component: () => import('../views/user/OverviewView.vue'), meta: { title: 'Overview', area: 'user' } },
-        { path: 'channels', name: 'user-channels', component: () => import('../views/user/ChannelsView.vue'), meta: { title: 'Channels', area: 'user' } },
-        { path: 'routes', name: 'user-routes', component: () => import('../views/user/RoutesView.vue'), meta: { title: 'Routes', area: 'user' } },
+        { path: 'overview', name: 'user-overview', component: () => import('../views/DashboardView.vue'), props: { scope: 'user' }, meta: { title: 'Overview', area: 'user' } },
+        { path: 'channels', name: 'user-channels', component: () => import('../views/ChannelsView.vue'), props: { scope: 'user' }, meta: { title: 'Channels', area: 'user' } },
+        { path: 'routes', name: 'user-routes', component: () => import('../views/ModelRoutesView.vue'), props: { scope: 'user' }, meta: { title: 'Routes', area: 'user' } },
         { path: 'pricing', name: 'user-pricing', component: () => import('../views/PricingView.vue'), props: { readonly: true }, meta: { title: 'Pricing', area: 'user' } },
-        { path: 'keys', name: 'user-keys', component: () => import('../views/user/KeysView.vue'), meta: { title: 'My API Keys', area: 'user' } },
-        { path: 'tokens', name: 'user-tokens', component: () => import('../views/user/TokensView.vue'), meta: { title: 'My Tokens', area: 'user' } },
-        { path: 'credits', name: 'user-credits', component: () => import('../views/user/UsageView.vue'), meta: { title: 'Credits', area: 'user' } },
-        { path: 'logs', name: 'user-logs', component: () => import('../views/user/LogsView.vue'), meta: { title: 'My Requests', area: 'user' } },
+        { path: 'keys', redirect: '/user/channels' },
+        { path: 'tokens', name: 'user-tokens', component: () => import('../views/UsersView.vue'), props: { scope: 'user' }, meta: { title: 'Users', area: 'user' } },
+        { path: 'members', name: 'user-members', component: () => import('../views/MembersView.vue'), props: { scope: 'user' }, meta: { title: 'Members', area: 'user' } },
+        { path: 'credits', name: 'user-credits', component: () => import('../views/UsageView.vue'), props: { scope: 'user' }, meta: { title: 'Billing', area: 'user' } },
+        { path: 'logs', name: 'user-logs', component: () => import('../views/LogsView.vue'), props: { scope: 'user' }, meta: { title: 'Logs', area: 'user' } },
       ],
     },
   ],
@@ -63,6 +65,18 @@ router.beforeEach(async (to) => {
     return role === 'user' ? true : { name: 'login', query: { redirect: to.fullPath } }
   }
   return true
+})
+
+// 部署后旧的懒加载 chunk 会随镜像更新而消失；已打开的页面再点导航会 import 失败。
+// 这里自动整页重载一次以拿到新版入口，避免“点击没反应，手动刷新才正常”。
+router.onError((error, to) => {
+  const msg = String((error as any)?.message || error || '')
+  if (!/dynamically imported module|Importing a module script failed|Failed to fetch/i.test(msg)) return
+  const key = 'llmgate_reload_at'
+  const last = Number(sessionStorage.getItem(key) || 0)
+  if (Date.now() - last < 10_000) return
+  sessionStorage.setItem(key, String(Date.now()))
+  window.location.assign(to?.fullPath || window.location.href)
 })
 
 export default router

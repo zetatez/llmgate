@@ -41,8 +41,17 @@ func CheckPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-// RegisterUserPortal 挂载用户端路由。
+// RegisterUserPortal 挂载用户端路由（无模型同步回调，测试用）。
 func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
+	registerUserPortal(g, a, nil)
+}
+
+// RegisterUserPortalWithSync 挂载用户端路由，并允许所有登录用户手动触发模型同步。
+func RegisterUserPortalWithSync(g *gin.RouterGroup, a *app.App, syncNow func() map[string]any) {
+	registerUserPortal(g, a, syncNow)
+}
+
+func registerUserPortal(g *gin.RouterGroup, a *app.App, syncNow func() map[string]any) {
 	g.Use(csrfOriginCheck())
 	g.POST("/login", userLogin(a))
 	g.POST("/logout", userLogout(a))
@@ -50,7 +59,11 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 	authed := g.Group("")
 	authed.Use(userAuthMiddleware(a))
 	authed.GET("/me", userMe(a))
+	authed.GET("/profile", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"data": toUserView(a, currentUser(c))})
+	})
 	authed.GET("/overview", userOverview(a))
+	authed.GET("/dashboard", userDashboard(a))
 	authed.PUT("/password", userChangePassword(a))
 
 	// 渠道（套餐）/ 路由 / 共享统计
@@ -70,6 +83,13 @@ func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
 	authed.GET("/logs", userLogs(a))
 	authed.GET("/logs/count", userLogsCount(a))
 	authed.GET("/pricing", listPricing(a))
+	authed.GET("/members", listMembers(a))
+	authed.GET("/gateway-endpoints", gatewayEndpoints(a))
+	if syncNow != nil {
+		authed.POST("/model-sync", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"data": syncNow()})
+		})
+	}
 	authed.POST("/logout-all", userLogoutAll(a))
 }
 
@@ -118,6 +138,8 @@ func userLogin(a *app.App) gin.HandlerFunc {
 		}
 		_ = store.TouchUserLogin(a.DB, u.ID)
 		setUserSession(c, token, int(sessionTTL))
+		// 同一浏览器切换身份：登录普通用户时吊销并清除管理端会话
+		clearAdminSessionFor(a, c)
 		v := toPortalUser(u)
 		v.GatewayPrefix = a.Cfg.GatewayPrefix
 		c.JSON(http.StatusOK, gin.H{"data": v})
@@ -397,6 +419,7 @@ func userUpdateKey(a *app.App) gin.HandlerFunc {
 			Remark  *string `json:"remark"`
 			Key     *string `json:"key"`
 			Enabled *int    `json:"enabled"`
+			Weight  *int    `json:"weight"`
 		}
 		if !decode(c, &b) {
 			return
@@ -412,6 +435,9 @@ func userUpdateKey(a *app.App) gin.HandlerFunc {
 		}
 		if b.Enabled != nil {
 			cur.Enabled = *b.Enabled
+		}
+		if b.Weight != nil && *b.Weight > 0 {
+			cur.Weight = *b.Weight
 		}
 		if err := store.UpdateChannelKey(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

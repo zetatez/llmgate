@@ -80,11 +80,13 @@ func userLoginCookie(t *testing.T, r http.Handler, username, password string) *h
 	if w.Code != http.StatusOK {
 		t.Fatalf("user login = %d, body=%s", w.Code, w.Body.String())
 	}
-	cs := w.Result().Cookies()
-	if len(cs) == 0 {
-		t.Fatal("expected user session cookie")
+	for _, c := range w.Result().Cookies() {
+		if c.Name == userSessionCookie {
+			return c
+		}
 	}
-	return cs[0]
+	t.Fatal("expected user session cookie")
+	return nil
 }
 
 func TestUserPortalLoginAndMe(t *testing.T) {
@@ -523,5 +525,31 @@ func TestUserTestKey(t *testing.T) {
 	// 测试不存在的 Key → 404
 	if w := doCookie(r, http.MethodPost, "/api/user/keys/99999/test", "", cookie); w.Code != http.StatusNotFound {
 		t.Fatalf("test missing key = %d, want 404", w.Code)
+	}
+}
+
+// TestUserCanTriggerModelSync 普通用户也应能手动触发模型同步。
+func TestUserCanTriggerModelSync(t *testing.T) {
+	a := newApp(t)
+	r := gin.New()
+	Register(r.Group(basePath), a, nil)
+	RegisterUserPortalWithSync(r.Group("/api/user"), a, func() map[string]any {
+		return map[string]any{"created": 3, "skipped": 1}
+	})
+	adminCreateUser(t, r, "alice")
+	cookie := userLoginCookie(t, r, "alice", "secret1")
+
+	w := doCookie(r, http.MethodPost, "/api/user/model-sync", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("user model-sync = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data struct {
+			Created int `json:"created"`
+		} `json:"data"`
+	}
+	decodeBody(t, w, &resp)
+	if resp.Data.Created != 3 {
+		t.Fatalf("model-sync result = %+v", resp.Data)
 	}
 }

@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { channelsApi, modelRoutesApi } from '../api'
-import type { Channel, ModelRoute } from '../api'
+import { channelsApi, modelRoutesApi, portalApi } from '../api'
+import type { Channel, ModelRoute, UserChannel, UserRoute } from '../api'
+
+const props = defineProps<{ scope?: 'admin' | 'user' }>()
+const isUser = computed(() => props.scope === 'user')
+const myRouteIDs = ref<Set<number>>(new Set())
+const myChannelIDs = ref<Set<number>>(new Set())
 import { vendorOf } from '../utils/vendor'
 
 const list = ref<ModelRoute[]>([])
@@ -87,6 +92,21 @@ const filtered = computed(() => {
 })
 
 // 每个渠道已同步的上游模型名（用于自定义路由/新增路由的搜索下拉）
+const channelOptions = computed(() => isUser.value ? channels.value.filter((c) => myChannelIDs.value.has(c.id)) : channels.value)
+
+function canManage(r: ModelRoute): boolean {
+  return !isUser.value || myRouteIDs.value.has(r.id)
+}
+
+function toModelRoute(r: UserRoute): ModelRoute {
+  return {
+    id: r.id, display_name: r.display_name, channel_id: r.channel_id, channel_name: r.channel_name,
+    channel_enabled: r.channel_enabled ?? 1, effective_enabled: r.effective_enabled,
+    upstream_model: r.upstream_model, priority: r.priority, weight: r.weight, enabled: r.enabled,
+    price_input: r.price_input ?? null, price_output: r.price_output ?? null,
+  }
+}
+
 const upstreamByChannel = computed(() => {
   const m = new Map<number, string[]>()
   for (const r of list.value) {
@@ -150,13 +170,14 @@ async function saveCustomGroup() {
   try {
     // 编辑模式：按"原名字"删除旧路由再重建（用户可能改了名）
     if (customDialog.editing && customDialog.originalName) {
-      const old = customGroups.value.find((g) => g.display_name === customDialog.originalName)?.routes ?? []
+      const old = (customGroups.value.find((g) => g.display_name === customDialog.originalName)?.routes ?? [])
+        .filter((r) => canManage(r))
       for (const r of old) {
-        await modelRoutesApi.remove(r.id)
+        await apiRemove(r.id)
       }
     }
     for (const row of rows) {
-      await modelRoutesApi.create({
+      await apiCreate({
         display_name: name, channel_id: row.channel_id,
         upstream_model: row.upstream_model.trim(), priority: +row.priority || 0,
         weight: +row.weight || 1, enabled: row.enabled,
@@ -174,7 +195,7 @@ function openCustomEdit(g: { display_name: string; routes: ModelRoute[] }) {
   customDialog.editing = true
   customDialog.name = g.display_name
   customDialog.originalName = g.display_name
-  customDialog.rows = g.routes.map((r) => ({
+  customDialog.rows = (isUser.value ? g.routes.filter((r) => canManage(r)) : g.routes).map((r) => ({
     channel_id: r.channel_id, upstream_model: r.upstream_model, priority: r.priority, weight: r.weight, enabled: r.enabled,
     price_custom: r.price_input != null || r.price_output != null,
     price_input: r.price_input ?? 0,
@@ -185,14 +206,16 @@ function openCustomEdit(g: { display_name: string; routes: ModelRoute[] }) {
 
 async function deleteCustomMapping(r: ModelRoute) {
   await ElMessageBox.confirm(`Delete mapping ${r.channel_name} → ${r.upstream_model}?`, 'Delete mapping', { type: 'warning' })
-  try { await modelRoutesApi.remove(r.id); ElMessage.success('Deleted'); load() }
+  try { await apiRemove(r.id); ElMessage.success('Deleted'); load() }
   catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Delete failed') }
 }
 
 async function deleteCustomGroup(g: { display_name: string; routes: ModelRoute[] }) {
   await ElMessageBox.confirm(`Delete the whole custom route "${g.display_name}"? This removes all its ${g.routes.length} mapping(s).`, 'Delete custom route', { type: 'warning' })
   try {
-    for (const r of g.routes) await modelRoutesApi.remove(r.id)
+    const owned = isUser.value ? g.routes.filter((r) => canManage(r)) : g.routes
+    if (isUser.value && !owned.length) { ElMessage.warning('You can only delete routes on your own channels'); return }
+    for (const r of owned) await apiRemove(r.id)
     ElMessage.success('Deleted')
     load()
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Delete failed') }
@@ -201,10 +224,32 @@ async function deleteCustomGroup(g: { display_name: string; routes: ModelRoute[]
 async function load() {
   loading.value = true
   try {
-    const [rs, chs] = await Promise.all([modelRoutesApi.list(), channelsApi.list()])
-    list.value = rs
-    channels.value = chs
+    if (isUser.value) {
+      const [rs, chs] = await Promise.all([portalApi.routes(), portalApi.channels()])
+      list.value = rs.map(toModelRoute)
+      channels.value = chs.map((c: UserChannel) => ({
+        id: c.id, user_id: c.user_id, name: c.name, base_url: c.base_url, adapter: c.adapter,
+        priority: c.priority, weight: c.weight, timeout_ms: c.timeout_ms || 60000, enabled: c.enabled,
+        health_state: c.health_state, extra_headers: c.extra_headers || '{}', note: c.note, created_at: 0, updated_at: 0,
+      }))
+      myRouteIDs.value = new Set(rs.filter((r) => r.is_mine).map((r) => r.id))
+      myChannelIDs.value = new Set(chs.filter((c) => c.is_mine).map((c) => c.id))
+    } else {
+      const [rs, chs] = await Promise.all([modelRoutesApi.list(), channelsApi.list()])
+      list.value = rs
+      channels.value = chs
+    }
   } finally { loading.value = false }
+}
+
+async function apiCreate(d: any) {
+  return isUser.value ? portalApi.createRoute(d) : modelRoutesApi.create(d)
+}
+async function apiUpdate(id: number, d: any) {
+  return isUser.value ? portalApi.updateRoute(id, d) : modelRoutesApi.update(id, d)
+}
+async function apiRemove(id: number) {
+  return isUser.value ? portalApi.removeRoute(id) : modelRoutesApi.remove(id)
 }
 
 function onRowClick(row: Group) {
@@ -245,8 +290,8 @@ async function submit() {
     price_output: dialog.custom_price ? (+(dialog.price_output ?? 0) || 0) : null,
   }
   try {
-    if (dialog.editing) await modelRoutesApi.update(dialog.id, d)
-    else await modelRoutesApi.create(d)
+    if (dialog.editing) await apiUpdate(dialog.id, d)
+    else await apiCreate(d)
     ElMessage.success('Saved')
     dialog.visible = false
     load()
@@ -256,7 +301,7 @@ async function submit() {
 async function remove(r: ModelRoute) {
   await ElMessageBox.confirm(`Delete route ${r.display_name} → ${r.channel_name}?`, 'Delete Route', { type: 'warning' })
   try {
-    await modelRoutesApi.remove(r.id)
+    await apiRemove(r.id)
     ElMessage.success('Deleted')
     load()
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to delete') }
@@ -281,7 +326,7 @@ onMounted(load)
                   <el-radio-button value="active">Active</el-radio-button>
                   <el-radio-button value="inactive">Inactive</el-radio-button>
                 </el-radio-group>
-                <el-button type="primary" size="small" @click="openCreate()">Add Route</el-button>
+                <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCreate()">Add Route</el-button>
               </div>
             </div>
           </template>
@@ -327,8 +372,10 @@ onMounted(load)
               </el-table-column>
               <el-table-column label="Actions" width="130">
                 <template #default="{ row: r }">
-                  <el-button link type="primary" size="small" @click.stop="openEdit(r)">Edit</el-button>
-                  <el-button link type="danger" size="small" @click.stop="remove(r)">Delete</el-button>
+                  <template v-if="canManage(r)">
+                    <el-button link type="primary" size="small" @click.stop="openEdit(r)">Edit</el-button>
+                    <el-button link type="danger" size="small" @click.stop="remove(r)">Delete</el-button>
+                  </template>
                 </template>
               </el-table-column>
             </el-table>
@@ -354,8 +401,8 @@ onMounted(load)
         </el-table-column>
       </el-table>
 
-      <el-alert v-if="!filtered.length && !loading" class="mt" title="No matching routes. Model routes are synced automatically — adjust the interval in Settings." type="info" :closable="false" />
-      <el-alert v-if="statusFilter === 'inactive' && filtered.length && !loading" class="mt" title="These models have no active channel (channel disabled/cooldown, or route disabled). Enable the corresponding channel or route to restore them." type="warning" :closable="false" />
+      <el-alert v-if="!filtered.length && !loading" class="mt" title="No matching routes." type="info" :closable="false" />
+      <el-alert v-if="statusFilter === 'inactive' && filtered.length && !loading" class="mt" title="No active channel; enable the channel or route." type="warning" :closable="false" />
     </el-card>
       </el-tab-pane>
 
@@ -365,7 +412,7 @@ onMounted(load)
           <template #header>
             <div class="head">
               <span>Custom Routes</span>
-              <el-button type="primary" size="small" @click="openCustomCreate">New Custom Route</el-button>
+              <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCustomCreate">New Custom Route</el-button>
             </div>
           </template>
           <el-table v-loading="loading" :data="customGroups" size="small" row-key="display_name">
@@ -389,8 +436,8 @@ onMounted(load)
                   </el-table-column>
                   <el-table-column label="Actions" width="110">
                     <template #default="{ row: r }">
-                      <el-button link type="danger" size="small" @click="deleteCustomMapping(r)">Delete</el-button>
-                    </template>
+                      <el-button v-if="canManage(r)" link type="danger" size="small" @click="deleteCustomMapping(r)">Delete</el-button>
+                        </template>
                   </el-table-column>
                 </el-table>
               </template>
@@ -408,13 +455,15 @@ onMounted(load)
             </el-table-column>
             <el-table-column label="Actions" width="150" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="openCustomEdit(row)">Edit</el-button>
-                <el-button link type="danger" size="small" @click="deleteCustomGroup(row)">Delete Group</el-button>
+                <template v-if="!isUser || row.routes.some((r: ModelRoute) => canManage(r))">
+                  <el-button link type="primary" size="small" @click="openCustomEdit(row)">Edit</el-button>
+                  <el-button link type="danger" size="small" @click="deleteCustomGroup(row)">Delete Group</el-button>
+                </template>
               </template>
             </el-table-column>
           </el-table>
-          <el-alert v-if="!customGroups.length && !loading" class="mt" title='No custom routes yet. Click "New Custom Route" in the top-right, e.g. define "flash" with deepseek-v4-flash from zenmux and glm-5.3-flash from opencode as its multiple upstreams.' type="info" :closable="false" />
-          <p class="tip-line">Multiple upstreams are assigned automatically by priority order + weight ratio; when one is unavailable (rate-limited / out of quota / expired), traffic switches to another mapping automatically. Avoid naming a route the same as an upstream model, so it won't be overwritten by auto-sync.</p>
+          <el-alert v-if="!customGroups.length && !loading" class="mt" title="No custom routes yet." type="info" :closable="false" />
+          <p class="tip-line">Upstreams are tried by priority/weight; unavailable ones are skipped.</p>
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -429,7 +478,7 @@ onMounted(load)
           <div v-for="(row, i) in customDialog.rows" :key="i" class="row-block">
             <div class="row-line">
               <el-select v-model="row.channel_id" style="width: 170px" placeholder="Channel" @change="row.upstream_model = ''">
-                <el-option v-for="ch in channels" :key="ch.id" :label="ch.name" :value="ch.id" />
+                <el-option v-for="ch in channelOptions" :key="ch.id" :label="ch.name" :value="ch.id" />
               </el-select>
               <el-select
                 v-model="row.upstream_model"
@@ -453,7 +502,7 @@ onMounted(load)
                 <el-input-number v-model="row.price_input" :min="0" :precision="6" :step="0.05" size="small" placeholder="Input price" title="Input price $/1M" />
                 <el-input-number v-model="row.price_output" :min="0" :precision="6" :step="0.1" size="small" placeholder="Output price" title="Output price $/1M" />
               </template>
-              <span v-else class="tip">When off, this mapping is billed by global model_pricing</span>
+              <span v-else class="tip">Off: global price.</span>
             </div>
           </div>
           <el-button size="small" class="mt" @click="addCustomRow">+ Add an upstream mapping</el-button>
@@ -472,7 +521,7 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="Channel" required>
           <el-select v-model="dialog.channel_id" style="width: 100%">
-            <el-option v-for="ch in channels" :key="ch.id" :label="`${ch.name} (${ch.base_url})`" :value="ch.id" />
+            <el-option v-for="ch in channelOptions" :key="ch.id" :label="`${ch.name} (${ch.base_url})`" :value="ch.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="Upstream model" required>
@@ -498,7 +547,7 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="Custom price">
           <el-switch v-model="dialog.custom_price" />
-          <span class="tip">Billed at this route's price when on; falls back to global model_pricing when off</span>
+          <span class="tip">On: custom price; off: global price.</span>
         </el-form-item>
         <template v-if="dialog.custom_price">
           <el-form-item label="Input price $/1M">

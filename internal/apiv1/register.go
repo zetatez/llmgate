@@ -52,6 +52,8 @@ func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any)
 	RegisterLogRoutes(admin.Group("/logs"), a)
 	RegisterSettingRoutes(admin.Group("/settings"), a)
 	RegisterPricingRoutes(admin.Group("/pricing"), a)
+	admin.GET("/members", listMembers(a))
+	admin.GET("/gateway-endpoints", gatewayEndpoints(a))
 }
 
 // setAdminSession 种下（或清除，maxAge<0 时）httpOnly 会话 Cookie。
@@ -59,6 +61,22 @@ func setAdminSession(c *gin.Context, token string, maxAge int) {
 	secure := isSecureRequest(c) // 直连 TLS 或反代 X-Forwarded-Proto=https
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(adminSessionCookie, token, maxAge, "/", "", secure, true)
+}
+
+// clearUserSessionFor 吊销并清除当前浏览器中的用户端会话（切换身份时调用）。
+func clearUserSessionFor(a *app.App, c *gin.Context) {
+	if sess, err := c.Cookie(userSessionCookie); err == nil && sess != "" {
+		_ = store.DeleteUserSession(a.DB, app.HashToken(sess))
+	}
+	setUserSession(c, "", -1)
+}
+
+// clearAdminSessionFor 吊销并清除当前浏览器中的管理端会话（切换身份时调用）。
+func clearAdminSessionFor(a *app.App, c *gin.Context) {
+	if sess, err := c.Cookie(adminSessionCookie); err == nil && sess != "" {
+		_ = store.DeleteAdminSession(a.DB, app.HashToken(sess))
+	}
+	setAdminSession(c, "", -1)
 }
 
 // loginHandler 校验管理令牌并建立服务端会话（带失败限速防爆破）。
@@ -88,6 +106,8 @@ func loginHandler(a *app.App) gin.HandlerFunc {
 			return
 		}
 		setAdminSession(c, sess, int(sessionTTL))
+		// 同一浏览器切换身份：登录 admin 时吊销并清除用户端会话
+		clearUserSessionFor(a, c)
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "ok"}})
 	}
 }

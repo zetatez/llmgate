@@ -13,6 +13,7 @@ const menus = [
   { path: '/model-routes', label: 'Routes', icon: 'Share' },
   { path: '/pricing', label: 'Pricing', icon: 'Coin' },
   { path: '/users', label: 'Users', icon: 'User' },
+  { path: '/members', label: 'Members', icon: 'UserFilled' },
   { path: '/usage', label: 'Billing', icon: 'Wallet' },
   { path: '/logs', label: 'Logs', icon: 'Document' },
   { path: '/settings', label: 'Settings', icon: 'Setting' },

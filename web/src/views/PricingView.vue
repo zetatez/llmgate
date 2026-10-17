@@ -228,11 +228,9 @@ onMounted(load)
       <div>
         <h2 class="page-title">Model pricing</h2>
         <p class="page-sub">
-          Public price list in USD per 1M tokens. Optional per-call fee is charged once per request.
-          Route-level custom prices take precedence.
+          USD per 1M tokens; per-call fee extra. Route prices take precedence.
         </p>
       </div>
-      <el-tag v-if="!isAdmin" size="small" type="info" effect="plain">read-only</el-tag>
     </div>
 
     <el-tabs v-if="isAdmin" v-model="tab" class="mt">

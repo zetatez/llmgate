@@ -84,10 +84,13 @@ func loginAndGetCookie(t *testing.T, r *gin.Engine) *http.Cookie {
 		t.Fatalf("login status = %d, body=%s", w.Code, w.Body.String())
 	}
 	cookies := w.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("expected 1 session cookie, got %d", len(cookies))
+	for _, c := range cookies {
+		if c.Name == adminSessionCookie {
+			return c
+		}
 	}
-	return cookies[0]
+	t.Fatalf("expected admin session cookie, got %+v", cookies)
+	return nil
 }
 
 // ---- register.go: 登录 / 鉴权 / CSRF ----

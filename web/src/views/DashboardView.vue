@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
-import { logsApi, settingsApi } from '../api'
+import { logsApi, portalApi, settingsApi } from '../api'
 import type { DashboardPayload } from '../api'
 import { ElMessage } from 'element-plus'
 import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
@@ -10,6 +10,11 @@ import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Refresh }
 const router = useRouter()
 const payload = ref<DashboardPayload | null>(null)
 const loading = ref(false)
+// 与 admin 共用同一套仪表盘布局，仅数据范围不同
+const props = defineProps<{ scope?: 'admin' | 'user' }>()
+const isUser = computed(() => props.scope === 'user')
+const channelsPath = computed(() => (isUser.value ? '/user/channels' : '/channels'))
+const logsPath = computed(() => (isUser.value ? '/user/logs' : '/logs'))
 const chartEl = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 const hourEl = ref<HTMLDivElement>()
@@ -36,7 +41,7 @@ function humanMoney(n: number | null | undefined): string {
 async function load() {
   loading.value = true
   try {
-    payload.value = await logsApi.dashboard(days.value)
+    payload.value = isUser.value ? await portalApi.dashboard(days.value) : await logsApi.dashboard(days.value)
   } catch (e: any) {
     ElMessage.error('Failed to load overview: ' + (e?.message || e))
   } finally {
@@ -50,8 +55,13 @@ async function load() {
 
 async function loadGatewayBase() {
   try {
-    const items = await settingsApi.get()
-    const p = items.find((i) => i.key === 'gateway_prefix')?.val || '/'
+    let p = '/'
+    if (isUser.value) {
+      p = (await portalApi.me()).gateway_prefix || '/'
+    } else {
+      const items = await settingsApi.get()
+      p = items.find((i) => i.key === 'gateway_prefix')?.val || '/'
+    }
     const prefix = p === '/' ? '' : p.replace(/\/$/, '')
     gatewayBase.value = `${window.location.origin}${prefix}/v1`
   } catch { /* keep fallback */ }
@@ -317,7 +327,7 @@ onBeforeUnmount(() => {
       <el-col :xs="24" :md="8">
         <el-card shadow="never">
           <template #header>
-            <div class="head"><span>Channels</span><el-button link type="primary" size="small" @click="router.push('/channels')">Manage</el-button></div>
+            <div class="head"><span>Channels</span><el-button link type="primary" size="small" @click="router.push(channelsPath)">Manage</el-button></div>
           </template>
           <el-table :data="payload?.channel_stats ?? []" size="small">
             <el-table-column prop="name" label="Channel" />
@@ -341,7 +351,7 @@ onBeforeUnmount(() => {
               <span>Recent Failures</span>
               <div>
                 <el-tag v-if="payload?.recent_failures" type="danger" size="small">{{ payload.recent_failures }}</el-tag>
-                <el-button link type="primary" size="small" class="ml" @click="router.push('/logs')">View logs</el-button>
+                <el-button link type="primary" size="small" class="ml" @click="router.push(logsPath)">View logs</el-button>
               </div>
             </div>
           </template>

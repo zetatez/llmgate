@@ -62,10 +62,10 @@ func GetChannel(db *sql.DB, id int64) (*models.Channel, error) {
 func CreateChannel(db *sql.DB, c *models.Channel) (int64, error) {
 	res, err := db.Exec(`
 		INSERT INTO channels (user_id, name, base_url, adapter, priority, weight, timeout_ms,
-			enabled, health_state, note, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			enabled, health_state, extra_headers, note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.UserID, c.Name, c.BaseURL, c.Adapter, c.Priority, c.Weight, c.TimeoutMS,
-		c.Enabled, c.HealthState, c.Note, models.Now(), models.Now())
+		c.Enabled, c.HealthState, c.ExtraHeaders, c.Note, models.Now(), models.Now())
 	if err != nil {
 		return 0, err
 	}

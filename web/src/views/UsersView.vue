@@ -1,28 +1,27 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { settingsApi, usersApi } from '../api'
+import { gatewayApi, portalApi, usersApi } from '../api'
 import type { AdminUserDetail, User } from '../api'
+
+// admin 看全部用户；普通用户看自己（同一套表格/字段风格）
+const props = defineProps<{ scope?: 'admin' | 'user' }>()
+const isUser = computed(() => props.scope === 'user')
 
 const list = ref<User[]>([])
 const loading = ref(false)
 
-// 网关 base URL（供客户端配置）
-const gatewayBase = ref('')
-const gatewayPrefix = ref('/')
+// 网关 Base URL：当前域名 + 本机全部 IP（供不同网络的客户端选择）
+const gatewayURLs = ref<string[]>([])
 
 async function loadGatewayBase() {
   try {
-    const items = await settingsApi.get()
-    const p = items.find((i) => i.key === 'gateway_prefix')?.val || '/'
-    gatewayPrefix.value = p === '/' ? '' : p
-    const origin = window.location.origin
-    gatewayBase.value = `${origin}${gatewayPrefix.value}/v1`
+    gatewayURLs.value = isUser.value ? await portalApi.gatewayEndpoints() : await gatewayApi.endpoints()
   } catch { /* keep fallback */ }
 }
 
-function copyGatewayBase() {
-  navigator.clipboard?.writeText(gatewayBase.value)
+function copyGatewayBase(url: string) {
+  navigator.clipboard?.writeText(url)
   ElMessage.success('Copied')
 }
 
@@ -32,7 +31,9 @@ const editDialog = reactive({ visible: false, id: 0, username: '', password: '',
 
 async function load() {
   loading.value = true
-  try { list.value = await usersApi.list() } finally { loading.value = false }
+  try {
+    list.value = isUser.value ? [await portalApi.profile()] : await usersApi.list()
+  } finally { loading.value = false }
 }
 
 // 打开新增用户弹窗（默认不限额度：0 = 无限）
@@ -126,7 +127,7 @@ async function createUserToken(u: User) {
 
 async function copyUserToken(u: User) {
   try {
-    const t = await usersApi.token(u.id)
+    const t = isUser.value ? await portalApi.token() : await usersApi.token(u.id)
     if (t.token) {
       await navigator.clipboard?.writeText(t.token)
       ElMessage.success('Token copied')
@@ -141,7 +142,7 @@ async function rotateUserToken(u: User) {
     await ElMessageBox.confirm('Refresh this API_KEY? The old key stops working immediately.', 'Refresh API_KEY', { type: 'warning' })
   } catch { return }
   try {
-    const t = await usersApi.rotateToken(u.id)
+    const t = isUser.value ? await portalApi.rotateToken() : await usersApi.rotateToken(u.id)
     if (t.token) await navigator.clipboard?.writeText(t.token)
     ElMessage.success('API_KEY refreshed & copied')
     load()
@@ -181,8 +182,14 @@ onMounted(() => {
     <!-- 网关接入信息 -->
     <el-alert type="info" :closable="false" class="mb">
       <template #title>
-        <span>Base URL: <code class="base">{{ gatewayBase }}</code></span>
-        <el-button link type="primary" size="small" class="ml" @click="copyGatewayBase">copy</el-button>
+        <div class="endpoints">
+          <span class="endpoints-label">Base URL</span>
+          <div v-for="u in gatewayURLs" :key="u" class="endpoint-row">
+            <code class="base">{{ u }}</code>
+            <el-button link type="primary" size="small" @click="copyGatewayBase(u)">copy</el-button>
+          </div>
+          <span v-if="!gatewayURLs.length" class="dim">—</span>
+        </div>
       </template>
     </el-alert>
 
@@ -190,7 +197,7 @@ onMounted(() => {
       <template #header>
         <div class="head">
           <span />
-          <el-button type="primary" size="small" @click="openCreateUser">Add User</el-button>
+          <el-button v-if="!isUser" type="primary" size="small" @click="openCreateUser">Add User</el-button>
         </div>
       </template>
       <el-table v-loading="loading" :data="list" size="small">
@@ -232,10 +239,11 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="Status" width="80">
           <template #default="{ row }">
-            <el-switch :model-value="row.status === 1" @change="toggleUserStatus(row)" />
+            <el-switch v-if="!isUser" :model-value="row.status === 1" @change="toggleUserStatus(row)" />
+            <el-tag v-else :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? 'Enabled' : 'Disabled' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="200" fixed="right">
+        <el-table-column v-if="!isUser" label="Actions" width="200" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openDetails(row)">Details</el-button>
             <el-button link type="primary" size="small" @click="openEdit(row)">Edit</el-button>
@@ -243,7 +251,7 @@ onMounted(() => {
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && !list.length" description='No users yet. Click "Add User" to create an account.' />
+      <el-empty v-if="!loading && !list.length" :description="isUser ? 'No profile available' : 'No users yet. Click Add User to create an account.'" />
     </el-card>
 
     <el-dialog v-model="dialog.visible" title="Add User" width="440px">
@@ -357,6 +365,11 @@ onMounted(() => {
 
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; }
+.endpoints { display: flex; flex-direction: column; gap: 4px; }
+.endpoints-label { font-weight: 600; }
+.endpoint-row { display: grid; grid-template-columns: 360px auto; align-items: center; gap: 8px; }
+.endpoint-row .base { width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
+.dim { color: var(--ll-muted); }
 .tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
 .mb { margin-bottom: 10px; }
 .mt { margin-top: 12px; }

@@ -124,6 +124,8 @@ export interface UserChannel {
   weight: number
   enabled: number
   health_state: string
+  timeout_ms: number
+  extra_headers: string
   note: string
   user_id: number
   owner_name: string
@@ -143,6 +145,9 @@ export interface UserRoute {
   weight: number
   enabled: number
   effective_enabled: number
+  channel_enabled: number
+  price_input?: number | null
+  price_output?: number | null
   is_mine: boolean
 }
 
@@ -307,4 +312,22 @@ export interface ModelPrice {
   output: number
   call: number
   updated_at: number
+}
+
+/** 成员公开数据（所有人可见） */
+export interface MemberStat {
+  id: number
+  username: string
+  name: string
+  created_at: number
+  calls_spent: number
+  calls_earned: number
+  calls_balance: number
+  in_spent: number
+  out_spent: number
+  in_served: number
+  out_served: number
+  credit_spent: number
+  credit_earned: number
+  credit_balance: number
 }

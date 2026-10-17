@@ -1,6 +1,6 @@
 import { adminApi, userApi } from './client'
 import type {
-  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelPrice, ModelRoute,
+  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelPrice, ModelRoute,
   ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User,
   UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken,
 } from './types'
@@ -47,17 +47,20 @@ export const usersApi = {
 
 export const portalApi = {
   me: () => userApi.get<DataEnvelope<PortalUser>>('/me').then(unwrap),
+  profile: () => userApi.get<DataEnvelope<User>>('/profile').then(unwrap),
   overview: () => userApi.get<DataEnvelope<UserOverview>>('/overview').then(unwrap),
   channels: () => userApi.get<DataEnvelope<UserChannel[]>>('/channels').then(unwrap),
-  createChannel: (d: { name: string; base_url: string; adapter?: string; priority?: number; weight?: number; note?: string }) =>
+  createChannel: (d: { name: string; base_url: string; adapter?: string; priority?: number; weight?: number; timeout_ms?: number; note?: string; enabled?: number; extra_headers?: Record<string, string>; keys?: Array<{ name?: string; source?: string; remark?: string; key: string }> }) =>
     userApi.post<DataEnvelope<{ id: number }>>('/channels', d).then(unwrap),
-  updateChannel: (id: number, d: Partial<UserChannel>) =>
+  updateChannel: (id: number, d: Partial<UserChannel> & { timeout_ms?: number; extra_headers?: Record<string, string> }) =>
     userApi.put<DataEnvelope<{ id: number }>>(`/channels/${id}`, d).then(unwrap),
   removeChannel: (id: number) => userApi.delete(`/channels/${id}`),
+  testChannel: (id: number) =>
+    userApi.post<DataEnvelope<{ ok: boolean; status?: number; error?: string; latency_ms?: number }>>(`/channels/${id}/test`, {}).then(unwrap),
   routes: () => userApi.get<DataEnvelope<UserRoute[]>>('/routes').then(unwrap),
-  createRoute: (d: { display_name: string; channel_id: number; upstream_model: string; priority?: number; weight?: number; enabled?: number }) =>
+  createRoute: (d: { display_name: string; channel_id: number; upstream_model: string; priority?: number; weight?: number; enabled?: number; price_input?: number | null; price_output?: number | null }) =>
     userApi.post<DataEnvelope<{ id: number }>>('/routes', d).then(unwrap),
-  updateRoute: (id: number, d: { display_name?: string; upstream_model?: string; priority?: number; weight?: number; enabled?: number }) =>
+  updateRoute: (id: number, d: { display_name?: string; upstream_model?: string; priority?: number; weight?: number; enabled?: number; price_input?: number | null; price_output?: number | null }) =>
     userApi.put<DataEnvelope<string>>(`/routes/${id}`, d).then(unwrap),
   removeRoute: (id: number) => userApi.delete(`/routes/${id}`),
   teamUsage: (days: number) => userApi.get<DataEnvelope<TeamUsage[]>>('/usage/by-user', { params: { days } }).then(unwrap),
@@ -65,7 +68,7 @@ export const portalApi = {
   keys: () => userApi.get<DataEnvelope<UserKey[]>>('/keys').then(unwrap),
   addKeys: (channelId: number, keys: Array<{ name?: string; source?: string; remark?: string; key: string }>) =>
     userApi.post<DataEnvelope<{ added: number }>>('/keys', { channel_id: channelId, keys }).then(unwrap),
-  updateKey: (keyId: number, d: { name?: string; source?: string; remark?: string; key?: string; enabled?: number }) =>
+  updateKey: (keyId: number, d: { name?: string; source?: string; remark?: string; key?: string; enabled?: number; weight?: number }) =>
     userApi.put<DataEnvelope<string>>(`/keys/${keyId}`, d).then(unwrap),
   removeKey: (keyId: number) => userApi.delete(`/keys/${keyId}`),
   testKey: (keyId: number) =>
@@ -78,10 +81,15 @@ export const portalApi = {
     userApi.put<DataEnvelope<UserToken>>('/token', d).then(unwrap),
   rotateToken: () => userApi.post<DataEnvelope<UserToken>>('/token/rotate', {}).then(unwrap),
   removeToken: () => userApi.delete('/token'),
-  logs: (params: { limit?: number; offset?: number } = {}) =>
+  logs: (params: { limit?: number; offset?: number; display_model?: string; status?: string } = {}) =>
     userApi.get<DataEnvelope<RequestLog[]>>('/logs', { params }).then(unwrap),
-  logsCount: () => userApi.get<DataEnvelope<number>>('/logs/count').then(unwrap),
+  logsCount: (params: { display_model?: string; status?: string } = {}) =>
+    userApi.get<DataEnvelope<number>>('/logs/count', { params }).then(unwrap),
   pricing: () => userApi.get<DataEnvelope<ModelPrice[]>>('/pricing').then(unwrap),
+  dashboard: (days = 7) => userApi.get<DataEnvelope<DashboardPayload>>('/dashboard', { params: { days } }).then(unwrap),
+  members: () => userApi.get<DataEnvelope<MemberStat[]>>('/members').then(unwrap),
+  gatewayEndpoints: () => userApi.get<DataEnvelope<string[]>>('/gateway-endpoints').then(unwrap),
+  syncModels: () => userApi.post<DataEnvelope<SyncResult>>('/model-sync', {}).then(unwrap),
 }
 
 export const logsApi = {
@@ -105,6 +113,14 @@ export const pricingApi = {
     adminApi.post<DataEnvelope<ModelPrice[]>>('/pricing/delete', { models }).then(unwrap),
 }
 
+export const membersApi = {
+  list: () => adminApi.get<DataEnvelope<MemberStat[]>>('/members').then(unwrap),
+}
+
+export const gatewayApi = {
+  endpoints: () => adminApi.get<DataEnvelope<string[]>>('/gateway-endpoints').then(unwrap),
+}
+
 export const settingsApi = {
   get: () => adminApi.get<DataEnvelope<SettingItem[]>>('/settings').then(unwrap),
   update: (items: SettingValue[]) => adminApi.put<DataEnvelope<string>>('/settings', { data: items }).then(unwrap),
@@ -116,4 +132,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, ModelPrice, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken }
+export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelPrice, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, TeamUsage, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserOverview, UserRoute, UserToken }
