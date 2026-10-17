@@ -26,6 +26,10 @@ type User struct {
 	OutServed       int64   `json:"out_served"`
 	CreditSpent     float64 `json:"credit_spent"`
 	CreditEarned    float64 `json:"credit_earned"`
+	BaseCalls       int64   `json:"base_calls"`
+	BaseIn          int64   `json:"base_in"`
+	BaseOut         int64   `json:"base_out"`
+	BaseCredit      float64 `json:"base_credit"`
 	DebtFloorCalls  int64   `json:"debt_floor_calls"`
 	DebtFloorCredit float64 `json:"debt_floor_credit"`
 	LastLoginAt     int64   `json:"last_login_at"`

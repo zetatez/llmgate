@@ -8,14 +8,15 @@ import (
 )
 
 const userCols = `id, name, remark, username, password_hash, token_hash, token_enc, token_expires_at, token_last_used_at, quota_limit, quota_used, status,
-	calls_spent, calls_earned, in_spent, out_spent, in_served, out_served, credit_spent, credit_earned, debt_floor_calls, debt_floor_credit,
+	calls_spent, calls_earned, in_spent, out_spent, in_served, out_served, credit_spent, credit_earned, base_calls, base_in, base_out, base_credit, debt_floor_calls, debt_floor_credit,
 	last_login_at, created_at, updated_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*models.User, error) {
 	u := &models.User{}
 	err := row.Scan(&u.ID, &u.Name, &u.Remark, &u.Username, &u.PasswordHash, &u.TokenHash, &u.TokenEnc,
 		&u.TokenExpiresAt, &u.TokenLastUsed, &u.QuotaLimit, &u.QuotaUsed, &u.Status,
-		&u.CallsSpent, &u.CallsEarned, &u.InSpent, &u.OutSpent, &u.InServed, &u.OutServed, &u.CreditSpent, &u.CreditEarned, &u.DebtFloorCalls, &u.DebtFloorCredit,
+		&u.CallsSpent, &u.CallsEarned, &u.InSpent, &u.OutSpent, &u.InServed, &u.OutServed, &u.CreditSpent, &u.CreditEarned,
+		&u.BaseCalls, &u.BaseIn, &u.BaseOut, &u.BaseCredit, &u.DebtFloorCalls, &u.DebtFloorCredit,
 		&u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err

@@ -64,13 +64,13 @@ func gatewayAuth(a *app.App, rl *RateLimiter) gin.HandlerFunc {
 			return
 		}
 		// 共享池账本门槛：允许透支到债务下限（负数）
-		if user.CallsEarned-user.CallsSpent <= user.DebtFloorCalls {
+		if user.CallsEarned-user.CallsSpent+user.BaseCalls <= user.DebtFloorCalls {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": gin.H{"message": "call credits exhausted", "type": "calls_exhausted"},
 			})
 			return
 		}
-		if user.CreditEarned-user.CreditSpent <= user.DebtFloorCredit {
+		if user.CreditEarned-user.CreditSpent+user.BaseCredit <= user.DebtFloorCredit {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": gin.H{"message": "credit exhausted", "type": "credit_exhausted"},
 			})

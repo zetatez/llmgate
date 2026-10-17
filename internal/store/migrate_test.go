@@ -64,7 +64,7 @@ func TestMigrateBackfillsLegacyTokens(t *testing.T) {
 	}
 
 	// 升级到最新（应用 009/010/011，等价于 Migrate 恰好要跑的那几步）
-	for _, name := range []string{"009_multiuser.sql", "010_sessions.sql", "012_token_in_users.sql", "013_channel_owner.sql", "014_ledger.sql"} {
+	for _, name := range []string{"009_multiuser.sql", "010_sessions.sql", "012_token_in_users.sql", "013_channel_owner.sql", "014_ledger.sql", "015_ledger_baseline.sql", "016_ledger_baseline_offset.sql"} {
 		sqlBytes, err := migrationsFS.ReadFile("migrations/" + name)
 		if err != nil {
 			t.Fatal(err)

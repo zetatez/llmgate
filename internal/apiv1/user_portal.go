@@ -192,9 +192,9 @@ func toPortalUser(u *models.User) portalUserView {
 	return portalUserView{
 		ID: u.ID, Username: u.Username, Name: u.Name,
 		QuotaLimit: u.QuotaLimit, QuotaUsed: u.QuotaUsed, Status: u.Status, LastLoginAt: u.LastLoginAt,
-		CallsSpent: u.CallsSpent, CallsEarned: u.CallsEarned, CallsBalance: u.CallsEarned - u.CallsSpent,
+		CallsSpent: u.CallsSpent, CallsEarned: u.CallsEarned, CallsBalance: u.CallsEarned - u.CallsSpent + u.BaseCalls,
 		InSpent: u.InSpent, OutSpent: u.OutSpent, InServed: u.InServed, OutServed: u.OutServed,
-		CreditSpent: u.CreditSpent, CreditEarned: u.CreditEarned, CreditBalance: u.CreditEarned - u.CreditSpent,
+		CreditSpent: u.CreditSpent, CreditEarned: u.CreditEarned, CreditBalance: u.CreditEarned - u.CreditSpent + u.BaseCredit,
 		DebtFloorCalls: u.DebtFloorCalls, DebtFloorCredit: u.DebtFloorCredit,
 	}
 }
