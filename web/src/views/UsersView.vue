@@ -190,8 +190,12 @@ onMounted(() => {
       </template>
       <el-table v-loading="loading" :data="list" size="small">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="username" label="Username" width="130" />
-        <el-table-column prop="name" label="Name" width="120" />
+        <el-table-column label="User" min-width="160">
+          <template #default="{ row }">
+            <div class="u-name">{{ row.username }}</div>
+            <div v-if="row.name && row.name !== row.username" class="u-sub">{{ row.name }}</div>
+          </template>
+        </el-table-column>
         <el-table-column prop="remark" label="Remark" min-width="100" show-overflow-tooltip />
         <el-table-column label="Token" min-width="300">
           <template #default="{ row }">
@@ -332,4 +336,6 @@ onMounted(() => {
 .token-cell code { background: var(--ll-soft); border-radius: 4px; padding: 1px 8px; }
 .token-form { margin-top: 8px; }
 .token-add { margin-bottom: 4px; }
+.u-name { font-weight: 600; color: var(--ll-ink); }
+.u-sub { font-size: 12px; color: var(--ll-muted); margin-top: 1px; }
 </style>
