@@ -1,17 +1,13 @@
 package apiv1
 
 import (
-	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"llmgate/internal/adapter"
 	"llmgate/internal/app"
 	"llmgate/internal/models"
 	"llmgate/internal/store"
@@ -245,68 +241,6 @@ func userUpdateChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": cur.ID}})
-	}
-}
-
-// userTestChannel 用当前用户在该渠道下的 Key 做连通性测试（与管理员端同结构）。
-func userTestChannel(a *app.App) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id, ok := parseID(c, "id")
-		if !ok {
-			return
-		}
-		u := currentUser(c)
-		ch, err := store.GetChannel(a.DB, id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if ch == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
-			return
-		}
-		keys, err := store.ListChannelKeys(a.DB, id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		var apiKey string
-		for _, k := range keys {
-			if k.UserID == u.ID && k.Enabled == 1 {
-				if plain, derr := a.Secret.Decrypt(k.APIKeyEnc); derr == nil && plain != "" {
-					apiKey = plain
-					break
-				}
-			}
-		}
-		if apiKey == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "add your own enabled key to this channel first"})
-			return
-		}
-		adpt := adapter.Get(ch.Adapter)
-		if adpt == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown adapter type: " + ch.Adapter})
-			return
-		}
-		timeout := ch.TimeoutMS
-		if timeout <= 0 {
-			timeout = 60000
-		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(timeout)*time.Millisecond)
-		defer cancel()
-		start := time.Now()
-		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "error": err.Error(), "latency_ms": time.Since(start).Milliseconds()}})
-			return
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "status": resp.StatusCode, "error": truncateStr(string(body), 300), "latency_ms": time.Since(start).Milliseconds()}})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": true, "status": resp.StatusCode, "latency_ms": time.Since(start).Milliseconds()}})
 	}
 }
 
