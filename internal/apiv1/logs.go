@@ -131,17 +131,16 @@ func parseLogFilter(c *gin.Context) store.LogFilter {
 
 // dashboardPayload 仪表盘一次性数据。
 type dashboardPayload struct {
-	Days           int                           `json:"days"`
-	Week           []store.UsagePoint            `json:"week"`
-	WeekModels     []store.UsageModelPoint       `json:"week_models"`
-	Models         []store.ModelUsage            `json:"models"`      // 区间内按模型聚合
-	ModelsPrev     []store.ModelUsage            `json:"models_prev"` // 上一等长区间，用于环比
-	Hours          []store.UsageHourPoint        `json:"hours"`
-	Today          store.UsageSummary            `json:"today"`
-	Periods        map[string]store.UsageSummary `json:"periods"` // today / week / month
-	ChannelStats   []store.ChannelDayStats       `json:"channel_stats"`
-	Failures       []*models.RequestLog          `json:"failures"` // 最近失败明细
-	RecentFailures int                           `json:"recent_failures"`
+	Days           int                     `json:"days"`
+	Week           []store.UsagePoint      `json:"week"`
+	WeekModels     []store.UsageModelPoint `json:"week_models"`
+	Models         []store.ModelUsage      `json:"models"`      // 区间内按模型聚合
+	ModelsPrev     []store.ModelUsage      `json:"models_prev"` // 上一等长区间，用于环比
+	Hours          []store.UsageHourPoint  `json:"hours"`
+	Today          store.UsageSummary      `json:"today"`
+	ChannelStats   []store.ChannelDayStats `json:"channel_stats"`
+	Failures       []*models.RequestLog    `json:"failures"` // 最近失败明细
+	RecentFailures int                     `json:"recent_failures"`
 }
 
 func usageDashboard(a *app.App) gin.HandlerFunc {
@@ -173,8 +172,6 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 			hours        []store.UsageHourPoint
 			channelStats []store.ChannelDayStats
 			today        store.UsageSummary
-			weekSum      store.UsageSummary
-			monthSum     store.UsageSummary
 			fails        []*models.RequestLog
 			err          error
 		)
@@ -200,12 +197,6 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 				today, err = store.UserUsageSummary(a.DB, userID, dayStartT.Unix())
 			}
 			if err == nil {
-				weekSum, err = store.UserUsageSummary(a.DB, userID, dayStartT.AddDate(0, 0, -6).Unix())
-			}
-			if err == nil {
-				monthSum, err = store.UserUsageSummary(a.DB, userID, dayStartT.AddDate(0, 0, -29).Unix())
-			}
-			if err == nil {
 				channelStats, err = store.UserChannelStatsToday(a.DB, userID)
 			}
 			if err == nil {
@@ -229,12 +220,6 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 				today, err = store.UsageSummaryRange(a.DB, dayStartT.Unix())
 			}
 			if err == nil {
-				weekSum, err = store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -6).Unix())
-			}
-			if err == nil {
-				monthSum, err = store.UsageSummaryRange(a.DB, dayStartT.AddDate(0, 0, -29).Unix())
-			}
-			if err == nil {
 				channelStats, err = store.ChannelStatsToday(a.DB)
 			}
 			if err == nil {
@@ -250,7 +235,6 @@ func dashboardPayloadHandler(a *app.App, userID int64) gin.HandlerFunc {
 			Week: week, WeekModels: weekModels, Hours: hours,
 			Models: modelStats, ModelsPrev: modelPrev,
 			Today:        today,
-			Periods:      map[string]store.UsageSummary{"today": today, "week": weekSum, "month": monthSum},
 			ChannelStats: channelStats, Failures: fails, RecentFailures: len(fails),
 		}})
 	}

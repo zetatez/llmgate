@@ -262,7 +262,6 @@ export interface DashboardPayload {
   models_prev: ModelUsage[]
   hours: UsageHourPoint[]
   today: UsageSummary
-  periods: { today: UsageSummary; week: UsageSummary; month: UsageSummary }
   channel_stats: ChannelDayStat[]
   failures: RequestLog[]
   recent_failures: number
