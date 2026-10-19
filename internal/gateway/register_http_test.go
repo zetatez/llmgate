@@ -8,8 +8,6 @@ import (
 	"llmgate/internal/router"
 )
 
-const chatModelFmt = `{"model":"m","stream":%t,"messages":[{"role":"user","content":"hi"}]}`
-
 func TestGatewayAuthMissingToken(t *testing.T) {
 	e := newTestEnv(t, "")
 	rec := e.do(http.MethodGet, "/v1/models", "", "")

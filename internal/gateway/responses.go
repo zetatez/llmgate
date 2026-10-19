@@ -33,12 +33,6 @@ type responsesBody struct {
 	Stream          bool            `json:"stream"`
 }
 
-// responsesError 标准 OpenAI 错误结构（与 chat 网关一致）。
-type responsesError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-}
-
 // handleResponses 处理 POST /v1/responses：翻译为 chat 请求，转发，再转回 Responses 格式。
 func handleResponses(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.HandlerFunc {
 	return func(c *gin.Context) {

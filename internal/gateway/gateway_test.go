@@ -121,12 +121,6 @@ type failingReader struct{}
 
 func (failingReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
 
-func failingBody() *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", failingReader{})
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	return req
-}
-
 func httptestNewRequest(path string, body io.Reader) *http.Request {
 	return httptest.NewRequest(http.MethodPost, path, body)
 }

@@ -9,8 +9,6 @@ import (
 	"llmgate/internal/models"
 )
 
-const logCols = `id, user_id, display_model, channel_id, key_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
-
 // queryLogSelect 附带渠道名/用户名（联表，仅查询用）
 const queryLogSelect = `lg.id, lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''), lg.display_model, lg.channel_id, lg.key_id, lg.key_owner_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
 
