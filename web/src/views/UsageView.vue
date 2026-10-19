@@ -43,8 +43,6 @@ interface Row {
   credit_spent: number
   credit_earned: number
   credit_balance: number
-  debt_floor_calls: number
-  debt_floor_credit: number
   models: UserModelUsage[]
 }
 
@@ -57,7 +55,6 @@ const rows = computed<Row[]>(() => {
       in_spent: u.in_spent, out_spent: u.out_spent,
       calls_spent: u.calls_spent, calls_earned: u.calls_earned, calls_balance: u.calls_balance,
       credit_spent: u.credit_spent, credit_earned: u.credit_earned, credit_balance: u.credit_balance,
-      debt_floor_calls: u.debt_floor_calls, debt_floor_credit: u.debt_floor_credit,
       models: [],
     })
   }
@@ -70,7 +67,7 @@ const rows = computed<Row[]>(() => {
         in_spent: 0, out_spent: 0,
         calls_spent: 0, calls_earned: 0, calls_balance: 0,
         credit_spent: 0, credit_earned: 0, credit_balance: 0,
-        debt_floor_calls: 0, debt_floor_credit: 0, models: [],
+        models: [],
       }
       m.set(r.user_id, row)
     }
