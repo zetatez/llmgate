@@ -40,7 +40,7 @@ export async function logoutAdmin(): Promise<void> {
   }
 }
 
-export type SessionRole = 'admin' | 'user' | 'anonymous'
+type SessionRole = 'admin' | 'user' | 'anonymous'
 
 // 一次请求获取当前会话身份（供路由守卫判定，避免两次串行校验）。
 export async function getSession(): Promise<{ role: SessionRole }> {

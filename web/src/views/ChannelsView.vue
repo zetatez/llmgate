@@ -149,7 +149,7 @@ async function toggleChannel(ch: Channel) {
 
 async function testChannel(ch: Channel) {
   try {
-    const r = isUser.value ? await portalApi.testChannel(ch.id) : await channelsApi.test(ch.id)
+    const r = await channelsApi.test(ch.id)
     if (r.ok) ElMessage.success(`Connection OK (${r.latency_ms}ms)`)
     else ElMessage.error(`Connection failed: ${r.error || `status ${r.status}`}`)
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Test failed') }
@@ -366,7 +366,7 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="Actions" width="230" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click.stop="testChannel(row)">Test</el-button>
+            <el-button v-if="!isUser" link type="primary" size="small" @click.stop="testChannel(row)">Test</el-button>
             <template v-if="!isUser || row.user_id === myID">
               <el-button link type="primary" size="small" @click.stop="openEdit(row)">Edit</el-button>
               <el-button link type="danger" size="small" @click.stop="removeChannel(row)">Delete</el-button>

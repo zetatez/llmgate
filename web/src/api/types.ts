@@ -151,22 +151,6 @@ export interface UserRoute {
   is_mine: boolean
 }
 
-/** 共享统计：每个用户的用量（消费 + 贡献），所有人可见 */
-export interface TeamUsage {
-  user_id: number
-  user_name: string
-  requests: number
-  success: number
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-  cost: number
-  earned_calls: number
-  earned_in_tokens: number
-  earned_out_tokens: number
-  earned_cost: number
-}
-
 /** 用户端：本人录入的 API Key */
 export interface UserKey {
   id: number
@@ -180,13 +164,6 @@ export interface UserKey {
   enabled: number
   last_used_at: number
   created_at: number
-}
-
-/** 用户端：用量概览 */
-export interface UserOverview {
-  week: UsagePoint[]
-  today: UsageSummary
-  total: UsageSummary
 }
 
 /** 管理员：某用户聚合详情 */

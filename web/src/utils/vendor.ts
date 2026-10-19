@@ -1,9 +1,4 @@
 // 按模型名推断厂商，用于路由页的快速筛选。
-export interface VendorOption {
-  name: string
-  count: number
-}
-
 const RULES: Array<[RegExp, string]> = [
   [/^(openai\/)/, 'OpenAI'],
   [/^(gpt-|chatgpt|o[1-9](\b|-))/i, 'OpenAI'],
@@ -52,13 +47,3 @@ export function usageVendorOf(name: string): string {
   return 'Other'
 }
 
-export function vendorOptions(names: string[]): VendorOption[] {
-  const m = new Map<string, number>()
-  for (const n of names) {
-    const v = vendorOf(n)
-    m.set(v, (m.get(v) || 0) + 1)
-  }
-  return [...m.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
-}
