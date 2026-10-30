@@ -15,6 +15,8 @@ export interface Channel {
   note: string
   created_at: number
   updated_at: number
+  key_count?: number
+  route_count?: number
 }
 
 export interface ChannelKeyItem {

@@ -124,7 +124,7 @@ func main() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	apiv1.Register(r.Group("/api/admin"), a, modelPuller.SyncNow)
+	apiv1.Register(r.Group("/api/admin"), a, modelPuller.SyncNow, pen)
 	apiv1.RegisterUserPortalWithSync(r.Group("/api/user"), a, modelPuller.SyncNow)
 	r.GET("/api/session", apiv1.SessionProbe(a))
 	gateway.Register(r.Group(cfg.GatewayPrefix+"v1"), a, logBus, pen, gatewayRateLimiter(a))

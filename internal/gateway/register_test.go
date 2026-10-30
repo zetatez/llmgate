@@ -21,7 +21,7 @@ func TestMapRouteError(t *testing.T) {
 		{"generic", errors.New("boom"), http.StatusBadGateway},
 	}
 	for _, c := range cases {
-		got, _ := mapRouteError(c.err)
+		got, _ := mapRouteError(c.err, "m")
 		if got != c.code {
 			t.Errorf("%s: got %d want %d", c.name, got, c.code)
 		}

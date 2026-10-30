@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { channelsApi, modelRoutesApi, portalApi } from '../api'
 import type { Channel, ModelRoute, UserChannel, UserRoute } from '../api'
@@ -18,6 +18,8 @@ const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
 const vendor = ref('all')
 const expandedKeys = ref<string[]>([])
 const activeTab = ref('synced')
+const page = ref(1)
+const pageSize = ref(20)
 
 const dialog = reactive({ visible: false, editing: false, id: 0, display_name: '', channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1, custom_price: false, price_input: 0 as number | null, price_output: 0 as number | null })
 
@@ -92,6 +94,13 @@ const filtered = computed(() => {
 })
 
 // 每个渠道已同步的上游模型名（用于自定义路由/新增路由的搜索下拉）
+const paged = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filtered.value.slice(start, start + pageSize.value)
+})
+
+watch([search, statusFilter, vendor], () => { page.value = 1 })
+
 const channelOptions = computed(() => isUser.value ? channels.value.filter((c) => myChannelIDs.value.has(c.id)) : channels.value)
 
 function canManage(r: ModelRoute): boolean {
@@ -341,8 +350,9 @@ onMounted(load)
 
           <el-table
             v-loading="loading"
-            :data="filtered"
+            :data="paged"
             size="small"
+            height="68vh"
             row-key="display_name"
             :expand-row-keys="expandedKeys"
             default-sort="{ prop: 'display_name', order: 'ascending' }"
@@ -403,6 +413,17 @@ onMounted(load)
 
       <el-alert v-if="!filtered.length && !loading" class="mt" title="No matching routes." type="info" :closable="false" />
       <el-alert v-if="statusFilter === 'inactive' && filtered.length && !loading" class="mt" title="No active channel; enable the channel or route." type="warning" :closable="false" />
+      <div v-if="filtered.length" class="pager">
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100]"
+          :total="filtered.length"
+          layout="total, sizes, prev, pager, next"
+          size="small"
+          background
+        />
+      </div>
     </el-card>
       </el-tab-pane>
 
@@ -582,4 +603,5 @@ onMounted(load)
 .row-block { margin-bottom: 10px; }
 .price-line { margin-top: -2px; padding-left: 130px; flex-wrap: wrap; }
 .tip-line { font-size: 12px; color: var(--ll-muted); margin: 12px 4px 0; line-height: 1.6; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 </style>

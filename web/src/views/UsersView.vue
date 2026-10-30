@@ -3,6 +3,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { gatewayApi, portalApi, usersApi } from '../api'
 import type { AdminUserDetail, User } from '../api'
+import { fmtDate, fmtDateTime } from '../utils/format'
+import { useCopy } from '../utils/copy'
 
 // admin 看全部用户；普通用户看自己（同一套表格/字段风格）
 const props = defineProps<{ scope?: 'admin' | 'user' }>()
@@ -20,9 +22,10 @@ async function loadGatewayBase() {
   } catch { /* keep fallback */ }
 }
 
-function copyGatewayBase(url: string) {
-  navigator.clipboard?.writeText(url)
-  ElMessage.success('Copied')
+const { copied, copy } = useCopy()
+
+async function copyGatewayBase(url: string) {
+  if (await copy(url, 'gw:' + url)) ElMessage.success('Copied')
 }
 
 // 透支额度（美元）：负数显示为 -$50.00
@@ -32,7 +35,7 @@ function creditLimit(v: number | undefined): string {
 }
 
 
-const dialog = reactive({ visible: false, username: '', password: '', name: '', remark: '', quota_limit: 0, debt_floor_calls: -1000, debt_floor_credit: -50 })
+const dialog = reactive({ visible: false, username: '', password: '', confirm: '', name: '', remark: '', quota_limit: 0, debt_floor_calls: -1000, debt_floor_credit: -50 })
 const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 0, status: 1, debt_floor_calls: -1000, debt_floor_credit: -50 })
 
 async function load() {
@@ -44,7 +47,7 @@ async function load() {
 
 // 打开新增用户弹窗（默认不限额度：0 = 无限）
 function openCreateUser() {
-  Object.assign(dialog, { visible: true, username: '', password: '', name: '', remark: '', quota_limit: 0, debt_floor_calls: -1000, debt_floor_credit: -50 })
+  Object.assign(dialog, { visible: true, username: '', password: '', confirm: '', name: '', remark: '', quota_limit: 0, debt_floor_calls: -1000, debt_floor_credit: -50 })
 }
 
 const createdToken = reactive({ visible: false, username: '', token: '' })
@@ -52,6 +55,7 @@ const createdToken = reactive({ visible: false, username: '', token: '' })
 async function create() {
   if (!dialog.username.trim()) { ElMessage.warning('Username is required'); return }
   if (dialog.password.length < 6) { ElMessage.warning('Password must be at least 6 characters'); return }
+  if (dialog.password !== dialog.confirm) { ElMessage.warning('Passwords do not match'); return }
   try {
     const u = await usersApi.create({
       name: dialog.name, remark: dialog.remark, username: dialog.username.trim(),
@@ -68,14 +72,18 @@ async function create() {
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to create') }
 }
 
-function copyCreatedToken() {
-  navigator.clipboard?.writeText(createdToken.token)
-  ElMessage.success('Copied')
+async function copyCreatedToken() {
+  if (await copy(createdToken.token, 'created')) ElMessage.success('Copied')
 }
 
 // 快捷启用/停用用户
 async function toggleUserStatus(u: User) {
   const next = u.status ? 0 : 1
+  if (!next) {
+    try {
+      await ElMessageBox.confirm(`Disable user "${u.username}"? Their API requests will stop immediately.`, 'Disable user', { type: 'warning' })
+    } catch { return }
+  }
   try {
     await usersApi.update(u.id, { status: next })
     u.status = next
@@ -137,8 +145,7 @@ async function copyUserToken(u: User) {
   try {
     const t = isUser.value ? await portalApi.token() : await usersApi.token(u.id)
     if (t.token) {
-      await navigator.clipboard?.writeText(t.token)
-      ElMessage.success('Token copied')
+      if (await copy(t.token, 'user:' + u.id)) ElMessage.success('Token copied')
     } else {
       ElMessage.warning('No token')
     }
@@ -194,7 +201,7 @@ onMounted(() => {
           <span class="endpoints-label">Base URL</span>
           <div v-for="u in gatewayURLs" :key="u" class="endpoint-row">
             <code class="base">{{ u }}</code>
-            <el-button link type="primary" size="small" @click="copyGatewayBase(u)">copy</el-button>
+            <el-button link type="primary" size="small" @click="copyGatewayBase(u)">{{ copied === 'gw:' + u ? 'copied' : 'copy' }}</el-button>
           </div>
           <span v-if="!gatewayURLs.length" class="dim">—</span>
         </div>
@@ -220,10 +227,10 @@ onMounted(() => {
           <template #default="{ row }">
             <div class="token-cell">
               <template v-if="row.has_token">
-                <el-tooltip :content="`expires: ${row.token_expires_at ? new Date(row.token_expires_at * 1000).toLocaleString() : 'never'}`" placement="top">
+                <el-tooltip :content="`expires: ${fmtDateTime(row.token_expires_at, 'never')}`" placement="top">
                   <code class="key">sk-****{{ row.token_tail }}</code>
                 </el-tooltip>
-                <el-button link type="primary" size="small" @click="copyUserToken(row)">copy</el-button>
+                <el-button link type="primary" size="small" @click="copyUserToken(row)">{{ copied === 'user:' + row.id ? 'copied' : 'copy' }}</el-button>
                 <el-button link type="warning" size="small" @click="rotateUserToken(row)">refresh</el-button>
               </template>
               <el-button v-else link type="primary" size="small" @click="createUserToken(row)">Create</el-button>
@@ -272,6 +279,7 @@ onMounted(() => {
       <el-form label-width="120px">
         <el-form-item label="Username" required><el-input v-model="dialog.username" /></el-form-item>
         <el-form-item label="Password" required><el-input v-model="dialog.password" type="password" show-password /></el-form-item>
+        <el-form-item label="Confirm" required><el-input v-model="dialog.confirm" type="password" show-password /></el-form-item>
         <el-form-item label="Name"><el-input v-model="dialog.name" placeholder="display name (optional)" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="dialog.remark" /></el-form-item>
         <el-form-item label="Quota limit ($)">
@@ -298,7 +306,7 @@ onMounted(() => {
       </p>
       <div class="token-cell">
         <code class="key" style="word-break:break-all">{{ createdToken.token }}</code>
-        <el-button link type="primary" size="small" @click="copyCreatedToken">copy</el-button>
+        <el-button link type="primary" size="small" @click="copyCreatedToken">{{ copied === 'created' ? 'copied' : 'copy' }}</el-button>
       </div>
       <template #footer>
         <el-button type="primary" @click="createdToken.visible = false">Done</el-button>
@@ -345,6 +353,8 @@ onMounted(() => {
             <el-descriptions-item label="Today req">{{ details.data.today.total_requests }}</el-descriptions-item>
             <el-descriptions-item label="Total req">{{ details.data.total.total_requests }}</el-descriptions-item>
             <el-descriptions-item label="Total cost ($)">{{ money(details.data.total.cost) }}</el-descriptions-item>
+            <el-descriptions-item label="Created">{{ fmtDate(details.data.user.created_at) }}</el-descriptions-item>
+            <el-descriptions-item label="Last login">{{ fmtDateTime(details.data.user.last_login_at, 'never') }}</el-descriptions-item>
           </el-descriptions>
 
           <el-tabs>
@@ -354,7 +364,7 @@ onMounted(() => {
                 <el-table-column label="Name" min-width="100"><template #default="{ row }">{{ row.name || 'Unnamed' }}</template></el-table-column>
                 <el-table-column label="Key" width="130"><template #default="{ row }"><code class="key">sk-****{{ row.key_tail }}</code></template></el-table-column>
                 <el-table-column label="Enabled" width="80"><template #default="{ row }">{{ row.enabled ? 'yes' : 'no' }}</template></el-table-column>
-                <el-table-column label="Last used" width="150"><template #default="{ row }">{{ row.last_used_at ? new Date(row.last_used_at * 1000).toLocaleString() : 'never' }}</template></el-table-column>
+                <el-table-column label="Last used" width="150"><template #default="{ row }">{{ fmtDateTime(row.last_used_at, 'never') }}</template></el-table-column>
               </el-table>
               <el-empty v-if="!details.data.keys.length" description="No keys" />
             </el-tab-pane>
@@ -362,8 +372,8 @@ onMounted(() => {
               <template v-if="details.data.token.has_token">
                 <el-descriptions :column="1" border size="small">
                   <el-descriptions-item label="API_KEY"><code class="key">sk-****{{ details.data.token.token_tail }}</code></el-descriptions-item>
-                  <el-descriptions-item label="Expires">{{ details.data.token.expires_at ? new Date(details.data.token.expires_at * 1000).toLocaleString() : 'never' }}</el-descriptions-item>
-                  <el-descriptions-item label="Last used">{{ details.data.token.last_used_at ? new Date(details.data.token.last_used_at * 1000).toLocaleString() : 'never' }}</el-descriptions-item>
+                  <el-descriptions-item label="Expires">{{ fmtDateTime(details.data.token.expires_at, 'never') }}</el-descriptions-item>
+                  <el-descriptions-item label="Last used">{{ fmtDateTime(details.data.token.last_used_at, 'never') }}</el-descriptions-item>
                 </el-descriptions>
               </template>
               <el-empty v-else description="No token" />

@@ -151,3 +151,10 @@ body {
 .el-message-box {
   border-radius: 14px;
 }
+/* 顶部导航高度 40px：消息提示整体下移，避免遮挡状态栏 */
+.el-message {
+  margin-top: 48px;
+}
+.el-notification {
+  margin-top: 48px;
+}

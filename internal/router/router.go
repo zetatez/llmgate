@@ -267,6 +267,16 @@ func (p *Penalizer) ClearModelDeniedKey(keyID int64, model string) {
 	clearModelLocked(p.mdlKey, keyID, model)
 }
 
+// Reset 清空全部内存态熔断（渠道/Key/模型拒权）。用于管理端手动恢复。
+func (p *Penalizer) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ch = map[int64]penaltyState{}
+	p.key = map[int64]time.Time{}
+	p.mdl = map[int64]map[string]*modelState{}
+	p.mdlKey = map[int64]map[string]*modelState{}
+}
+
 // ChPenalized 渠道是否处于熔断中。
 func (p *Penalizer) ChPenalized(id int64) bool {
 	p.mu.RLock()

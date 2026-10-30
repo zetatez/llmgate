@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { membersApi, portalApi } from '../api'
 import type { MemberStat } from '../api'
+import { fmtDate } from '../utils/format'
 
 const props = defineProps<{ scope?: 'admin' | 'user' }>()
 const isUser = computed(() => props.scope === 'user')
@@ -23,10 +24,6 @@ function humanNum(n: number | null | undefined): string {
 
 function money(v: number): string {
   return (v ?? 0).toFixed(4)
-}
-
-function fmtDate(ts: number): string {
-  return ts ? new Date(ts * 1000).toLocaleDateString() : '—'
 }
 
 const filtered = computed(() => {
@@ -124,12 +121,12 @@ onMounted(load)
             <div class="sub">{{ humanNum(row.in_served) }} / {{ humanNum(row.out_served) }} · ${{ money(row.credit_earned) }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="Calls balance" width="120" align="right" sortable>
+        <el-table-column label="Calls (bal)" width="110" align="right" sortable>
           <template #default="{ row }">
             <span :class="{ neg: row.calls_balance < 0 }">{{ row.calls_balance }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="Credit balance ($)" width="140" align="right" sortable>
+        <el-table-column label="Credit ($)" width="120" align="right" sortable>
           <template #default="{ row }">
             <span :class="{ neg: row.credit_balance < 0 }">{{ money(row.credit_balance) }}</span>
           </template>

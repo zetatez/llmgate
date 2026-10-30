@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { channelsApi, portalApi, syncApi, usersApi } from '../api'
 import type { Channel, ChannelKeyItem, User, UserChannel, UserKey } from '../api'
+import { fmtDateTime } from '../utils/format'
 
 // 与 admin 共用同一套页面；scope=user 时使用用户端 API，数据与权限按本人收窄
 const props = defineProps<{ scope?: 'admin' | 'user' }>()
@@ -139,6 +140,11 @@ async function removeChannel(ch: Channel) {
 // 快捷启用/停用渠道
 async function toggleChannel(ch: Channel) {
   const d: any = { enabled: ch.enabled ? 0 : 1 }
+  if (!d.enabled) {
+    try {
+      await ElMessageBox.confirm(`Disable channel "${ch.name}"? Its requests will stop immediately.`, 'Disable channel', { type: 'warning' })
+    } catch { return }
+  }
   try {
     if (isUser.value) await portalApi.updateChannel(ch.id, { enabled: d.enabled } as any)
     else await channelsApi.update(ch.id, d)
@@ -155,8 +161,22 @@ async function testChannel(ch: Channel) {
   } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Test failed') }
 }
 
+async function clearCooldowns() {
+  clearing.value = true
+  try {
+    await channelsApi.resetPenalties()
+    ElMessage.success('Cooldowns cleared')
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'Failed to clear cooldowns')
+  } finally {
+    clearing.value = false
+  }
+}
+
 // 立即全局同步一次模型路由（等效定时任务立即执行）
 const syncing = ref(false)
+const clearing = ref(false)
 async function syncNow() {
   if (syncing.value) return
   syncing.value = true
@@ -215,11 +235,26 @@ async function loadKeys() {
 
 async function toggleKey(k: ChannelKeyItem) {
   const next = k.enabled ? 0 : 1
+  if (!next) {
+    try {
+      await ElMessageBox.confirm(`Disable key "${k.name || k.key_tail}"? It will stop serving requests.`, 'Disable key', { type: 'warning' })
+    } catch { return }
+  }
   try {
     if (isUser.value) await portalApi.updateKey(k.id, { enabled: next })
     else await channelsApi.updateKey(k.id, { enabled: next })
     k.enabled = next
   } catch (e: any) { ElMessage.error('Operation failed: ' + (e?.response?.data?.error || e)) }
+}
+
+async function testKeyAction(k: ChannelKeyItem) {
+  try {
+    const r = isUser.value ? await portalApi.testKey(k.id) : await channelsApi.testKey(k.id)
+    if (r.ok) ElMessage.success(`Key OK (${r.latency_ms}ms)`)
+    else ElMessage.error(`Key failed: ${r.error || `status ${r.status}`}`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'Key test failed')
+  }
 }
 
 async function updateKeyWeight(k: ChannelKeyItem, weight: number) {
@@ -329,6 +364,9 @@ onMounted(async () => {
         <div class="head">
           <span />
           <div>
+            <el-button v-if="!isUser" size="small" class="mr" :loading="clearing" :disabled="clearing" @click="clearCooldowns">
+              {{ clearing ? 'Clearing…' : 'Clear cooldowns' }}
+            </el-button>
             <el-button
               size="small"
               class="mr"
@@ -359,6 +397,9 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column prop="priority" label="Priority" width="80" />
         <el-table-column prop="weight" label="Weight" width="80" />
+        <el-table-column v-if="!isUser" label="Keys / Routes" width="120" align="right">
+          <template #default="{ row }">{{ row.key_count ?? 0 }} / {{ row.route_count ?? 0 }}</template>
+        </el-table-column>
         <el-table-column label="Health" width="100">
           <template #default="{ row }">
             <el-tag :type="row.health_state === 'cooldown' ? 'danger' : 'success'" size="small">{{ row.health_state === 'cooldown' ? 'Cooling' : 'OK' }}</el-tag>
@@ -431,22 +472,22 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column prop="last_used_at" label="Last used" width="140" sortable>
-          <template #default="{ row }">{{ row.last_used_at ? new Date(row.last_used_at * 1000).toLocaleString() : 'never' }}</template>
+          <template #default="{ row }">{{ fmtDateTime(row.last_used_at, 'never') }}</template>
         </el-table-column>
-        <el-table-column label="Enabled" width="70" fixed="right">
-          <template #default="{ row }"><el-switch :model-value="row.enabled === 1" @change="toggleKey(row)" /></template>
-        </el-table-column>
-        <el-table-column label="Effective" width="110" fixed="right">
+        <el-table-column label="Status" width="150" fixed="right">
           <template #default="{ row }">
-            <el-tooltip :content="row.effective_enabled ? 'Key enabled and channel enabled: participates in routing' : (selected?.enabled ? 'Key is individually disabled' : 'Channel disabled: this key does not currently participate in routing')">
-              <el-tag :type="row.effective_enabled ? 'success' : 'info'" size="small">
-                {{ row.effective_enabled ? 'Active' : 'Inactive' }}
+            <el-switch :model-value="row.enabled === 1" @change="toggleKey(row)" />
+            <el-tooltip :content="row.effective_enabled ? 'Key and channel enabled: participates in routing' : (selected?.enabled ? 'Key is individually disabled' : 'Channel is disabled: key is stored but not used')">
+              <el-tag v-if="row.enabled && !row.effective_enabled" type="info" size="small" class="ml">channel off</el-tag>
+              <el-tag v-else :type="row.effective_enabled ? 'success' : 'info'" size="small" class="ml">
+                {{ row.effective_enabled ? 'Active' : 'Off' }}
               </el-tag>
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="110" fixed="right">
+        <el-table-column label="Actions" width="170" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="testKeyAction(row)">Test</el-button>
             <el-button link type="primary" size="small" @click="openEditKey(row)">Edit</el-button>
             <el-button link type="danger" size="small" @click="removeKey(row)">Remove</el-button>
           </template>
@@ -478,8 +519,8 @@ onMounted(async () => {
         <el-form-item label="Base URL" required><el-input v-model="channelDialog.base_url" placeholder="https://api.deepseek.com or .../v1" /></el-form-item>
         <el-form-item label="Protocol"><el-select v-model="channelDialog.adapter" style="width: 100%"><el-option label="OpenAI compatible" value="openai" /></el-select></el-form-item>
         <el-form-item label="Priority"><el-input-number v-model="channelDialog.priority" :min="-10" :max="10" /><span class="tip">lower = preferred</span></el-form-item>
-        <el-form-item label="Weight"><el-input-number v-model="channelDialog.weight" :min="1" /></el-form-item>
-        <el-form-item label="Timeout (ms)"><el-input-number v-model="channelDialog.timeout_ms" :min="1000" :step="5000" /></el-form-item>
+        <el-form-item label="Weight"><el-input-number v-model="channelDialog.weight" :min="1" /><span class="tip">higher = more traffic</span></el-form-item>
+        <el-form-item label="Timeout (ms)"><el-input-number v-model="channelDialog.timeout_ms" :min="1000" :step="5000" /><span class="tip">upstream request timeout</span></el-form-item>
         <el-form-item label="Enabled"><el-switch v-model="channelDialog.enabled" :active-value="1" :inactive-value="0" /></el-form-item>
         <el-form-item v-if="!channelDialog.editing" label="API Keys">
           <el-input v-model="channelDialog.keys" type="textarea" :rows="3" placeholder="name=key, one per line" />

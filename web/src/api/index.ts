@@ -15,6 +15,9 @@ export const channelsApi = {
   update: (id: number, d: Partial<Channel>) => adminApi.put<DataEnvelope<Channel>>(`/channels/${id}`, d).then(unwrap),
   remove: (id: number) => adminApi.delete(`/channels/${id}`),
   test: (id: number) => adminApi.post<DataEnvelope<{ ok: boolean; error?: string; latency_ms?: number; status?: number }>>(`/channels/${id}/test`).then(unwrap),
+  resetPenalties: () => adminApi.post<DataEnvelope<string>>('/penalties/reset', {}).then(unwrap),
+  testKey: (keyId: number) =>
+    adminApi.post<DataEnvelope<{ ok: boolean; status?: number; error?: string; latency_ms?: number }>>(`/channels/keys/${keyId}/test`, {}).then(unwrap),
 
   keys: (id: number) => adminApi.get<DataEnvelope<ChannelKeyItem[]>>(`/channels/${id}/keys`).then(unwrap),
   addKeys: (id: number, keys: Array<{ name?: string; source?: string; remark?: string; key: string }>) =>
@@ -66,6 +69,8 @@ export const portalApi = {
   updateKey: (keyId: number, d: { name?: string; source?: string; remark?: string; key?: string; enabled?: number; weight?: number }) =>
     userApi.put<DataEnvelope<string>>(`/keys/${keyId}`, d).then(unwrap),
   removeKey: (keyId: number) => userApi.delete(`/keys/${keyId}`),
+  testKey: (keyId: number) =>
+    userApi.post<DataEnvelope<{ ok: boolean; status?: number; error?: string; latency_ms?: number }>>(`/keys/${keyId}/test`, {}).then(unwrap),
   changePassword: (currentPassword: string, newPassword: string) =>
     userApi.put<DataEnvelope<string>>('/password', { current_password: currentPassword, new_password: newPassword }).then(unwrap),
   token: () => userApi.get<DataEnvelope<UserToken>>('/token').then(unwrap),

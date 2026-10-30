@@ -126,7 +126,7 @@ func responsesPlain(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rout
 	logEntry.Status = "error"
 	logEntry.ErrorCode = oneLine(ferr.Error(), 200)
 	finalizeLog(a, bus, logEntry, nil, nil)
-	code, msg := mapRouteError(ferr)
+	code, msg := mapRouteError(ferr, model)
 	if ra := retryAfterFor(code); ra != "" {
 		c.Header("Retry-After", ra)
 	}
@@ -143,7 +143,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
 		finalizeLog(a, bus, logEntry, nil, nil)
-		code, msg := mapRouteError(ferr)
+		code, msg := mapRouteError(ferr, model)
 		if ra := retryAfterFor(code); ra != "" {
 			c.Header("Retry-After", ra)
 		}

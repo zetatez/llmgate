@@ -10,6 +10,7 @@ import (
 
 	"llmgate/internal/app"
 	"llmgate/internal/models"
+	"llmgate/internal/router"
 	"llmgate/internal/store"
 )
 
@@ -32,7 +33,11 @@ func SetSessionTTL(seconds int) {
 //   - POST /logout 删除服务端会话并清 Cookie
 //   - authMiddleware 同时接受 Bearer 管理令牌（脚本/CLI）或会话 Cookie
 //   - csrfOriginCheck 对非安全方法校验 Origin/Referer 与请求 Host 一致
-func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any) {
+func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any, pens ...*router.Penalizer) {
+	var pen *router.Penalizer
+	if len(pens) > 0 {
+		pen = pens[0]
+	}
 	admin.Use(csrfOriginCheck())
 	admin.POST("/login", loginHandler(a))
 	admin.POST("/logout", logoutHandler(a))
@@ -45,6 +50,7 @@ func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any)
 			c.JSON(http.StatusOK, gin.H{"data": syncNow()})
 		})
 	}
+	admin.POST("/penalties/reset", resetPenalties(a, pen))
 
 	RegisterChannelRoutes(admin.Group("/channels"), a)
 	RegisterModelRouteRoutes(admin.Group("/model-routes"), a)
@@ -54,6 +60,22 @@ func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any)
 	RegisterPricingRoutes(admin.Group("/pricing"), a)
 	admin.GET("/members", listMembers(a))
 	admin.GET("/gateway-endpoints", gatewayEndpoints(a))
+}
+
+// resetPenalties 清空内存熔断 + 渠道冷却，便于管理员手工恢复（不删除任何数据）。
+func resetPenalties(a *app.App, pen *router.Penalizer) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if pen == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "penalizer unavailable"})
+			return
+		}
+		pen.Reset()
+		if _, err := a.DB.Exec(`UPDATE channels SET health_state='healthy', cooldown_until=0`); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": "ok"})
+	}
 }
 
 // setAdminSession 种下（或清除，maxAge<0 时）httpOnly 会话 Cookie。

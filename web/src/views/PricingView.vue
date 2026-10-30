@@ -350,6 +350,7 @@ onBeforeUnmount(() => {
       </el-card>
 
       <el-card shadow="never">
+        <p class="table-hint">Calls / $100 assumes 1K input + 1K output tokens per call.</p>
         <el-table :data="viewPaged" size="small" row-key="model">
           <el-table-column prop="model" label="Model" min-width="280" show-overflow-tooltip />
           <el-table-column label="Input ($/1M)" width="150" align="right">
@@ -511,4 +512,5 @@ onBeforeUnmount(() => {
 .batch-status .err { color: #c9808a; }
 .batch-status .ok { color: #6f9a86; }
 .batch-status .tip { color: var(--ll-muted); }
+.table-hint { margin: 0 0 8px; font-size: 12px; color: var(--ll-muted); }
 </style>

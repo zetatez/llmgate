@@ -275,7 +275,7 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 	logEntry.Status = "error"
 	logEntry.ErrorCode = oneLine(ferr.Error(), 200) // 单行：渠道 + 原因（如 channel opencode: upstream 403 ...）
 	finalizeLog(a, bus, logEntry, nil, nil)
-	code, msg := mapRouteError(ferr)
+	code, msg := mapRouteError(ferr, model)
 	if retryAfter := retryAfterFor(code); retryAfter != "" {
 		c.Header("Retry-After", retryAfter)
 	}
@@ -301,7 +301,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
 		finalizeLog(a, bus, logEntry, nil, nil)
-		code, msg := mapRouteError(ferr)
+		code, msg := mapRouteError(ferr, model)
 		if ra := retryAfterFor(code); ra != "" {
 			c.Header("Retry-After", ra)
 		}
@@ -452,14 +452,18 @@ func successOrError(code int) string {
 	return "error"
 }
 
-func mapRouteError(err error) (int, string) {
+func mapRouteError(err error, model string) (int, string) {
+	suffix := ""
+	if model != "" {
+		suffix = ` (model: "` + model + `")`
+	}
 	switch {
 	case errors.Is(err, router.ErrNoCandidate):
-		return http.StatusNotFound, "no available channel for this model"
+		return http.StatusNotFound, "no available channel for this model" + suffix
 	case errors.Is(err, router.ErrChannelBusy):
-		return http.StatusServiceUnavailable, "all channels are temporarily unavailable, please retry shortly"
+		return http.StatusServiceUnavailable, "all channels for this model are cooling down or have no enabled key, please retry shortly" + suffix
 	case errors.Is(err, router.ErrNetworkExhausted):
-		return http.StatusServiceUnavailable, "all channels failed due to network errors, please retry shortly"
+		return http.StatusServiceUnavailable, "all channels failed due to network errors, please retry shortly" + suffix
 	default:
 		return http.StatusBadGateway, err.Error()
 	}

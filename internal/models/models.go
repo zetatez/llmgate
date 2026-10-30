@@ -54,6 +54,9 @@ type Channel struct {
 	Note          string `json:"note"`
 	CreatedAt     int64  `json:"created_at"`
 	UpdatedAt     int64  `json:"updated_at"`
+	// 仅列表接口填充，便于管理端展示规模
+	KeyCount   int `json:"key_count"`
+	RouteCount int `json:"route_count"`
 }
 
 // ChannelKey 是渠道下的一个 API Key。

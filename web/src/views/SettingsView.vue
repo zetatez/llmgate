@@ -5,6 +5,7 @@ import { settingsApi, type SettingItem } from '../api'
 
 const form = reactive<Record<string, string>>({})
 const rows = ref<SettingItem[]>([])
+const original = ref<Record<string, string>>({})
 const loading = ref(false)
 const saving = ref(false)
 const active = ref('')
@@ -90,9 +91,14 @@ async function load() {
   try {
     rows.value = await settingsApi.get()
     for (const it of rows.value) form[it.key] = it.val
+    original.value = Object.fromEntries(rows.value.map((it) => [it.key, String(it.val)]))
     if (!active.value && groups.value.length) active.value = groups.value[0].classification
   } finally { loading.value = false }
 }
+
+const dirty = computed(() =>
+  rows.value.some((r) => meta[r.key] && String(form[r.key]) !== (original.value[r.key] ?? String(r.val))),
+)
 
 async function save() {
   saving.value = true
@@ -130,7 +136,10 @@ onMounted(load)
           <h2 class="page-title">{{ current?.classification || 'Settings' }}</h2>
           <p class="page-sub">{{ sectionDesc[current?.classification || ''] || 'Platform-level configuration.' }}</p>
         </div>
-        <el-button type="primary" :loading="saving" @click="save">Save</el-button>
+        <div class="save-area">
+          <span v-if="dirty" class="dirty">Unsaved changes</span>
+          <el-button type="primary" :loading="saving" :disabled="!dirty || saving" @click="save">Save</el-button>
+        </div>
       </div>
 
       <el-card shadow="never" v-if="current">
@@ -278,4 +287,6 @@ onMounted(load)
   tab-size: 2;
   white-space: pre;
 }
+.save-area { display: flex; align-items: center; gap: 10px; }
+.dirty { font-size: 12px; color: #d3b27f; }
 </style>

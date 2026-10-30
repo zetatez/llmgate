@@ -270,16 +270,16 @@ onBeforeUnmount(() => {
         <el-table-column label="Cost ($)" width="100" align="right">
           <template #default="{ row }">{{ money(mode === 'lifetime' ? row.credit_spent : row.cost) }}</template>
         </el-table-column>
-        <el-table-column label="Calls (bal)" width="110" align="right" sortable>
+        <el-table-column label="Calls balance" width="130" align="right" sortable>
           <template #default="{ row }">
             <span :class="{ neg: row.calls_balance < 0 }">{{ row.calls_balance }}</span>
-            <div class="sub">{{ row.calls_spent }} / {{ row.calls_earned }}</div>
+            <div class="sub">spent {{ row.calls_spent }} · earned {{ row.calls_earned }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="Credit (bal)" width="120" align="right" sortable>
+        <el-table-column label="Credit balance" width="140" align="right" sortable>
           <template #default="{ row }">
             <span :class="{ neg: row.credit_balance < 0 }">${{ row.credit_balance.toFixed(4) }}</span>
-            <div class="sub">${{ row.credit_spent.toFixed(4) }} / ${{ row.credit_earned.toFixed(4) }}</div>
+            <div class="sub">spent ${{ row.credit_spent.toFixed(4) }} · earned ${{ row.credit_earned.toFixed(4) }}</div>
           </template>
         </el-table-column>
       </el-table>

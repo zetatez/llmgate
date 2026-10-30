@@ -7,6 +7,8 @@ import type { DashboardPayload } from '../api'
 import { ElMessage } from 'element-plus'
 import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
 import { usageVendorOf } from '../utils/vendor'
+import { fmtShort } from '../utils/format'
+import { useCopy } from '../utils/copy'
 import { PALETTE, AXIS_TOOLTIP, buildDailyStack } from '../utils/chart'
 import type { DailyTokenPoint } from '../utils/chart'
 
@@ -86,9 +88,10 @@ async function loadGatewayBase() {
   } catch { /* keep fallback */ }
 }
 
-function copyGatewayBase() {
-  navigator.clipboard?.writeText(gatewayBase.value)
-  ElMessage.success('Copied')
+const { copied, copy } = useCopy()
+
+async function copyGatewayBase() {
+  if (await copy(gatewayBase.value, 'gw')) ElMessage.success('Copied')
 }
 
 // 区间统计（按所选天数求和）
@@ -386,7 +389,7 @@ onBeforeUnmount(() => {
         <div class="gateway">
           <span class="gl">Gateway</span>
           <code>{{ gatewayBase }}</code>
-          <el-button link type="primary" size="small" @click="copyGatewayBase"><el-icon :size="14"><CopyDocument /></el-icon>&nbsp;copy</el-button>
+          <el-button link type="primary" size="small" @click="copyGatewayBase"><el-icon :size="14"><CopyDocument /></el-icon>&nbsp;{{ copied === 'gw' ? 'copied' : 'copy' }}</el-button>
         </div>
       </div>
     </el-card>
@@ -556,7 +559,7 @@ onBeforeUnmount(() => {
           </template>
           <el-table :data="payload?.failures ?? []" size="small" max-height="248">
             <el-table-column label="Time" width="96">
-              <template #default="{ row }">{{ new Date(row.created_at * 1000).toLocaleString().slice(5, 16) }}</template>
+              <template #default="{ row }">{{ fmtShort(row.created_at) }}</template>
             </el-table-column>
             <el-table-column prop="display_model" label="Model" min-width="100" show-overflow-tooltip />
             <el-table-column prop="error_code" label="Error" min-width="100" show-overflow-tooltip>
@@ -583,6 +586,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 .spacer {
   flex: 1;
@@ -602,6 +606,10 @@ onBeforeUnmount(() => {
   padding: 2px 10px;
   color: var(--el-color-primary);
   font-size: 13px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stat-card {
   margin-bottom: 12px;
@@ -737,5 +745,14 @@ onBeforeUnmount(() => {
   font-weight: normal;
   font-size: 12px;
   color: var(--ll-muted);
+}
+@media (max-width: 640px) {
+  .stat-num,
+  .stat-label {
+    white-space: normal;
+  }
+  .gateway code {
+    max-width: 180px;
+  }
 }
 </style>

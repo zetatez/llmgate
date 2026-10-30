@@ -143,5 +143,40 @@ async function logout() {
   width: 100%;
   max-width: 1400px;
   margin: 0 auto;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .logo-text,
+  .who {
+    display: none;
+  }
+  .main {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    padding: 0 8px;
+    gap: 4px;
+  }
+  .topmenu {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .topmenu::-webkit-scrollbar {
+    display: none;
+  }
+  .topmenu :deep(.el-menu-item) {
+    padding: 0 9px;
+  }
+  .right {
+    gap: 4px;
+  }
+  .right :deep(.el-button) {
+    padding: 4px 2px;
+  }
 }
 </style>

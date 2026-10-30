@@ -3,6 +3,7 @@ package apiv1
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,6 +24,7 @@ func RegisterChannelRoutes(g *gin.RouterGroup, a *app.App) {
 	g.GET("", listChannels(a))
 	g.POST("", createChannel(a))
 	g.POST("/:id/test", testChannel(a))
+	g.POST("/keys/:keyID/test", testKey(a))
 
 	g.GET("/:id", getChannel(a))
 	g.PUT("/:id", updateChannel(a))
@@ -79,12 +81,53 @@ func (b *channelBody) toModel() *models.Channel {
 	return c
 }
 
+type channelCount struct {
+	keyCount   int
+	routeCount int
+}
+
+func channelCounts(db *sql.DB) (map[int64]channelCount, error) {
+	out := map[int64]channelCount{}
+	for _, q := range []struct {
+		sql string
+		set func(*channelCount, int)
+	}{
+		{`SELECT channel_id, COUNT(*) FROM channel_keys GROUP BY channel_id`, func(c *channelCount, n int) { c.keyCount = n }},
+		{`SELECT channel_id, COUNT(*) FROM model_routes GROUP BY channel_id`, func(c *channelCount, n int) { c.routeCount = n }},
+	} {
+		rows, err := db.Query(q.sql)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			var n int
+			if err := rows.Scan(&id, &n); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			cc := out[id]
+			q.set(&cc, n)
+			out[id] = cc
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
 func listChannels(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		list, err := store.ListChannels(a.DB)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
+		}
+		if counts, err := channelCounts(a.DB); err == nil {
+			for _, ch := range list {
+				if n, ok := counts[ch.ID]; ok {
+					ch.KeyCount, ch.RouteCount = n.keyCount, n.routeCount
+				}
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"data": list})
 	}
@@ -275,6 +318,65 @@ func testChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "status": resp.StatusCode, "error": string(body), "latency_ms": time.Since(start).Milliseconds()}})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": true, "status": resp.StatusCode, "latency_ms": time.Since(start).Milliseconds()}})
+	}
+}
+
+// testKey 用指定 Key 请求上游 /v1/models，验证该 Key 的连通性。
+func testKey(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c, "keyID")
+		if !ok {
+			return
+		}
+		key, err := store.GetChannelKey(a.DB, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if key == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "key not found"})
+			return
+		}
+		ch, err := store.GetChannel(a.DB, key.ChannelID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if ch == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+			return
+		}
+		apiKey, err := a.Secret.Decrypt(key.APIKeyEnc)
+		if err != nil || apiKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "decrypt key failed"})
+			return
+		}
+		adpt := adapter.Get(ch.Adapter)
+		if adpt == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown adapter type: " + ch.Adapter})
+			return
+		}
+		timeout := ch.TimeoutMS
+		if timeout <= 0 {
+			timeout = 60000
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(timeout)*time.Millisecond)
+		defer cancel()
+
+		start := time.Now()
+		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "error": err.Error(), "latency_ms": time.Since(start).Milliseconds()}})
+			return
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": false, "status": resp.StatusCode, "error": string(body), "latency_ms": time.Since(start).Milliseconds()}})
 			return
