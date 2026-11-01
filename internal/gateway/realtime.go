@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"encoding/json"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -57,7 +56,11 @@ func handleRealtime(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.Hand
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "websocket upgrade required", "type": "invalid_request_error"}})
 			return
 		}
-		model := c.Query("model")
+		model, ok := resolveRequestModel(c)
+		if !ok {
+			c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": "model does not match session", "type": "invalid_request_error"}})
+			return
+		}
 		if model == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "missing model query parameter", "type": "invalid_request_error"}})
 			return
@@ -76,7 +79,7 @@ func handleRealtime(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.Hand
 			return
 		}
 
-		upstream, cand, key, lastErr := dialModelWS(c, rt, cands, model, "/v1/realtime", "", c.Request.URL.Query())
+		upstream, cand, key, lastErr := dialModelWS(c, rt, cands, model, "/v1/realtime", "", upstreamQuery(c))
 		if upstream == nil {
 			code, msg := mapRouteError(router.ErrChannelBusy, model)
 			if lastErr != nil {
@@ -163,55 +166,4 @@ func dialModelWS(c *gin.Context, rt *router.Router, cands []router.Candidate, mo
 		return conn, cd, k, nil
 	}
 	return nil, nil, nil, lastErr
-}
-
-// handleRealtimeSession 代理 POST /v1/realtime/sessions 与 /v1/realtime/transcription_sessions。
-// 会话创建不按调用计费，仅记录审计日志。
-func handleRealtimeSession(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamPath string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxRequestBody+1))
-		if err != nil || len(body) > maxRequestBody {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "invalid request body", "type": "invalid_request_error"}})
-			return
-		}
-		var meta struct {
-			Model string `json:"model"`
-		}
-		if err := json.Unmarshal(body, &meta); err != nil || meta.Model == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "missing valid model field", "type": "invalid_request_error"}})
-			return
-		}
-		userAny, _ := c.Get(ctxUserKey)
-		user := userAny.(*models.User)
-		rt := router.New(a, pen).SetUser(user.ID)
-		logEntry := &models.RequestLog{UserID: user.ID, DisplayModel: meta.Model, CreatedAt: models.Now()}
-		start := time.Now()
-		res, ferr := rt.ForwardChat(c.Request.Context(), body, meta.Model, upstreamPath, buildPassHeaders(c.Request.Header))
-		logEntry.LatencyMS = time.Since(start).Milliseconds()
-		if res != nil {
-			logEntry.ChannelID = res.Channel.ID
-			logEntry.KeyID = res.KeyID
-			logEntry.KeyOwnerID = res.KeyOwnerID
-			logEntry.UpstreamModel = res.Route.UpstreamModel
-			logEntry.Status = successOrError(res.StatusCode)
-			if logEntry.Status != "success" {
-				logEntry.ErrorCode = oneLine(string(res.Body), 200)
-			}
-			bus.Write(logEntry)
-			resCT := res.ContentType
-			if resCT == "" {
-				resCT = "application/json"
-			}
-			c.Data(res.StatusCode, resCT, res.Body)
-			return
-		}
-		logEntry.Status = "error"
-		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-		bus.Write(logEntry)
-		code, msg := mapRouteError(ferr, meta.Model)
-		if retryAfter := retryAfterFor(code); retryAfter != "" {
-			c.Header("Retry-After", retryAfter)
-		}
-		c.JSON(code, gin.H{"error": gin.H{"message": oneLine(msg, 500), "type": "upstream_error"}})
-	}
 }

@@ -35,35 +35,39 @@ type Result struct {
 //   - 为缺失模型创建 display_name=上游模型名 的一一映射路由（幂等）；
 //   - 删除上游已不再存在、且为"同名直通"的路由（手动别名路由保留）。
 func PullChannel(ctx context.Context, a *app.App, ch *models.Channel, opt Options) (*Result, error) {
-	apiKey, err := a.FirstEnabledKey(ch.ID)
-	if err != nil {
-		return nil, err
-	}
-	// Deepgram 没有 /v1/models；由管理员手工添加需要的模型路由。
-	if ch.Adapter == "deepgram" {
-		return &Result{Models: []string{}}, nil
-	}
 	adpt := adapter.Get(ch.Adapter)
 	if adpt == nil {
 		return nil, fmt.Errorf("unknown adapter type: %s", ch.Adapter)
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(ch.TimeoutMS)*time.Millisecond)
-	defer cancel()
-
-	resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
-	if err != nil {
-		return nil, err
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		ct := resp.Headers["Content-Type"]
-		if strings.Contains(strings.ToLower(ct), "html") {
-			return nil, fmt.Errorf("upstream returned an HTML page (HTTP %d); check that base_url points to an API endpoint", resp.StatusCode)
+	var names []string
+	if lister, ok := adpt.(interface{ Models() []string }); ok {
+		// 适配器自带静态模型目录（Deepgram 等没有 /v1/models 的上游）。
+		names = lister.Models()
+	} else {
+		apiKey, err := a.FirstEnabledKey(ch.ID)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("upstream returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+		ctx, cancel := context.WithTimeout(ctx, time.Duration(ch.TimeoutMS)*time.Millisecond)
+		defer cancel()
+		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.TestRequest())
+		if err != nil {
+			return nil, err
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 400 {
+			ct := resp.Headers["Content-Type"]
+			if strings.Contains(strings.ToLower(ct), "html") {
+				return nil, fmt.Errorf("upstream returned an HTML page (HTTP %d); check that base_url points to an API endpoint", resp.StatusCode)
+			}
+			return nil, fmt.Errorf("upstream returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+		}
+		names, err = adapter.ParseModels(body)
+		if err != nil {
+			return nil, err
+		}
 	}
-	names, err := adapter.ParseModels(body)
-	if err != nil || len(names) == 0 {
+	if len(names) == 0 {
 		return nil, errors.New("upstream returned no usable model list")
 	}
 

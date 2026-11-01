@@ -409,8 +409,9 @@ func handleAudioTranscription(a *app.App, bus *logbus.Bus, pen *router.Penalizer
 		}
 		start := time.Now()
 		res, ferr := rt.ForwardRaw(c.Request.Context(), raw, model, "/v1/audio/transcriptions", http.MethodPost, ct, passHeaders, false,
-			func(upstreamModel string) ([]byte, string, error) {
-				return rewriteMultipartModel(raw, ct, upstreamModel)
+			func(upstreamModel string) ([]byte, string, string, error) {
+				b, c, err := rewriteMultipartModel(raw, ct, upstreamModel)
+				return b, c, "", err
 			})
 		// 部分上游只支持 chat/completions 的 input_audio（如 qwen3-asr-flash），
 		// 原生 /audio/transcriptions 不可用时回退为 chat 音频请求。
@@ -495,8 +496,9 @@ func handleAudioSpeech(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.H
 		}
 		start := time.Now()
 		res, ferr := rt.ForwardRaw(c.Request.Context(), body, meta.Model, "/v1/audio/speech", http.MethodPost, "application/json", passHeaders, false,
-			func(upstreamModel string) ([]byte, string, error) {
-				return rewriteJSONModel(body, upstreamModel)
+			func(upstreamModel string) ([]byte, string, string, error) {
+				b, c, err := rewriteJSONModel(body, upstreamModel)
+				return b, c, "", err
 			})
 		logEntry.LatencyMS = time.Since(start).Milliseconds()
 

@@ -23,6 +23,15 @@ type Adapter struct{}
 
 func (a *Adapter) Name() string { return "deepgram" }
 
+// Models 返回 Deepgram 常用模型目录（Deepgram 没有 /v1/models 端点）。
+func (a *Adapter) Models() []string {
+	return []string{
+		"nova-3", "nova-3-general", "nova-3-medical",
+		"nova-2", "nova-2-general", "nova-2-medical", "nova-2-phonecall",
+		"enhanced", "base",
+	}
+}
+
 func (a *Adapter) Do(ctx context.Context, bc adapter.BaseChannel, apiKey string, req *adapter.Request) (*adapter.Response, error) {
 	base := strings.TrimRight(bc.BaseURL, "/")
 	path := req.Path

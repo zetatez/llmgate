@@ -12,9 +12,9 @@ import (
 	"llmgate/internal/models"
 )
 
-// RewriteFunc 在选定候选后按上游模型名重写请求体（如 multipart 的 model 字段）。
-// contentType 返回空表示沿用原值。
-type RewriteFunc func(upstreamModel string) (body []byte, contentType string, err error)
+// RewriteFunc 在选定候选后按上游模型名重写请求体/路径（如 multipart 的 model 字段）。
+// contentType/path 返回空表示沿用原值。
+type RewriteFunc func(upstreamModel string) (body []byte, contentType, path string, err error)
 
 // Select 在给定候选中按优先级/熔断/Key 可用性选出一个可尝试的组合。
 // 返回的 Candidate 可能非空但 key 为空（渠道内无可用 Key），调用方可排除该渠道后重试。
@@ -37,7 +37,11 @@ func (r *Router) ForwardRaw(ctx context.Context, body []byte, displayModel, upst
 	if err != nil {
 		return nil, err
 	}
+	return r.ForwardRawCandidates(ctx, cands, body, displayModel, upstreamPath, method, contentType, passHeaders, penalizeChannels, rewrite)
+}
 
+// ForwardRawCandidates 与 ForwardRaw 相同，但使用调用方预筛选的候选（如仅 Deepgram 渠道）。
+func (r *Router) ForwardRawCandidates(ctx context.Context, cands []Candidate, body []byte, displayModel, upstreamPath, method, contentType string, passHeaders map[string]string, penalizeChannels bool, rewrite RewriteFunc) (*Result, error) {
 	excludedCh := map[int64]bool{}
 	failedKeys := map[int64]bool{}
 	var lastErr error
@@ -66,8 +70,9 @@ func (r *Router) ForwardRaw(ctx context.Context, body []byte, displayModel, upst
 
 		reqBody := body
 		reqCT := contentType
+		reqPath := upstreamPath
 		if rewrite != nil {
-			rb, ct, rerr := rewrite(cand.Route.UpstreamModel)
+			rb, ct, rp, rerr := rewrite(cand.Route.UpstreamModel)
 			if rerr != nil {
 				return nil, rerr
 			}
@@ -75,11 +80,14 @@ func (r *Router) ForwardRaw(ctx context.Context, body []byte, displayModel, upst
 			if ct != "" {
 				reqCT = ct
 			}
+			if rp != "" {
+				reqPath = rp
+			}
 		}
 
 		resp, err := adpt.Do(ctx, adapter.ChannelFrom(&cand.Channel), apiKey, &adapter.Request{
 			Method:      method,
-			Path:        upstreamPath,
+			Path:        reqPath,
 			Body:        bytes.NewReader(reqBody),
 			ContentType: reqCT,
 			Headers:     mergeHeaders(passHeaders, channelHeaders(&cand.Channel)),

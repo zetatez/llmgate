@@ -76,8 +76,14 @@ curl http://localhost:3210/v1/audio/speech \
 
 # Deepgram-compatible streaming ASR (WebSocket)
 # ws://localhost:3210/v1/listen?model=nova-3&language=en
+# add &aggregate=1 to receive gateway_transcript/gateway_final on every message
 
-# Realtime session creation (OpenAI-compatible)
+# Deepgram-compatible pre-recorded transcription (raw audio body)
+curl "http://localhost:3210/v1/listen?model=nova-3&language=en" \
+  -H "Authorization: Token sk-your-token" -H "Content-Type: audio/wav" \
+  --data-binary @sample.wav
+
+# Realtime session creation (issued locally, no upstream call)
 curl http://localhost:3210/v1/realtime/transcription_sessions \
   -H "Authorization: Bearer sk-your-token" -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-transcribe","input_audio_format":"pcm16"}'
@@ -93,8 +99,18 @@ one-shot and cannot emit partials; use `/v1/realtime` (OpenAI-compatible) or `/v
 (Deepgram-compatible) for streaming partial results.
 
 Deepgram channels use `Adapter: deepgram` in the channel dialog and authenticate upstream
-with `Authorization: Token <key>`. Deepgram has no `/v1/models`, so model routes must be
-added manually (for example `nova-3`).
+with `Authorization: Token <key>`. Deepgram has no `/v1/models`, so channel sync uses a
+built-in catalog (`nova-3`, `nova-2`, `enhanced`, ...) instead of calling upstream.
+
+Realtime session endpoints (`/v1/realtime/sessions` and
+`/v1/realtime/transcription_sessions`) are issued by the gateway itself: they return an
+`id`, `expires_at` (10 minutes) and `client_secret.value` (`ek_...`). Browsers can then
+connect to `/v1/realtime?api_key=ek_...` or `/v1/listen?api_key=ek_...` without custom
+headers. Session tokens are model-bound and are rejected on non-WebSocket requests.
+
+`/v1/listen?aggregate=1` keeps Deepgram's native partial/final messages untouched and adds
+`gateway_transcript` (accumulated text with word-level overlap dedup) plus `gateway_final`.
+Without `aggregate=1` the gateway is a pure pass-through.
 
 For TTS upstreams that return PCM inside JSON (qwen/grok style), the gateway unwraps and
 wraps PCM as WAV; pass `"response_format":"pcm"` to receive raw PCM instead.
@@ -102,8 +118,9 @@ wraps PCM as WAV; pass `"response_format":"pcm"` to receive raw PCM instead.
 Billing uses the same model price table:
 
 - transcription: upstream `usage` tokens when returned, otherwise WAV duration × 1000 tokens/s;
+- Deepgram pre-recorded: upstream `metadata.duration`, otherwise WAV header duration × 1000 tokens/s;
 - speech: upstream usage tokens when returned, otherwise input characters ÷ 4;
-- realtime: connection seconds × 1000 tokens/s.
+- realtime / Deepgram streaming: connection seconds × 1000 tokens/s.
 
 Upstream support is required for each endpoint; if a provider only offers chat-based audio
 (e.g. `qwen3-asr-flash` via `input_audio`), use `/v1/chat/completions` instead.

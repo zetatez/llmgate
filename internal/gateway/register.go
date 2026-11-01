@@ -9,10 +9,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 
 	"llmgate/internal/app"
 	"llmgate/internal/logbus"
@@ -35,9 +37,10 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 	v1.POST("/audio/transcriptions", handleAudioTranscription(a, bus, pen))
 	v1.POST("/audio/speech", handleAudioSpeech(a, bus, pen))
 	v1.GET("/realtime", handleRealtime(a, bus, pen))
-	v1.POST("/realtime/sessions", handleRealtimeSession(a, bus, pen, "/v1/realtime/sessions"))
-	v1.POST("/realtime/transcription_sessions", handleRealtimeSession(a, bus, pen, "/v1/realtime/transcription_sessions"))
+	v1.POST("/realtime/sessions", handleRealtimeSession(a, bus))
+	v1.POST("/realtime/transcription_sessions", handleRealtimeSession(a, bus))
 	v1.GET("/listen", handleDeepgramListen(a, bus, pen))
+	v1.POST("/listen", handleDeepgramListenHTTP(a, bus, pen))
 }
 
 const ctxUserKey = "llmgate.user"
@@ -46,16 +49,38 @@ const ctxUserKey = "llmgate.user"
 func gatewayAuth(a *app.App, rl *RateLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerValue(c.GetHeader("Authorization"))
+		if token == "" && websocket.IsWebSocketUpgrade(c.Request) {
+			// 浏览器 WebSocket 无法设置自定义头：允许短时 ek_ 会话令牌走 query。
+			token = c.Query("api_key")
+		}
 		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "missing Authorization: Bearer <sk-xxx>", "type": "unauthorized"},
 			})
 			return
 		}
-		user, err := store.GetUserByTokenHash(a.DB, app.HashToken(token))
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "internal error", "type": "internal_error"}})
-			return
+		var user *models.User
+		sessionModel := ""
+		if strings.HasPrefix(token, "ek_") {
+			// 会话令牌仅用于 WebSocket 握手，避免被当作长期 API Key 复用。
+			if !websocket.IsWebSocketUpgrade(c.Request) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"message": "session token is only valid for websocket upgrades", "type": "unauthorized"}})
+				return
+			}
+			var ok bool
+			user, sessionModel, ok = resolveEphemeralSession(a.DB, token)
+			if !ok {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"message": "invalid or expired session token", "type": "unauthorized"}})
+				return
+			}
+			c.Set(ctxSessionModelKey, sessionModel)
+		} else {
+			var err error
+			user, err = store.GetUserByTokenHash(a.DB, app.HashToken(token))
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": "internal error", "type": "internal_error"}})
+				return
+			}
 		}
 		if user == nil || user.Status != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -98,10 +123,25 @@ func gatewayAuth(a *app.App, rl *RateLimiter) gin.HandlerFunc {
 				return
 			}
 		}
-		touchUserToken(a.DB, user.ID)
+		if !strings.HasPrefix(token, "ek_") {
+			touchUserToken(a.DB, user.ID)
+		}
 		c.Set(ctxUserKey, user)
 		c.Next()
 	}
+}
+
+// upstreamQuery 复制查询参数并剔除仅网关使用的参数，避免把会话令牌/聚合开关透传给上游。
+func upstreamQuery(c *gin.Context) url.Values {
+	out := url.Values{}
+	for k, vs := range c.Request.URL.Query() {
+		switch k {
+		case "api_key", "aggregate":
+			continue
+		}
+		out[k] = append([]string(nil), vs...)
+	}
+	return out
 }
 
 func bearerValue(h string) string {

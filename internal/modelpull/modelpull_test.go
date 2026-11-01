@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"llmgate/internal/adapter"
+	_ "llmgate/internal/adapter/deepgram" // 静态模型目录（无 /v1/models 的上游）
 	"llmgate/internal/app"
 	"llmgate/internal/config"
 	"llmgate/internal/models"
@@ -147,6 +148,21 @@ func TestPullChannelRemovesStaleAndBare(t *testing.T) {
 	}
 	if ok, _ := store.RouteExists(a.DB, chID, "deepseek/deepseek-v4-flash", "deepseek-v4-flash"); !ok {
 		t.Fatal("namespaced route should exist")
+	}
+}
+
+func TestPullChannelStaticCatalog(t *testing.T) {
+	a := newApp(t)
+	ch, chID := addChannel(t, a, "deepgram")
+	res, err := PullChannel(context.Background(), a, ch, Options{})
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if res.Created == 0 || res.Total == 0 {
+		t.Fatalf("expected static catalog routes, got %+v", res)
+	}
+	if ok, _ := store.RouteExists(a.DB, chID, "nova-3", "nova-3"); !ok {
+		t.Fatal("nova-3 route not created")
 	}
 }
 

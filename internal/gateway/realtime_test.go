@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -110,23 +111,56 @@ func TestDeepgramListenProxy(t *testing.T) {
 	}
 }
 
-func TestRealtimeSessionProxy(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/realtime/transcription_sessions" {
-			t.Errorf("path = %q", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"sess_1","client_secret":{"value":"ephemeral"}}`))
-	}))
-	defer srv.Close()
-
-	e := newTestEnv(t, srv.URL)
+func TestRealtimeSessionIssuedLocally(t *testing.T) {
+	e := newTestEnv(t, "")
 	rec := e.doAuth(http.MethodPost, "/v1/realtime/transcription_sessions", `{"model":"m","input_audio_format":"pcm16"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
-	if !contains(rec.Body.String(), `"sess_1"`) {
-		t.Fatalf("body = %s", rec.Body.String())
+	body := rec.Body.String()
+	for _, want := range []string{`"object":"realtime.transcription_session"`, `"value":"ek_`, `"input_audio_format":"pcm16"`} {
+		if !contains(body, want) {
+			t.Fatalf("body missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestEphemeralSessionAuth(t *testing.T) {
+	upstream, gotAuth := wsEchoUpstream(t)
+	defer upstream.Close()
+
+	e := newTestEnv(t, upstream.URL)
+	rec := e.doAuth(http.MethodPost, "/v1/realtime/transcription_sessions", `{"model":"m"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var sess struct {
+		ClientSecret struct {
+			Value string `json:"value"`
+		} `json:"client_secret"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sess); err != nil || sess.ClientSecret.Value == "" {
+		t.Fatalf("session body = %s", rec.Body.String())
+	}
+
+	gw := httptest.NewServer(e.uh)
+	defer gw.Close()
+	// 不传 model，使用会话绑定的 m；浏览器式 api_key 查询参数。
+	wsURL := "ws" + gw.URL[len("http"):] + "/v1/realtime?api_key=" + url.QueryEscape(sess.ClientSecret.Value)
+	client, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial with ephemeral token: %v", err)
+	}
+	defer client.Close()
+	if err := client.WriteMessage(websocket.TextMessage, []byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	_, reply, err := client.ReadMessage()
+	if err != nil || string(reply) != "hi" {
+		t.Fatalf("reply=%q err=%v", reply, err)
+	}
+	if *gotAuth != "Bearer sk-upstream" {
+		t.Fatalf("upstream auth = %q", *gotAuth)
 	}
 }
 
