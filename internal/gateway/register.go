@@ -35,6 +35,9 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 	v1.POST("/audio/transcriptions", handleAudioTranscription(a, bus, pen))
 	v1.POST("/audio/speech", handleAudioSpeech(a, bus, pen))
 	v1.GET("/realtime", handleRealtime(a, bus, pen))
+	v1.POST("/realtime/sessions", handleRealtimeSession(a, bus, pen, "/v1/realtime/sessions"))
+	v1.POST("/realtime/transcription_sessions", handleRealtimeSession(a, bus, pen, "/v1/realtime/transcription_sessions"))
+	v1.GET("/listen", handleDeepgramListen(a, bus, pen))
 }
 
 const ctxUserKey = "llmgate.user"
@@ -102,9 +105,11 @@ func gatewayAuth(a *app.App, rl *RateLimiter) gin.HandlerFunc {
 }
 
 func bearerValue(h string) string {
-	const p = "Bearer "
-	if len(h) > len(p) && h[:len(p)] == p {
-		return h[len(p):]
+	h = strings.TrimSpace(h)
+	for _, p := range []string{"Bearer ", "Token "} {
+		if len(h) > len(p) && strings.EqualFold(h[:len(p)], p) {
+			return strings.TrimSpace(h[len(p):])
+		}
 	}
 	return ""
 }

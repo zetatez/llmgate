@@ -407,7 +407,7 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="Actions" width="230" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="!isUser" link type="primary" size="small" @click.stop="testChannel(row)">Test</el-button>
+            <el-button v-if="!isUser && row.adapter !== 'deepgram'" link type="primary" size="small" @click.stop="testChannel(row)">Test</el-button>
             <template v-if="!isUser || row.user_id === myID">
               <el-button link type="primary" size="small" @click.stop="openEdit(row)">Edit</el-button>
               <el-button link type="danger" size="small" @click.stop="removeChannel(row)">Delete</el-button>
@@ -487,7 +487,7 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="Actions" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="testKeyAction(row)">Test</el-button>
+            <el-button v-if="selected?.adapter !== 'deepgram'" link type="primary" size="small" @click="testKeyAction(row)">Test</el-button>
             <el-button link type="primary" size="small" @click="openEditKey(row)">Edit</el-button>
             <el-button link type="danger" size="small" @click="removeKey(row)">Remove</el-button>
           </template>
@@ -517,7 +517,8 @@ onMounted(async () => {
       <el-form v-else label-width="110px">
         <el-form-item label="Name" required><el-input v-model="channelDialog.name" /></el-form-item>
         <el-form-item label="Base URL" required><el-input v-model="channelDialog.base_url" placeholder="https://api.deepseek.com or .../v1" /></el-form-item>
-        <el-form-item label="Protocol"><el-select v-model="channelDialog.adapter" style="width: 100%"><el-option label="OpenAI compatible" value="openai" /></el-select></el-form-item>
+        <el-form-item label="Protocol"><el-select v-model="channelDialog.adapter" style="width: 100%"><el-option label="OpenAI compatible" value="openai" />
+              <el-option label="Deepgram" value="deepgram" /></el-select></el-form-item>
         <el-form-item label="Priority"><el-input-number v-model="channelDialog.priority" :min="-10" :max="10" /><span class="tip">lower = preferred</span></el-form-item>
         <el-form-item label="Weight"><el-input-number v-model="channelDialog.weight" :min="1" /><span class="tip">higher = more traffic</span></el-form-item>
         <el-form-item label="Timeout (ms)"><el-input-number v-model="channelDialog.timeout_ms" :min="1000" :step="5000" /><span class="tip">upstream request timeout</span></el-form-item>

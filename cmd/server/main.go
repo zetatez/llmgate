@@ -15,13 +15,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"llmgate/internal/adapter/openai" // init() 注册适配器；SetProxy 配置出站代理
+	_ "llmgate/internal/adapter/deepgram" // init() 注册适配器
+	_ "llmgate/internal/adapter/openai"   // init() 注册适配器
 	"llmgate/internal/apiv1"
 	"llmgate/internal/app"
 	"llmgate/internal/config"
 	"llmgate/internal/gateway"
 	"llmgate/internal/logbus"
 	"llmgate/internal/models"
+	"llmgate/internal/outbound"
 	"llmgate/internal/puller"
 	"llmgate/internal/quota"
 	"llmgate/internal/router"
@@ -45,7 +47,7 @@ func main() {
 	}
 
 	// 上游出站代理（socks5/http），用于绕过网络过滤
-	if err := openai.SetProxy(cfg.Proxy); err != nil {
+	if err := outbound.SetProxy(cfg.Proxy); err != nil {
 		log.Fatalf("proxy config: %v", err)
 	}
 	if cfg.Proxy != "" {

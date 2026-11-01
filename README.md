@@ -73,12 +73,29 @@ curl http://localhost:3210/v1/audio/speech \
 
 # Realtime (WebSocket); pass model as a query parameter
 # ws://localhost:3210/v1/realtime?model=openai/gpt-realtime
+
+# Deepgram-compatible streaming ASR (WebSocket)
+# ws://localhost:3210/v1/listen?model=nova-3&language=en
+
+# Realtime session creation (OpenAI-compatible)
+curl http://localhost:3210/v1/realtime/transcription_sessions \
+  -H "Authorization: Bearer sk-your-token" -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-transcribe","input_audio_format":"pcm16"}'
 ```
+
+Gateway tokens are accepted with either `Authorization: Bearer sk-...` or
+`Authorization: Token sk-...` (the latter matches Deepgram-style clients).
 
 Transcription first forwards to the upstream `/v1/audio/transcriptions`; if the upstream
 does not expose that endpoint, it falls back to `/v1/chat/completions` with `input_audio`
-(works with chat-audio ASR models such as `qwen3-asr-flash`). Realtime supports
-OpenAI-compatible WebSocket upstreams; Deepgram-specific protocols are not supported.
+(works with chat-audio ASR models such as `qwen3-asr-flash`). That chat fallback is
+one-shot and cannot emit partials; use `/v1/realtime` (OpenAI-compatible) or `/v1/listen`
+(Deepgram-compatible) for streaming partial results.
+
+Deepgram channels use `Adapter: deepgram` in the channel dialog and authenticate upstream
+with `Authorization: Token <key>`. Deepgram has no `/v1/models`, so model routes must be
+added manually (for example `nova-3`).
+
 For TTS upstreams that return PCM inside JSON (qwen/grok style), the gateway unwraps and
 wraps PCM as WAV; pass `"response_format":"pcm"` to receive raw PCM instead.
 

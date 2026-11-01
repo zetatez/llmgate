@@ -298,6 +298,10 @@ func testChannel(a *app.App) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
 			return
 		}
+		if ch.Adapter == "deepgram" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "deepgram channel: use a WebSocket /v1/listen client to test"})
+			return
+		}
 		apiKey, err := a.FirstEnabledKey(id)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -350,6 +354,10 @@ func testKey(a *app.App) gin.HandlerFunc {
 		}
 		if ch == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+			return
+		}
+		if ch.Adapter == "deepgram" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "deepgram channel: use a WebSocket /v1/listen client to test"})
 			return
 		}
 		apiKey, err := a.Secret.Decrypt(key.APIKeyEnc)

@@ -3,81 +3,29 @@ package openai
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/net/proxy"
-
 	"llmgate/internal/adapter"
+	"llmgate/internal/outbound"
 )
 
 func init() {
 	adapter.Register(&Adapter{})
 }
 
-// httpProxyURL 已解析的代理地址（http/https 用）。
-var httpProxyURL *url.URL
-
-// socksDialer SOCKS5 拨号器（socks5/socks5h 用）。
-var socksDialer proxy.Dialer
-
-// SetProxy 配置上游出站代理，LGM_PROXY 提供（socks5:// / socks5h:// / http:// / https://）。空=直连。
-func SetProxy(raw string) error {
-	if raw == "" {
-		return nil
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("invalid LGM_PROXY: %w", err)
-	}
-	switch u.Scheme {
-	case "http", "https":
-		httpProxyURL = u
-		return nil
-	case "socks5", "socks5h":
-		// socks5h：域名交给代理解析（规避本地 DNS 污染）
-		auth := &proxy.Auth{}
-		if u.User != nil {
-			auth.User = u.User.Username()
-			auth.Password, _ = u.User.Password()
-		} else {
-			auth = nil
-		}
-		d, err := proxy.SOCKS5("tcp", u.Host, auth, &net.Dialer{Timeout: 15 * time.Second})
-		if err != nil {
-			return fmt.Errorf("invalid socks5 proxy: %w", err)
-		}
-		socksDialer = d
-		return nil
-	default:
-		return fmt.Errorf("unsupported LGM_PROXY scheme: %s (supported: http/https/socks5/socks5h)", u.Scheme)
-	}
-}
+// SetProxy 配置上游出站代理（兼容旧调用；实际实现见 internal/outbound）。
+func SetProxy(raw string) error { return outbound.SetProxy(raw) }
 
 // newClient 构造 httpClient；配置了代理时走代理。带总超时（含响应体读取），用于非流式请求。
 func newClient(timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	if socksDialer != nil {
-		tr := &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return socksDialer.Dial(network, addr)
-			},
-		}
-		return &http.Client{Transport: tr, Timeout: timeout}
-	}
-	if httpProxyURL != nil {
-		tr := &http.Transport{Proxy: http.ProxyURL(httpProxyURL)}
-		return &http.Client{Transport: tr, Timeout: timeout}
-	}
-	return &http.Client{Timeout: timeout}
+	return &http.Client{Transport: outbound.Transport(), Timeout: timeout}
 }
 
 // newStreamClient 构造流式 httpClient：只限制"响应头首字节"耗时，不设总超时，
@@ -86,15 +34,8 @@ func newStreamClient(headerTimeout time.Duration) *http.Client {
 	if headerTimeout <= 0 {
 		headerTimeout = 60 * time.Second
 	}
-	tr := &http.Transport{ResponseHeaderTimeout: headerTimeout}
-	if socksDialer != nil {
-		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return socksDialer.Dial(network, addr)
-		}
-	}
-	if httpProxyURL != nil {
-		tr.Proxy = http.ProxyURL(httpProxyURL)
-	}
+	tr := outbound.Transport()
+	tr.ResponseHeaderTimeout = headerTimeout
 	return &http.Client{Transport: tr} // 无总超时：长流依赖 ctx 取消 + 响应体空闲超时
 }
 

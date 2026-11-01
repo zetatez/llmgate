@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"llmgate/internal/adapter"
+	"llmgate/internal/outbound"
 )
 
 // resetGlobals 清空包级代理状态，避免测试间相互污染。
 func resetGlobals() {
-	httpProxyURL = nil
-	socksDialer = nil
+	outbound.ResetForTest()
 }
 
 func TestSetProxy(t *testing.T) {
@@ -31,7 +31,7 @@ func TestSetProxy(t *testing.T) {
 	if err := SetProxy(""); err != nil {
 		t.Fatalf("SetProxy(\"\") = %v, want nil", err)
 	}
-	if httpProxyURL != nil || socksDialer != nil {
+	if outbound.HTTPProxyForTest() != nil || outbound.SOCKSForTest() != nil {
 		t.Fatalf("empty proxy should leave globals nil")
 	}
 
@@ -44,7 +44,7 @@ func TestSetProxy(t *testing.T) {
 	if err := SetProxy("http://proxy.example:8080"); err != nil {
 		t.Fatalf("SetProxy(http) = %v, want nil", err)
 	}
-	if httpProxyURL == nil || socksDialer != nil {
+	if outbound.HTTPProxyForTest() == nil || outbound.SOCKSForTest() != nil {
 		t.Fatalf("http proxy should set httpProxyURL only")
 	}
 
@@ -53,7 +53,7 @@ func TestSetProxy(t *testing.T) {
 	if err := SetProxy("https://proxy.example:8443"); err != nil {
 		t.Fatalf("SetProxy(https) = %v, want nil", err)
 	}
-	if httpProxyURL == nil {
+	if outbound.HTTPProxyForTest() == nil {
 		t.Fatalf("https proxy should set httpProxyURL")
 	}
 
@@ -62,7 +62,7 @@ func TestSetProxy(t *testing.T) {
 	if err := SetProxy("socks5://host.example:1080"); err != nil {
 		t.Fatalf("SetProxy(socks5) = %v, want nil", err)
 	}
-	if socksDialer == nil {
+	if outbound.SOCKSForTest() == nil {
 		t.Fatalf("socks5 proxy should set socksDialer")
 	}
 

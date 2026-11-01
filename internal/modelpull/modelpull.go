@@ -39,6 +39,10 @@ func PullChannel(ctx context.Context, a *app.App, ch *models.Channel, opt Option
 	if err != nil {
 		return nil, err
 	}
+	// Deepgram 没有 /v1/models；由管理员手工添加需要的模型路由。
+	if ch.Adapter == "deepgram" {
+		return &Result{Models: []string{}}, nil
+	}
 	adpt := adapter.Get(ch.Adapter)
 	if adpt == nil {
 		return nil, fmt.Errorf("unknown adapter type: %s", ch.Adapter)
