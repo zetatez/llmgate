@@ -74,6 +74,7 @@ func registerUserPortal(g *gin.RouterGroup, a *app.App, syncNow func() map[strin
 	authed.PUT("/keys/:id", userUpdateKey(a))
 	authed.DELETE("/keys/:id", userDeleteKey(a))
 	authed.POST("/keys/:id/test", userTestKey(a))
+	authed.GET("/keys/:id/secret", userRevealKey(a))
 
 	authed.GET("/token", userGetToken(a))
 	authed.PUT("/token", userUpsertToken(a))
@@ -473,6 +474,26 @@ func userDeleteKey(a *app.App) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": "deleted"})
+	}
+}
+
+// userRevealKey 返回本人 Key 明文，按 AK:SK 拆分便于分别复制。
+func userRevealKey(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c, "id")
+		if !ok {
+			return
+		}
+		cur := ownedKey(a, c, id)
+		if cur == nil {
+			return
+		}
+		view, err := decryptKeySecret(a, cur.APIKeyEnc)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "key decrypt failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": view})
 	}
 }
 

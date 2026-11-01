@@ -32,7 +32,7 @@ flowchart LR
 ## Features
 
 - Multi-user: the admin creates accounts; users sign in with username and password and manage only their own data.
-- Bring your own key (BYOK): users record their own upstream API keys into admin-defined channels. Every key is tagged with its owner, is visible only to that owner, and is used only for that owner's requests.
+- Bring your own key (BYOK): users record their own upstream API keys into admin-defined channels. Every key is tagged with its owner, is visible only to that owner, and is used only for that owner's requests. A key may be a plain value (`sk-...`) or an `AK:SK` pair; owners (and admins) can copy the full key, the AK, or the SK separately from the key list.
 - Per-user gateway tokens: users issue and revoke multiple `sk-` tokens for their own consumption; each token resolves to its owner.
 - Channel key pools with priority / weight based routing; downstream switch on rate limit, quota exhaustion, or upstream error.
 - Circuit breaker keyed to a consecutive-failure threshold (default 6 failures in 30s) with exponential backoff, cleared automatically after a successful probe.

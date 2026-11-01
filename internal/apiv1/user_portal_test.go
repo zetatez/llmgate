@@ -569,3 +569,50 @@ func TestUserCanTriggerModelSync(t *testing.T) {
 		t.Fatalf("model-sync result = %+v", resp.Data)
 	}
 }
+
+func TestUserRevealKeyIsolation(t *testing.T) {
+	a := newApp(t)
+	r := newPortalRouter(a)
+	adminCreateUser(t, r, "alice")
+	adminCreateUser(t, r, "bob")
+	chID := mustChannel(t, a, "shared")
+
+	aCookie := userLoginCookie(t, r, "alice", "secret1")
+	bCookie := userLoginCookie(t, r, "bob", "secret1")
+
+	for _, kv := range []struct {
+		cookie *http.Cookie
+		key    string
+	}{{aCookie, "AKAAA:SKAAA"}, {bCookie, "AKBBB:SKBBB"}} {
+		body := fmt.Sprintf(`{"channel_id":%d,"keys":[{"key":%q}]}`, chID, kv.key)
+		if w := doCookie(r, http.MethodPost, "/api/user/keys", body, kv.cookie); w.Code != http.StatusOK {
+			t.Fatalf("add key = %d, body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	type keyList struct {
+		Data []userKeyView `json:"data"`
+	}
+	var ka keyList
+	decodeBody(t, doCookie(r, http.MethodGet, "/api/user/keys", "", aCookie), &ka)
+	if len(ka.Data) != 1 {
+		t.Fatalf("alice keys = %+v", ka.Data)
+	}
+	aKeyID := ka.Data[0].ID
+
+	w := doCookie(r, http.MethodGet, fmt.Sprintf("/api/user/keys/%d/secret", aKeyID), "", aCookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("alice reveal own = %d, body=%s", w.Code, w.Body.String())
+	}
+	var secret struct {
+		Data keySecretView `json:"data"`
+	}
+	decodeBody(t, w, &secret)
+	if secret.Data.AK != "AKAAA" || secret.Data.SK != "SKAAA" || secret.Data.Key != "AKAAA:SKAAA" {
+		t.Fatalf("secret = %+v", secret.Data)
+	}
+
+	if w := doCookie(r, http.MethodGet, fmt.Sprintf("/api/user/keys/%d/secret", aKeyID), "", bCookie); w.Code != http.StatusNotFound {
+		t.Fatalf("bob reveal alice key = %d, want 404", w.Code)
+	}
+}

@@ -922,3 +922,65 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("update settings bad body = %d, want 400", w.Code)
 	}
 }
+
+// ---- Key 明文复制（AK:SK） ----
+
+func TestSplitKeySecret(t *testing.T) {
+	cases := []struct{ in, key, ak, sk string }{
+		{"sk-abc", "sk-abc", "", "sk-abc"},
+		{"AK123:SK456", "AK123:SK456", "AK123", "SK456"},
+		{"AK:SK:with:colons", "AK:SK:with:colons", "AK", "SK:with:colons"},
+		{"  ak : sk  ", "ak : sk", "ak", "sk"},
+		{"", "", "", ""},
+	}
+	for _, c := range cases {
+		got := splitKeySecret(c.in)
+		if got.Key != c.key || got.AK != c.ak || got.SK != c.sk {
+			t.Errorf("splitKeySecret(%q) = %+v, want key=%q ak=%q sk=%q", c.in, got, c.key, c.ak, c.sk)
+		}
+	}
+}
+
+func TestRevealKeyAdmin(t *testing.T) {
+	a := newApp(t)
+	r := newRouter(a, nil)
+	tok := testAdminToken
+
+	w := do(r, http.MethodPost, basePath+"/channels", `{"name":"c","base_url":"http://x","keys":["AK123:SK456"]}`, tok, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("create = %d, body=%s", w.Code, w.Body.String())
+	}
+	var created struct {
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	decodeBody(t, w, &created)
+	w = do(r, http.MethodGet, basePath+"/channels/"+fmt.Sprint(created.Data.ID)+"/keys", "", tok, "")
+	var kl struct {
+		Data []keyView `json:"data"`
+	}
+	decodeBody(t, w, &kl)
+	if len(kl.Data) != 1 {
+		t.Fatalf("keys = %+v", kl.Data)
+	}
+
+	w = do(r, http.MethodGet, basePath+"/channels/keys/"+fmt.Sprint(kl.Data[0].ID)+"/secret", "", tok, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("reveal = %d, body=%s", w.Code, w.Body.String())
+	}
+	var secret struct {
+		Data keySecretView `json:"data"`
+	}
+	decodeBody(t, w, &secret)
+	if secret.Data.Key != "AK123:SK456" || secret.Data.AK != "AK123" || secret.Data.SK != "SK456" {
+		t.Fatalf("secret = %+v", secret.Data)
+	}
+
+	if w := do(r, http.MethodGet, basePath+"/channels/keys/9999/secret", "", tok, ""); w.Code != http.StatusNotFound {
+		t.Fatalf("missing key = %d, want 404", w.Code)
+	}
+	if w := do(r, http.MethodGet, basePath+"/channels/keys/abc/secret", "", tok, ""); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad key id = %d, want 400", w.Code)
+	}
+}

@@ -3,8 +3,11 @@ package apiv1
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"llmgate/internal/app"
 )
 
 // parseID 解析路径参数为 int64，失败返回 false（已写响应）。
@@ -15,6 +18,30 @@ func parseID(c *gin.Context, name string) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// keySecretView 是 Key 明文的可复制视图：约定 "AK:SK" 格式，无冒号时整体视为 SK。
+type keySecretView struct {
+	Key string `json:"key"`
+	AK  string `json:"ak"`
+	SK  string `json:"sk"`
+}
+
+func splitKeySecret(full string) keySecretView {
+	full = strings.TrimSpace(full)
+	if i := strings.IndexByte(full, ':'); i >= 0 {
+		return keySecretView{Key: full, AK: strings.TrimSpace(full[:i]), SK: strings.TrimSpace(full[i+1:])}
+	}
+	return keySecretView{Key: full, SK: full}
+}
+
+// decryptKeySecret 解密渠道 Key 并返回可复制视图。
+func decryptKeySecret(a *app.App, enc string) (keySecretView, error) {
+	plain, err := a.Secret.Decrypt(enc)
+	if err != nil {
+		return keySecretView{}, err
+	}
+	return splitKeySecret(plain), nil
 }
 
 // decode 将请求体解析到 dst，失败返回 false（已写响应）。

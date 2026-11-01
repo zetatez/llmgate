@@ -25,6 +25,7 @@ func RegisterChannelRoutes(g *gin.RouterGroup, a *app.App) {
 	g.POST("", createChannel(a))
 	g.POST("/:id/test", testChannel(a))
 	g.POST("/keys/:keyID/test", testKey(a))
+	g.GET("/keys/:keyID/secret", revealKey(a))
 
 	g.GET("/:id", getChannel(a))
 	g.PUT("/:id", updateChannel(a))
@@ -328,6 +329,31 @@ func testChannel(a *app.App) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"ok": true, "status": resp.StatusCode, "latency_ms": time.Since(start).Milliseconds()}})
+	}
+}
+
+// revealKey 返回 Key 明文（管理员可查看全部），按 AK:SK 拆分便于分别复制。
+func revealKey(a *app.App) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c, "keyID")
+		if !ok {
+			return
+		}
+		key, err := store.GetChannelKey(a.DB, id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if key == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "key not found"})
+			return
+		}
+		view, err := decryptKeySecret(a, key.APIKeyEnc)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "key decrypt failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": view})
 	}
 }
 

@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { channelsApi, portalApi, syncApi, usersApi } from '../api'
 import type { Channel, ChannelKeyItem, User, UserChannel, UserKey } from '../api'
 import { fmtDateTime } from '../utils/format'
+import { useCopy } from '../utils/copy'
 
 // 与 admin 共用同一套页面；scope=user 时使用用户端 API，数据与权限按本人收窄
 const props = defineProps<{ scope?: 'admin' | 'user' }>()
@@ -72,9 +73,10 @@ function openEdit(ch: Channel) {
   Object.assign(channelDialog, { visible: true, editing: true, id: ch.id, name: ch.name, base_url: ch.base_url, adapter: ch.adapter, priority: ch.priority, weight: ch.weight, timeout_ms: ch.timeout_ms, enabled: ch.enabled, keys: '', headers, note: ch.note })
 }
 
+// 批量导入只认 name=key，避免把 AK:SK 当成 name:key 拆错。
 function parseKeyLines(text: string): Array<{ name: string; key: string }> {
   return text.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
-    const m = line.match(/^(.+?)\s*[=:]\s*(.+)$/)
+    const m = line.match(/^(.+?)\s*=\s*(.+)$/)
     if (m) return { name: m[1].trim(), key: m[2].trim() }
     return { name: '', key: line }
   })
@@ -245,6 +247,20 @@ async function toggleKey(k: ChannelKeyItem) {
     else await channelsApi.updateKey(k.id, { enabled: next })
     k.enabled = next
   } catch (e: any) { ElMessage.error('Operation failed: ' + (e?.response?.data?.error || e)) }
+}
+
+const { copy } = useCopy()
+
+// 复制 Key 明文：支持 AK:SK 格式分拆复制（后端按首个冒号拆分）。
+async function copyKey(k: ChannelKeyItem, part: 'full' | 'ak' | 'sk') {
+  try {
+    const s = isUser.value ? await portalApi.keySecret(k.id) : await channelsApi.keySecret(k.id)
+    const text = part === 'ak' ? s.ak : part === 'sk' ? s.sk : s.key
+    if (!text) { ElMessage.warning(`This key has no ${part.toUpperCase()}`); return }
+    const label = part === 'full' ? 'full key' : part.toUpperCase()
+    if (await copy(text, `${k.id}:${part}`)) ElMessage.success(`Copied ${label}`)
+    else ElMessage.error('Copy failed')
+  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to read key') }
 }
 
 async function testKeyAction(k: ChannelKeyItem) {
@@ -463,8 +479,20 @@ onMounted(async () => {
         <el-table-column label="Remark" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.remark || '—' }}</template>
         </el-table-column>
-        <el-table-column label="Key" width="150">
-          <template #default="{ row }"><code :class="{ dim: !row.key_tail }">{{ row.masked }}{{ row.key_tail }}</code></template>
+        <el-table-column label="Key" width="210">
+          <template #default="{ row }">
+            <code :class="{ dim: !row.key_tail }">{{ row.masked }}{{ row.key_tail }}</code>
+            <el-dropdown trigger="click" class="ml" @command="(cmd: any) => copyKey(row, cmd)">
+              <el-button link type="primary" size="small">Copy</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="full">Copy full key</el-dropdown-item>
+                  <el-dropdown-item command="ak">Copy AK</el-dropdown-item>
+                  <el-dropdown-item command="sk">Copy SK</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
         </el-table-column>
         <el-table-column label="Weight" width="100">
           <template #default="{ row }">
@@ -524,7 +552,7 @@ onMounted(async () => {
         <el-form-item label="Timeout (ms)"><el-input-number v-model="channelDialog.timeout_ms" :min="1000" :step="5000" /><span class="tip">upstream request timeout</span></el-form-item>
         <el-form-item label="Enabled"><el-switch v-model="channelDialog.enabled" :active-value="1" :inactive-value="0" /></el-form-item>
         <el-form-item v-if="!channelDialog.editing" label="API Keys">
-          <el-input v-model="channelDialog.keys" type="textarea" :rows="3" placeholder="name=key, one per line" />
+          <el-input v-model="channelDialog.keys" type="textarea" :rows="3" placeholder="name=key, one per line (values may be AK:SK)" />
         </el-form-item>
         <el-form-item label="Note"><el-input v-model="channelDialog.note" /></el-form-item>
         <el-form-item label="Extra Headers">
@@ -546,12 +574,12 @@ onMounted(async () => {
           <el-form label-width="80px">
             <el-form-item label="Name"><el-input v-model="addDialog.name" placeholder="e.g. main / backup" /></el-form-item>
             <el-form-item label="Remark"><el-input v-model="addDialog.remark" placeholder="e.g. expires end of year" /></el-form-item>
-            <el-form-item label="Key" required><el-input v-model="addDialog.key" placeholder="sk-..." /></el-form-item>
+            <el-form-item label="Key" required><el-input v-model="addDialog.key" placeholder="sk-... or AK:SK" /></el-form-item>
           </el-form>
           <el-button type="primary" :loading="addDialog.busy" @click="submitAdd">Add</el-button>
         </el-tab-pane>
         <el-tab-pane label="Bulk" name="batch">
-          <el-input v-model="addDialog.batchText" type="textarea" :rows="6" placeholder="name=key, one per line" />
+          <el-input v-model="addDialog.batchText" type="textarea" :rows="6" placeholder="name=key, one per line (values may be AK:SK)" />
           <el-button type="primary" :loading="addDialog.busy" class="mt" @click="submitAdd">Add All</el-button>
         </el-tab-pane>
       </el-tabs>
@@ -563,7 +591,7 @@ onMounted(async () => {
         <el-form-item label="Name"><el-input v-model="editKeyDialog.name" placeholder="e.g. main / backup" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="editKeyDialog.remark" placeholder="e.g. expires end of year" /></el-form-item>
         <el-form-item label="Secret">
-          <el-input v-model="editKeyDialog.key" type="password" show-password placeholder="Leave empty to keep the current secret" />
+          <el-input v-model="editKeyDialog.key" type="password" show-password placeholder="Leave empty to keep current; supports AK:SK" />
         </el-form-item>
         <el-form-item v-if="!isUser" label="Owner">
           <el-select v-model="editKeyDialog.user_id" style="width: 100%">

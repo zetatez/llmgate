@@ -18,6 +18,8 @@ export const channelsApi = {
   resetPenalties: () => adminApi.post<DataEnvelope<string>>('/penalties/reset', {}).then(unwrap),
   testKey: (keyId: number) =>
     adminApi.post<DataEnvelope<{ ok: boolean; status?: number; error?: string; latency_ms?: number }>>(`/channels/keys/${keyId}/test`, {}).then(unwrap),
+  keySecret: (keyId: number) =>
+    adminApi.get<DataEnvelope<{ key: string; ak: string; sk: string }>>(`/channels/keys/${keyId}/secret`).then(unwrap),
 
   keys: (id: number) => adminApi.get<DataEnvelope<ChannelKeyItem[]>>(`/channels/${id}/keys`).then(unwrap),
   addKeys: (id: number, keys: Array<{ name?: string; source?: string; remark?: string; key: string }>) =>
@@ -71,6 +73,8 @@ export const portalApi = {
   removeKey: (keyId: number) => userApi.delete(`/keys/${keyId}`),
   testKey: (keyId: number) =>
     userApi.post<DataEnvelope<{ ok: boolean; status?: number; error?: string; latency_ms?: number }>>(`/keys/${keyId}/test`, {}).then(unwrap),
+  keySecret: (keyId: number) =>
+    userApi.get<DataEnvelope<{ key: string; ak: string; sk: string }>>(`/keys/${keyId}/secret`).then(unwrap),
   changePassword: (currentPassword: string, newPassword: string) =>
     userApi.put<DataEnvelope<string>>('/password', { current_password: currentPassword, new_password: newPassword }).then(unwrap),
   token: () => userApi.get<DataEnvelope<UserToken>>('/token').then(unwrap),
