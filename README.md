@@ -54,6 +54,43 @@ curl http://localhost:3210/v1/chat/completions \
   -d '{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"hello"}]}'
 ```
 
+### Audio endpoints
+
+The gateway also proxies OpenAI-compatible audio APIs:
+
+```bash
+# File transcription (multipart/form-data)
+curl http://localhost:3210/v1/audio/transcriptions \
+  -H "Authorization: Bearer sk-your-token" \
+  -F model="qwen/qwen3-asr-flash" \
+  -F file=@sample.wav
+
+# Text-to-speech (JSON -> audio bytes)
+curl http://localhost:3210/v1/audio/speech \
+  -H "Authorization: Bearer sk-your-token" -H "Content-Type: application/json" \
+  -d '{"model":"google/gemini-3.8-flash-tts","input":"hello","voice":"alloy"}' \
+  -o out.mp3
+
+# Realtime (WebSocket); pass model as a query parameter
+# ws://localhost:3210/v1/realtime?model=openai/gpt-realtime
+```
+
+Transcription first forwards to the upstream `/v1/audio/transcriptions`; if the upstream
+does not expose that endpoint, it falls back to `/v1/chat/completions` with `input_audio`
+(works with chat-audio ASR models such as `qwen3-asr-flash`). Realtime supports
+OpenAI-compatible WebSocket upstreams; Deepgram-specific protocols are not supported.
+For TTS upstreams that return PCM inside JSON (qwen/grok style), the gateway unwraps and
+wraps PCM as WAV; pass `"response_format":"pcm"` to receive raw PCM instead.
+
+Billing uses the same model price table:
+
+- transcription: upstream `usage` tokens when returned, otherwise WAV duration × 1000 tokens/s;
+- speech: upstream usage tokens when returned, otherwise input characters ÷ 4;
+- realtime: connection seconds × 1000 tokens/s.
+
+Upstream support is required for each endpoint; if a provider only offers chat-based audio
+(e.g. `qwen3-asr-flash` via `input_audio`), use `/v1/chat/completions` instead.
+
 ## Configuration
 
 Main environment variables are documented in [`.env.example`](.env.example) (`LGM_ADMIN_TOKEN`, `LGM_HTTP_ADDR`, `LGM_PROXY`, ...). Circuit-breaker parameters can be tuned in the admin Settings.

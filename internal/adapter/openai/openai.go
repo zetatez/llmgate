@@ -163,9 +163,13 @@ func (a *Adapter) Do(ctx context.Context, bc adapter.BaseChannel, apiKey string,
 	if err != nil {
 		return nil, err
 	}
-	// 组装头：客户端透传/渠道配置。强制保证鉴权头与 JSON 内容类型，
+	contentType := req.ContentType
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	// 组装头：客户端透传/渠道配置。强制保证鉴权头与内容类型，
 	// 防止渠道 extra_headers 或透传头覆盖网关的真实 Key/类型。
-	headers := map[string]string{"Content-Type": "application/json"}
+	headers := map[string]string{"Content-Type": contentType}
 	for k, v := range req.Headers {
 		headers[k] = v
 	}
@@ -173,7 +177,7 @@ func (a *Adapter) Do(ctx context.Context, bc adapter.BaseChannel, apiKey string,
 		httpReq.Header.Set(k, v)
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", contentType)
 
 	timeout := time.Duration(bc.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {

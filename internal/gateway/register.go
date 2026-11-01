@@ -32,6 +32,9 @@ func Register(v1 *gin.RouterGroup, a *app.App, bus *logbus.Bus, pen *router.Pena
 	v1.POST("/completions", handleForward(a, bus, pen, "/v1/completions"))
 	v1.POST("/embeddings", handleForward(a, bus, pen, "/v1/embeddings"))
 	v1.POST("/responses", handleResponses(a, bus, pen))
+	v1.POST("/audio/transcriptions", handleAudioTranscription(a, bus, pen))
+	v1.POST("/audio/speech", handleAudioSpeech(a, bus, pen))
+	v1.GET("/realtime", handleRealtime(a, bus, pen))
 }
 
 const ctxUserKey = "llmgate.user"

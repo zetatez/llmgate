@@ -10,11 +10,12 @@ import (
 // Request 是路由层交给适配器的统一转发描述。
 // 网关侧按 OpenAI 协议反序列化后，映射到各上游的实际请求。
 type Request struct {
-	Method  string            // HTTP 方法
-	Path    string            // 上游相对路径，如 /v1/chat/completions
-	Body    io.Reader         // 请求体（已按上游适配转换）
-	Headers map[string]string // 需要附加/覆盖的头
-	Model   string            // 本次请求的对外模型名（仅日志用）
+	Method      string            // HTTP 方法
+	Path        string            // 上游相对路径，如 /v1/chat/completions
+	Body        io.Reader         // 请求体（已按上游适配转换）
+	ContentType string            // 请求 Content-Type；空=application/json
+	Headers     map[string]string // 需要附加/覆盖的头
+	Model       string            // 本次请求的对外模型名（仅日志用）
 }
 
 // StatusError 是上游返回非 2xx 时的错误，携带状态码与响应体，供路由层判定 failover 或透传。

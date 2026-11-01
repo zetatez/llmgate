@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // 内嵌时区数据，容器无系统 tzdata 也能 LoadLocation
@@ -131,9 +132,14 @@ func main() {
 
 	// 生产构建（-tags embedweb）时托管前端静态资源；本地开发返回 nil 不影响运行
 	if h := web.Handler(); h != nil {
+		apiPrefix := strings.TrimSuffix(cfg.GatewayPrefix, "/") + "/v1"
 		r.NoRoute(func(c *gin.Context) {
-			// 非页面请求（如已下线的旧接口）返回标准 404 JSON，避免误回 index.html
-			if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			// /api/* 与 /v1/* 的未知路径（含 GET）一律返回 JSON 404，
+			// 不能回退到 SPA index.html —— 否则客户端会把 HTML 200 误判为真实接口。
+			p := c.Request.URL.Path
+			isAPI := p == "/api" || strings.HasPrefix(p, "/api/") ||
+				p == apiPrefix || strings.HasPrefix(p, apiPrefix+"/")
+			if isAPI || (c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "api not found"})
 				return
 			}
