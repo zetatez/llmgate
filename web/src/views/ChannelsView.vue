@@ -68,6 +68,7 @@ function continueReuse() {
 }
 
 function openEdit(ch: Channel) {
+  selectChannel(ch) // 让下方 Keys 面板与编辑对象保持一致
   let headers = ''
   try { headers = JSON.stringify(JSON.parse(ch.extra_headers || '{}'), null, 2) } catch { headers = ch.extra_headers || '' }
   Object.assign(channelDialog, { visible: true, editing: true, id: ch.id, name: ch.name, base_url: ch.base_url, adapter: ch.adapter, priority: ch.priority, weight: ch.weight, timeout_ms: ch.timeout_ms, enabled: ch.enabled, keys: '', headers, note: ch.note })
@@ -554,6 +555,9 @@ onMounted(async () => {
         <el-form-item v-if="!channelDialog.editing" label="API Keys">
           <el-input v-model="channelDialog.keys" type="textarea" :rows="3" placeholder="name=key, one per line (values may be AK:SK)" />
         </el-form-item>
+        <el-form-item v-else label="API Keys">
+          <div class="tip">Keys are managed in the <b>Keys</b> panel below this list: select the channel, then use <b>Edit</b> on a key to replace its secret.</div>
+        </el-form-item>
         <el-form-item label="Note"><el-input v-model="channelDialog.note" /></el-form-item>
         <el-form-item label="Extra Headers">
           <el-input v-model="channelDialog.headers" type="textarea" :rows="3" class="code" placeholder='{"x-opencode-session":"your session"}' />
@@ -574,7 +578,7 @@ onMounted(async () => {
           <el-form label-width="80px">
             <el-form-item label="Name"><el-input v-model="addDialog.name" placeholder="e.g. main / backup" /></el-form-item>
             <el-form-item label="Remark"><el-input v-model="addDialog.remark" placeholder="e.g. expires end of year" /></el-form-item>
-            <el-form-item label="Key" required><el-input v-model="addDialog.key" placeholder="sk-... or AK:SK" /></el-form-item>
+            <el-form-item label="Key" required><el-input v-model="addDialog.key" autocomplete="off" placeholder="sk-... or AK:SK" /></el-form-item>
           </el-form>
           <el-button type="primary" :loading="addDialog.busy" @click="submitAdd">Add</el-button>
         </el-tab-pane>
@@ -591,7 +595,7 @@ onMounted(async () => {
         <el-form-item label="Name"><el-input v-model="editKeyDialog.name" placeholder="e.g. main / backup" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="editKeyDialog.remark" placeholder="e.g. expires end of year" /></el-form-item>
         <el-form-item label="Secret">
-          <el-input v-model="editKeyDialog.key" type="password" show-password placeholder="Leave empty to keep current; supports AK:SK" />
+          <el-input v-model="editKeyDialog.key" type="password" show-password autocomplete="new-password" name="llmgate-key-secret" placeholder="Leave empty to keep current; supports AK:SK" />
         </el-form-item>
         <el-form-item v-if="!isUser" label="Owner">
           <el-select v-model="editKeyDialog.user_id" style="width: 100%">

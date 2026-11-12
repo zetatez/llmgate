@@ -52,7 +52,7 @@ func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any,
 	}
 	admin.POST("/penalties/reset", resetPenalties(a, pen))
 
-	RegisterChannelRoutes(admin.Group("/channels"), a)
+	RegisterChannelRoutes(admin.Group("/channels"), a, pen)
 	RegisterModelRouteRoutes(admin.Group("/model-routes"), a)
 	RegisterUserRoutes(admin.Group("/users"), a)
 	RegisterLogRoutes(admin.Group("/logs"), a)

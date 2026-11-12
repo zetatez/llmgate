@@ -333,7 +333,8 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 // retryAfterFor 返回指定错误码应带上的 Retry-After 秒数；空串表示不重试提示。
 func retryAfterFor(code int) string {
 	if code == http.StatusServiceUnavailable {
-		return "5"
+		// 下游 agent 自带指数退避；网关只给最小提示，避免叠加额外等待。
+		return "1"
 	}
 	return ""
 }

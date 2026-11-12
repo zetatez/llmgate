@@ -29,8 +29,8 @@ func TestMapRouteError(t *testing.T) {
 }
 
 func TestRetryAfter(t *testing.T) {
-	if got := retryAfterFor(http.StatusServiceUnavailable); got != "5" {
-		t.Fatalf("503 should carry Retry-After=5, got %q", got)
+	if got := retryAfterFor(http.StatusServiceUnavailable); got != "1" {
+		t.Fatalf("503 should carry Retry-After=1, got %q", got)
 	}
 	if got := retryAfterFor(http.StatusNotFound); got != "" {
 		t.Fatalf("404 should carry no Retry-After, got %q", got)

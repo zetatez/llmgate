@@ -16,17 +16,17 @@ func mkCandidate(chID, chPrio, chWeight, routePrio, routeWeight int64) Candidate
 
 func TestPenaltyLadder(t *testing.T) {
 	p := NewPenalizer()
-	if d := p.PenaliseChan(1, 0); d != 2*time.Second {
-		t.Fatalf("first penalty = %v, want 2s", d)
+	if d := p.PenaliseChan(1, 0); d != penaltyLadder[0] {
+		t.Fatalf("first penalty = %v, want %v", d, penaltyLadder[0])
 	}
-	if d := p.PenaliseChan(1, 0); d != 4*time.Second {
-		t.Fatalf("second penalty = %v, want 4s", d)
+	if d := p.PenaliseChan(1, 0); d != penaltyLadder[1] {
+		t.Fatalf("second penalty = %v, want %v", d, penaltyLadder[1])
 	}
-	if d := p.PenaliseChan(1, 0); d != 8*time.Second {
-		t.Fatalf("third penalty = %v, want 8s", d)
+	if d := p.PenaliseChan(1, 0); d != penaltyLadder[2] {
+		t.Fatalf("third penalty = %v, want %v", d, penaltyLadder[2])
 	}
-	if d := p.PenaliseChan(1, 0); d != 8*time.Second {
-		t.Fatalf("fourth penalty = %v, want 8s (capped)", d)
+	if d := p.PenaliseChan(1, 0); d != penaltyLadder[2] {
+		t.Fatalf("fourth penalty = %v, want %v (capped)", d, penaltyLadder[2])
 	}
 	if !p.ChPenalized(1) {
 		t.Fatal("channel 1 should be penalized")
@@ -36,8 +36,8 @@ func TestPenaltyLadder(t *testing.T) {
 		t.Fatal("channel 1 should be cleared")
 	}
 	// 清除后退避从头开始
-	if d := p.PenaliseChan(1, 0); d != 2*time.Second {
-		t.Fatalf("post-clear penalty = %v, want 2s", d)
+	if d := p.PenaliseChan(1, 0); d != penaltyLadder[0] {
+		t.Fatalf("post-clear penalty = %v, want %v", d, penaltyLadder[0])
 	}
 }
 
@@ -218,8 +218,8 @@ func TestFailChanThreshold(t *testing.T) {
 		}
 	}
 	// 达阈值才冷却，进入阶梯
-	if d := p.FailChan(1, 0); d != 2*time.Second {
-		t.Fatalf("first cooldown should be 2s, got %v", d)
+	if d := p.FailChan(1, 0); d != penaltyLadder[0] {
+		t.Fatalf("first cooldown should be %v, got %v", penaltyLadder[0], d)
 	}
 	if !p.ChPenalized(1) {
 		t.Fatal("channel should be penalized at threshold")
@@ -296,7 +296,7 @@ func TestApplyTuning(t *testing.T) {
 	if p.ChPenalized(3) {
 		t.Fatal("not penalized after one failure with threshold=2")
 	}
-	if d := p.FailChan(3, 0); d != 2*time.Second {
+	if d := p.FailChan(3, 0); d != penaltyLadder[0] {
 		t.Fatalf("second fail should cool (threshold=2), got %v", d)
 	}
 	if !p.ChPenalized(3) {

@@ -164,6 +164,7 @@ export interface UserKey {
   masked: string
   key_tail: string
   enabled: number
+  weight: number
   last_used_at: number
   created_at: number
 }

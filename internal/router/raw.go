@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"llmgate/internal/adapter"
 	"llmgate/internal/models"
@@ -46,7 +45,7 @@ func (r *Router) ForwardRawCandidates(ctx context.Context, cands []Candidate, bo
 	failedKeys := map[int64]bool{}
 	var lastErr error
 	attempts := 0
-	maxAttempts := 5
+	maxAttempts := attemptBudget(cands)
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -94,6 +93,9 @@ func (r *Router) ForwardRawCandidates(ctx context.Context, cands []Candidate, bo
 			Model:       cand.Route.UpstreamModel,
 		})
 		if err != nil {
+			if cerr := ctx.Err(); cerr != nil { // 客户端取消/超时不计惩罚
+				return nil, fmt.Errorf("request cancelled: %w", cerr)
+			}
 			attempts++
 			lastErr = fmt.Errorf("channel %s: %v", cand.Channel.Name, err)
 			if penalizeChannels {
@@ -135,10 +137,13 @@ func (r *Router) ForwardRawCandidates(ctx context.Context, cands []Candidate, bo
 		case code == http.StatusTooManyRequests || code == http.StatusPaymentRequired || code == http.StatusForbidden:
 			attempts++
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, truncate(string(respBody), 300))
-			if code == http.StatusTooManyRequests {
+			if isQuotaExceeded(string(respBody)) {
+				r.pen.PenalizeKeyWithProbe(key.ID, r.pen.QuotaPenalty(), quotaProbeInterval)
+			} else if code == http.StatusTooManyRequests {
 				r.pen.PenalizeKey(key.ID, keyRatePenalty)
 			} else {
-				r.pen.PenalizeKey(key.ID, r.pen.QuotaPenalty())
+				// 非额度类 403/402（access_denied 等）：该 Key 无此模型权限
+				r.pen.FailModelKey(key.ID, displayModel, keyModelDenied)
 			}
 			failedKeys[key.ID] = true
 			if attempts >= maxAttempts {
@@ -148,7 +153,7 @@ func (r *Router) ForwardRawCandidates(ctx context.Context, cands []Candidate, bo
 		case code == http.StatusUnauthorized:
 			attempts++
 			lastErr = fmt.Errorf("channel %s: unauthorized key", cand.Channel.Name)
-			r.pen.PenalizeKey(key.ID, 5*time.Minute)
+			r.pen.PenalizeKeyWithProbe(key.ID, keyAuthPenalty, keyProbeInterval)
 			failedKeys[key.ID] = true
 			if attempts >= maxAttempts {
 				return nil, lastErr
@@ -168,6 +173,7 @@ func (r *Router) ForwardRawCandidates(ctx context.Context, cands []Candidate, bo
 		case code == http.StatusBadRequest || code == http.StatusNotFound:
 			attempts++
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, truncate(string(respBody), 300))
+			r.pen.MarkKeySuccess(key.ID) // 上游已响应，Key 本身可用
 			excludedCh[cand.Channel.ID] = true
 			if penalizeChannels {
 				r.recoverChannel(&cand.Channel)
@@ -178,6 +184,7 @@ func (r *Router) ForwardRawCandidates(ctx context.Context, cands []Candidate, bo
 			continue
 		default:
 			r.recoverChannel(&cand.Channel)
+			r.pen.MarkKeySuccess(key.ID)
 			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			r.pen.ClearModelDeniedKey(key.ID, displayModel)
 			return &Result{

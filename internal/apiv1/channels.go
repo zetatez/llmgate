@@ -16,11 +16,17 @@ import (
 	"llmgate/internal/adapter"
 	"llmgate/internal/app"
 	"llmgate/internal/models"
+	"llmgate/internal/router"
 	"llmgate/internal/store"
 )
 
 // RegisterChannelRoutes 挂载渠道及 Key 池管理路由。
-func RegisterChannelRoutes(g *gin.RouterGroup, a *app.App) {
+// pen 可选：更换 Key 密钥后清除该 Key 的熔断/拒权缓存。
+func RegisterChannelRoutes(g *gin.RouterGroup, a *app.App, pens ...*router.Penalizer) {
+	var pen *router.Penalizer
+	if len(pens) > 0 {
+		pen = pens[0]
+	}
 	g.GET("", listChannels(a))
 	g.POST("", createChannel(a))
 	g.POST("/:id/test", testChannel(a))
@@ -33,7 +39,7 @@ func RegisterChannelRoutes(g *gin.RouterGroup, a *app.App) {
 
 	g.GET("/:id/keys", listKeys(a))
 	g.POST("/:id/keys", addKeys(a))
-	g.PUT("/keys/:keyID", updateKey(a))
+	g.PUT("/keys/:keyID", updateKey(a, pen))
 	g.DELETE("/keys/:keyID", deleteKey(a))
 }
 
@@ -582,7 +588,7 @@ func encryptAndAddKeyItems(a *app.App, channelID int64, entries []keyEntry) erro
 	return store.AddChannelKeys(a.DB, channelID, items)
 }
 
-func updateKey(a *app.App) gin.HandlerFunc {
+func updateKey(a *app.App, pen *router.Penalizer) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "keyID")
 		if !ok {
@@ -651,6 +657,9 @@ func updateKey(a *app.App) gin.HandlerFunc {
 				return
 			}
 			cur.APIKeyEnc = enc
+			if pen != nil {
+				pen.ClearKey(id) // 新密钥立即恢复可用，不再受旧密钥熔断影响
+			}
 		}
 		v := toKeyView(a, cur)
 		v.OwnerName = userNames(a)[cur.UserID]

@@ -248,3 +248,23 @@ func TestRunBackgroundFieldsImmediately(t *testing.T) {
 		t.Fatal("RunBackground should return after Stop")
 	}
 }
+
+func TestProbeKeysOnceRecovers(t *testing.T) {
+	var chID int64
+	p, a, _ := newPuller(t, func(a *app.App) { chID = addEnabledChannel(a, "c1") })
+	keys, err := store.ListChannelKeys(a.DB, chID)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("keys = %+v err=%v", keys, err)
+	}
+	id := keys[0].ID
+	// 冷却 1min，但 1ms 后即到探测时间
+	p.pen.PenalizeKeyWithProbe(id, time.Minute, time.Millisecond)
+	if !p.pen.KeyPenalized(id) {
+		t.Fatal("precondition: key should be cooling")
+	}
+	time.Sleep(5 * time.Millisecond)
+	p.probeKeysOnce() // 后台探活成功
+	if p.pen.KeyPenalized(id) {
+		t.Fatal("successful background probe should clear the key cooldown")
+	}
+}

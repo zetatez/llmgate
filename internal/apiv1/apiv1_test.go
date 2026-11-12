@@ -8,12 +8,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"llmgate/internal/app"
 	"llmgate/internal/config"
 	"llmgate/internal/models"
+	"llmgate/internal/router"
 	"llmgate/internal/store"
 
 	_ "llmgate/internal/adapter/openai" // 注册 openai 适配器供 testChannel 使用
@@ -982,5 +984,46 @@ func TestRevealKeyAdmin(t *testing.T) {
 	}
 	if w := do(r, http.MethodGet, basePath+"/channels/keys/abc/secret", "", tok, ""); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad key id = %d, want 400", w.Code)
+	}
+}
+
+func TestUpdateKeyClearsPenalty(t *testing.T) {
+	a := newApp(t)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	pen := router.NewPenalizer()
+	RegisterChannelRoutes(r.Group(basePath+"/channels"), a, pen)
+	tok := testAdminToken
+
+	w := do(r, http.MethodPost, basePath+"/channels", `{"name":"c","base_url":"http://x","keys":["sk-old"]}`, tok, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("create = %d, body=%s", w.Code, w.Body.String())
+	}
+	var created struct {
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	decodeBody(t, w, &created)
+	var kl struct {
+		Data []keyView `json:"data"`
+	}
+	decodeBody(t, do(r, http.MethodGet, basePath+"/channels/"+fmt.Sprint(created.Data.ID)+"/keys", "", tok, ""), &kl)
+	if len(kl.Data) != 1 {
+		t.Fatalf("keys = %+v", kl.Data)
+	}
+	keyID := kl.Data[0].ID
+	pen.PenalizeKey(keyID, time.Minute)
+	pen.FailModelKey(keyID, "m", time.Minute)
+	if !pen.KeyPenalized(keyID) {
+		t.Fatal("precondition: key should be penalized")
+	}
+
+	w = do(r, http.MethodPut, basePath+"/channels/keys/"+fmt.Sprint(keyID), `{"key":"sk-new"}`, tok, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("update = %d, body=%s", w.Code, w.Body.String())
+	}
+	if pen.KeyPenalized(keyID) {
+		t.Fatal("replacing the secret should clear the key cooldown")
 	}
 }

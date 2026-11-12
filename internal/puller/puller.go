@@ -6,6 +6,8 @@ package puller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"runtime/debug"
 	"strconv"
@@ -24,7 +26,14 @@ const defaultIntervalMin = 60
 
 // probeBackoff 探活失败后施加的退避冷却：到期后探活才会再次尝试。
 // 既避免下一个 tick 立刻重打同一个欠费/挂掉的上游，又保证在退避到期后可尽快恢复。
-const probeBackoff = 30 * time.Second
+const probeBackoff = 10 * time.Second
+
+// 坏 Key 的后台恢复探测：每 5s 跑一轮，每轮最多探测 keyProbeBatch 个，
+// 避免对上游造成集中压力；失败后按该 Key 自身的 probe 间隔（带抖动）重排。
+const (
+	keyProbeTick  = 5 * time.Second
+	keyProbeBatch = 4
+)
 
 // Puller 定时任务执行体。
 type Puller struct {
@@ -65,11 +74,13 @@ func (p *Puller) SyncNow() map[string]any {
 	return p.tick()
 }
 
-// RunBackground 后台任务：冷却渠道探活自愈（每 20s）+ 日志保留清理（每小时）。
+// RunBackground 后台任务：冷却渠道探活（每 15s）、坏 Key 恢复探测（每 5s）+ 日志保留清理（每小时）。
 func (p *Puller) RunBackground() {
 	probeTk := time.NewTicker(15 * time.Second)
+	keyTk := time.NewTicker(keyProbeTick)
 	cleanTk := time.NewTicker(time.Hour)
 	defer probeTk.Stop()
+	defer keyTk.Stop()
 	defer cleanTk.Stop()
 
 	p.safeRun("probe-once", p.probeOnce)
@@ -78,6 +89,8 @@ func (p *Puller) RunBackground() {
 		select {
 		case <-probeTk.C:
 			p.safeRun("probe-once", p.probeOnce)
+		case <-keyTk.C:
+			p.safeRun("probe-keys", p.probeKeysOnce)
 		case <-cleanTk.C:
 			p.safeRun("cleanup-once", p.cleanupOnce)
 		case <-p.stop:
@@ -115,17 +128,17 @@ func (p *Puller) probeOnce() {
 			p.pen.ClearChan(ch.ID)
 			continue
 		}
-		apiKey, err := a.FirstEnabledKey(ch.ID)
-		if err != nil {
-			continue
-		}
 		adpt := adapter.Get(ch.Adapter)
 		if adpt == nil {
 			continue
 		}
 		// 用真实聊天路径探活（带该渠道任一启用路由的模型）：避免“models 列表通但 chat 挂”
-		// 导致冷却被反复误恢复（探活过 20s 一轮，聊天接口持续 EOF/超时则不会恢复）。
+		// 导致冷却被反复误恢复（探活约 15s 一轮，聊天接口持续 EOF/超时则不会恢复）。
 		probeModel, _ := store.ProbeRouteModel(a.DB, ch.ID)
+		probeKeyID, apiKey, err := p.firstHealthyKey(ch.ID, probeModel)
+		if err != nil {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ch.TimeoutMS)*time.Millisecond)
 		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), apiKey, adapter.HealthRequest(probeModel))
 		cancel()
@@ -139,7 +152,92 @@ func (p *Puller) probeOnce() {
 		resp.Body.Close()
 		_ = store.SetChannelHealthy(a.DB, ch.ID)
 		p.pen.ClearChan(ch.ID)
+		p.pen.MarkKeySuccess(probeKeyID) // 探活用的 Key 也已验证可用
 		log.Printf("puller: channel %q 探活成功，已恢复 healthy", ch.Name)
+	}
+}
+
+// firstHealthyKey 优先取一个未冷却/未被该模型拒权的 Key 做渠道探活；
+// 全部不可用时回退到任意启用 Key，避免因首个 Key 是坏 Key 而误冷却整条渠道。
+func (p *Puller) firstHealthyKey(channelID int64, model string) (int64, string, error) {
+	keys, err := store.ListChannelKeys(p.a.DB, channelID)
+	if err != nil {
+		return 0, "", err
+	}
+	var fallbackID int64
+	var fallback string
+	for _, k := range keys {
+		if k.Enabled != 1 {
+			continue
+		}
+		plain, derr := p.a.Secret.Decrypt(k.APIKeyEnc)
+		if derr != nil || plain == "" {
+			continue
+		}
+		if !p.pen.KeyPenalized(k.ID) && !p.pen.ModelDeniedKey(k.ID, model) {
+			return k.ID, plain, nil
+		}
+		if fallbackID == 0 {
+			fallbackID, fallback = k.ID, plain
+		}
+	}
+	if fallbackID != 0 {
+		return fallbackID, fallback, nil
+	}
+	return 0, "", fmt.Errorf("no enabled key for channel %d", channelID)
+}
+
+// probeKeysOnce 对处于冷却、且已到恢复探测时间的坏 Key 做一次轻量探活。
+// 放在后台执行，正常请求始终优先健康 Key，不会因恢复探测增加用户延迟。
+func (p *Puller) probeKeysOnce() {
+	ids := p.pen.DueKeyIDs()
+	if len(ids) == 0 {
+		return
+	}
+	if len(ids) > keyProbeBatch {
+		ids = ids[:keyProbeBatch] // 每轮限量，避免集中打上游
+	}
+	a := p.a
+	for _, id := range ids {
+		key, err := store.GetChannelKey(a.DB, id)
+		if err != nil || key == nil || key.Enabled != 1 {
+			p.pen.MarkKeySuccess(id) // Key 已删除/禁用：直接清理内存冷却
+			continue
+		}
+		ch, err := store.GetChannel(a.DB, key.ChannelID)
+		if err != nil || ch == nil || ch.Enabled != 1 {
+			p.pen.MarkKeySuccess(id)
+			continue
+		}
+		plain, err := a.Secret.Decrypt(key.APIKeyEnc)
+		if err != nil || plain == "" {
+			p.pen.MarkKeySuccess(id)
+			continue
+		}
+		adpt := adapter.Get(ch.Adapter)
+		if adpt == nil {
+			p.pen.MarkKeySuccess(id)
+			continue
+		}
+		probeModel, _ := store.ProbeRouteModel(a.DB, ch.ID)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ch.TimeoutMS)*time.Millisecond)
+		resp, err := adpt.Do(ctx, adapter.ChannelFrom(ch), plain, adapter.HealthRequest(probeModel))
+		cancel()
+		if err != nil || resp == nil || resp.StatusCode >= 400 {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			p.pen.MarkKeyProbed(id, 0) // 仍失败：按该 Key 的探测间隔（带抖动）重排
+			continue
+		}
+		// 读取极少量响应体以复用连接，然后立即关闭。
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
+		resp.Body.Close()
+		p.pen.MarkKeySuccess(id)
+		if probeModel != "" {
+			p.pen.ClearModelDeniedKey(id, probeModel) // 该模型的 access_denied 也一并恢复
+		}
+		log.Printf("puller: key #%d 探测成功，已解除冷却", id)
 	}
 }
 

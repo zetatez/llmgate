@@ -858,3 +858,124 @@ func TestPenaliperConcurrency(t *testing.T) {
 		<-done
 	}
 }
+
+func TestClearKey(t *testing.T) {
+	p := NewPenalizer()
+	p.PenalizeKey(5, time.Minute)
+	for i := 0; i < 10; i++ { // 达到连续失败阈值后标记模型拒权
+		p.FailModelKey(5, "m", time.Minute)
+	}
+	if !p.KeyPenalized(5) || !p.ModelDeniedKey(5, "m") {
+		t.Fatal("precondition: key should be penalized/denied")
+	}
+	p.ClearKey(5)
+	if p.KeyPenalized(5) || p.ModelDeniedKey(5, "m") {
+		t.Fatal("ClearKey should clear key cooldown and model denials")
+	}
+	p.ClearKey(0) // 不应 panic
+}
+
+func TestPickKeyFallsBackWhenCooling(t *testing.T) {
+	b := newTB(t)
+	chID := b.ch("c", "http://stub", "fa-none", 0, 1)
+	keyID := b.key(chID, "sk-live")
+	rt := b.router()
+	rt.pen.PenalizeKey(keyID, time.Minute) // 单 Key 渠道进入冷却
+
+	key, apiKey, err := rt.pickKey(chID, "m", nil)
+	if err != nil {
+		t.Fatalf("cooling key should still be usable as last resort: %v", err)
+	}
+	if key.ID != keyID || apiKey != "sk-live" {
+		t.Fatalf("picked key = %d/%q, want %d/sk-live", key.ID, apiKey, keyID)
+	}
+}
+
+func TestPickKeyRespectsFailedKeys(t *testing.T) {
+	b := newTB(t)
+	chID := b.ch("c", "http://stub", "fa-none", 0, 1)
+	keyID := b.key(chID, "sk-live")
+	rt := b.router()
+
+	if _, _, err := rt.pickKey(chID, "m", map[int64]bool{keyID: true}); err == nil {
+		t.Fatal("key already tried in this request must stay excluded")
+	}
+}
+
+func TestAttemptBudget(t *testing.T) {
+	cases := []struct {
+		cands int
+		want  int
+	}{
+		{0, 5}, {1, 5}, {2, 8}, {3, 10}, {5, 10},
+	}
+	for _, c := range cases {
+		if got := attemptBudget(make([]Candidate, c.cands)); got != c.want {
+			t.Errorf("attemptBudget(%d) = %d, want %d", c.cands, got, c.want)
+		}
+	}
+}
+
+func TestKeyProbeDueAndSuccess(t *testing.T) {
+	p := NewPenalizer()
+	p.PenalizeKey(1, time.Minute)
+	if !p.KeyPenalized(1) {
+		t.Fatal("key should be cooling")
+	}
+	if p.KeyProbeDue(1) {
+		t.Fatal("probe should not be due immediately after penalty")
+	}
+	// 模拟冷却仍在、但已到探测时间
+	p.mu.Lock()
+	p.key[1] = keyState{until: time.Now().Add(time.Minute), nextProbe: time.Now().Add(-time.Second)}
+	p.mu.Unlock()
+	if !p.KeyProbeDue(1) {
+		t.Fatal("probe should be due")
+	}
+	p.MarkKeySuccess(1) // 探测成功后立即恢复
+	if p.KeyPenalized(1) {
+		t.Fatal("successful probe should clear the key cooldown")
+	}
+}
+
+func TestPickKeyPrefersHealthyOverCooling(t *testing.T) {
+	b := newTB(t)
+	chID := b.ch("c", "http://stub", "fa-none", 0, 1)
+	coolID := b.key(chID, "sk-cool")
+	goodID := b.key(chID, "sk-good")
+	rt := b.router()
+	rt.pen.PenalizeKey(coolID, time.Minute)
+	// 即使探测到点，用户请求也应优先健康 Key（探测在后台进行）
+	rt.pen.mu.Lock()
+	rt.pen.key[coolID] = keyState{until: time.Now().Add(time.Minute), nextProbe: time.Now().Add(-time.Second), probe: keyProbeInterval}
+	rt.pen.mu.Unlock()
+
+	key, _, err := rt.pickKey(chID, "m", nil)
+	if err != nil || key.ID != goodID {
+		t.Fatalf("expected healthy key %d, got %+v err=%v", goodID, key, err)
+	}
+}
+
+func TestDueKeyIDsAndMarkProbed(t *testing.T) {
+	p := NewPenalizer()
+	p.PenalizeKey(7, time.Minute)
+	if got := p.DueKeyIDs(); len(got) != 0 {
+		t.Fatalf("probe should not be due immediately, got %v", got)
+	}
+	p.mu.Lock()
+	st := p.key[7]
+	st.nextProbe = time.Now().Add(-time.Second)
+	p.key[7] = st
+	p.mu.Unlock()
+	if got := p.DueKeyIDs(); len(got) != 1 || got[0] != 7 {
+		t.Fatalf("due keys = %v, want [7]", got)
+	}
+	p.MarkKeyProbed(7, 0) // 失败重排
+	if got := p.DueKeyIDs(); len(got) != 0 {
+		t.Fatalf("after reschedule should not be due, got %v", got)
+	}
+	p.MarkKeySuccess(7) // 探测成功即恢复
+	if p.KeyPenalized(7) {
+		t.Fatal("successful probe should clear cooldown")
+	}
+}

@@ -37,20 +37,39 @@ var ErrNetworkExhausted = errors.New("all channels failed due to network errors,
 // 属于确定性、模型级持久错误（如模型只支持 Responses/Claude 协议却被发到 chat/completions）。
 const protoUnsupportedMarker = "ModelProtocolUnsupported"
 
-// 熔断退避阶梯：2s → 4s → 8s（之后连续失败保持 8s 封顶）。
+// 熔断退避阶梯：1s → 2s → 4s（之后连续失败保持 4s 封顶）。
+// 网关不做长退避：短冷却只用于避免立刻重复撞同一个故障上游，恢复由下一次请求自然探测。
 var penaltyLadder = []time.Duration{
+	1 * time.Second,
 	2 * time.Second,
 	4 * time.Second,
-	8 * time.Second,
 }
 
 // quotaPenalty 上游额度用尽/欠费/过期的冷却时长。
-// 比普通限流更久：这类问题不易在 8s 内自愈，且避免探活每 tick 去重打一个已停付/欠费账户。
-const quotaPenalty = 30 * time.Second
+// 略长于普通限流：这类问题不会秒级自愈，但也只做短时避让，避免账户充值后长时间不可用。
+const quotaPenalty = 10 * time.Second
 
 // keyRatePenalty 普通限流（429 非额度）的 Key 级冷却时长。
-// 按 Key 隔离：某用户 Key 被限流不会冷却整条渠道、不影响同渠道其它用户。
-const keyRatePenalty = 20 * time.Second
+// 网关只是中转站，且下游已有重试/退避：这里只做秒级避让，避免一次抖动把 Key 钉死。
+const keyRatePenalty = 1 * time.Second
+
+// keyAuthPenalty 401（Key 无效/鉴权抖动）的 Key 级冷却时长。
+// 不用 5 分钟：先换 Key/渠道；若确实持续无效，重复失败会继续维持冷却。
+const keyAuthPenalty = 10 * time.Second
+
+// keyModelDenied 403 access_denied 等"该 Key 无此模型权限"的拒权时长。
+const keyModelDenied = 30 * time.Second
+
+// protoUnsupportedDeny 模型不支持当前调用协议（确定性错误）的拒权时长。
+const protoUnsupportedDeny = 5 * time.Minute
+
+// keyProbeInterval 处于冷却中的 Key 多久允许一次"半开"恢复探测。
+// 探测由 puller 后台执行，不占用用户请求；5s 只控制单个坏 Key 的恢复探测频率。
+const keyProbeInterval = 5 * time.Second
+
+// quotaProbeInterval 额度/欠费类 Key 的探测间隔稍长：这类问题不会秒级自愈，
+// 高频探测只会无谓打扰已欠费账户。
+const quotaProbeInterval = 10 * time.Second
 
 // failThreshold / failWindow：冷却采用"连续失败才拉黑"的渐进策略。
 // 仅在 failWindow 滑动窗口内连续失败达到 failThreshold 次，才真正把渠道/模型拉进冷却，
@@ -93,12 +112,19 @@ type modelState struct {
 	last  time.Time
 }
 
+// keyState 单个 Key 的冷却与恢复探测信息。
+type keyState struct {
+	until     time.Time     // 冷却截止
+	nextProbe time.Time     // 下一次允许后台恢复探测的时间
+	probe     time.Duration // 该 Key 的探测间隔（按错误类型不同）
+}
+
 // Penalizer 内存态熔断器（并发安全）。单个，供 Router 与 puller 探活共用。
 // 熔断阈值/窗口/配额冷却均可在运行期通过 settings 覆盖（见 SetTuning）。
 type Penalizer struct {
 	mu            sync.RWMutex
 	ch            map[int64]penaltyState           // 渠道冷却（网络/5xx/超时等连接级故障）
-	key           map[int64]time.Time              // Key 冷却（401/限流/额度等账号级故障）
+	key           map[int64]keyState               // Key 冷却（401/限流/额度等账号级故障）
 	mdl           map[int64]map[string]*modelState // 模型级拒权（渠道维度：协议不支持等）
 	mdlKey        map[int64]map[string]*modelState // 模型级拒权（Key 维度：403 access_denied 等，按 Key 隔离避免跨用户串扰）
 	failThreshold int                              // 连续失败阈值
@@ -110,7 +136,7 @@ type Penalizer struct {
 func NewPenalizer() *Penalizer {
 	return &Penalizer{
 		ch:            map[int64]penaltyState{},
-		key:           map[int64]time.Time{},
+		key:           map[int64]keyState{},
 		mdl:           map[int64]map[string]*modelState{},
 		mdlKey:        map[int64]map[string]*modelState{},
 		failThreshold: failThreshold,
@@ -170,7 +196,7 @@ func modelDeniedLocked(m map[int64]map[string]*modelState, id int64, model strin
 
 func failModelLocked(m map[int64]map[string]*modelState, id int64, model string, d, window time.Duration, threshold int) {
 	if d <= 0 {
-		d = 10 * time.Minute
+		d = 2 * time.Minute
 	}
 	byModel := m[id]
 	if byModel == nil {
@@ -272,7 +298,7 @@ func (p *Penalizer) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.ch = map[int64]penaltyState{}
-	p.key = map[int64]time.Time{}
+	p.key = map[int64]keyState{}
 	p.mdl = map[int64]map[string]*modelState{}
 	p.mdlKey = map[int64]map[string]*modelState{}
 }
@@ -352,23 +378,114 @@ func (p *Penalizer) ClearChan(id int64) {
 	}
 }
 
-// KeyPenalized Key 是否处于熔断中。
+// KeyPenalized Key 是否处于冷却中（仍可能因恢复探测被尝试）。
 func (p *Penalizer) KeyPenalized(id int64) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	t, ok := p.key[id]
-	return ok && time.Now().Before(t)
+	st, ok := p.key[id]
+	return ok && time.Now().Before(st.until)
+}
+
+// KeyProbeDue Key 处于冷却中，且已到下一次恢复探测时间。
+func (p *Penalizer) KeyProbeDue(id int64) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	st, ok := p.key[id]
+	now := time.Now()
+	return ok && now.Before(st.until) && !now.Before(st.nextProbe)
+}
+
+// DueKeyIDs 返回当前需要做恢复探测的 Key（仍在冷却中且已到探测时间）。
+// 由 puller 后台任务消费，避免恢复探测占用用户请求。
+func (p *Penalizer) DueKeyIDs() []int64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	out := make([]int64, 0, len(p.key))
+	for id, st := range p.key {
+		if now.Before(st.until) && !now.Before(st.nextProbe) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// MarkKeyProbed 记录一次恢复探测，推迟下一次探测时间。
+// interval<=0 时沿用该 Key 注册时的探测间隔。
+func (p *Penalizer) MarkKeyProbed(id int64, interval time.Duration) {
+	if id <= 0 {
+		return
+	}
+	p.mu.Lock()
+	if st, ok := p.key[id]; ok {
+		if interval <= 0 {
+			interval = st.probe
+		}
+		if interval <= 0 {
+			interval = keyProbeInterval
+		}
+		st.nextProbe = time.Now().Add(jitterDuration(interval))
+		p.key[id] = st
+	}
+	p.mu.Unlock()
+}
+
+// jitterDuration 给探测间隔加 ±20% 抖动，避免大量坏 Key 同时到点探测。
+func jitterDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	span := int64(d) / 5
+	if span <= 0 {
+		return d
+	}
+	return d + time.Duration(rand.Int63n(2*span+1)) - time.Duration(span)
+}
+
+// MarkKeySuccess 探测/调用成功后立即解除该 Key 的冷却（高频恢复的关键）。
+func (p *Penalizer) MarkKeySuccess(id int64) {
+	if id <= 0 {
+		return
+	}
+	p.mu.Lock()
+	delete(p.key, id)
+	p.mu.Unlock()
+}
+
+// ClearKey 清除某个 Key 的冷却与模型拒权标记（更换密钥后立即恢复可用）。
+func (p *Penalizer) ClearKey(id int64) {
+	if id <= 0 {
+		return
+	}
+	p.mu.Lock()
+	delete(p.key, id)
+	delete(p.mdlKey, id)
+	p.mu.Unlock()
 }
 
 func (p *Penalizer) PenalizeKey(id int64, d time.Duration) {
+	p.PenalizeKeyWithProbe(id, d, keyProbeInterval)
+}
+
+// PenalizeKeyWithProbe 冷却 Key，并指定后台恢复探测间隔。
+func (p *Penalizer) PenalizeKeyWithProbe(id int64, d, probe time.Duration) {
 	if id <= 0 {
 		return
 	}
 	if d <= 0 {
-		d = 30 * time.Second
+		d = 10 * time.Second
+	}
+	if probe <= 0 {
+		probe = keyProbeInterval
+	}
+	now := time.Now()
+	until := now.Add(d)
+	probeAt := now.Add(jitterDuration(probe))
+	if probeAt.After(until) {
+		probeAt = until // 探测不晚于冷却结束
 	}
 	p.mu.Lock()
-	p.key[id] = time.Now().Add(d)
+	p.key[id] = keyState{until: until, nextProbe: probeAt, probe: probe}
 	p.mu.Unlock()
 }
 
@@ -565,28 +682,57 @@ func (r *Router) pickBest(cands []Candidate, excludedCh map[int64]bool, displayM
 	})
 }
 
-// pickKey 从渠道启用 Key 中加权随机选一个（跳过熔断中的 Key）并解密。
+// pickKey 从渠道启用 Key 中加权随机选一个并解密。
+// 采用分层回退，避免冷却把渠道硬性打成不可用：
+//  1. 优先健康 Key（无冷却、无模型拒权）；
+//  2. 若全在冷却/拒权中，回退到仍在本次请求失败集合之外的 Key（可用性优先）。
+//
+// 冷却只是"优先级提示"，不是硬门禁；本次请求已失败的 Key 仍会被排除。
 // 共享池：所有用户的 Key 都参与路由；选中 Key 的归属用户作为"贡献者"由调用方记账。
 func (r *Router) pickKey(channelID int64, displayModel string, failedKeys map[int64]bool) (*models.ChannelKey, string, error) {
 	keys, err := store.ListChannelKeys(r.db, channelID)
 	if err != nil {
 		return nil, "", err
 	}
-	var available []*models.ChannelKey
+	var healthy, cooling []*models.ChannelKey
 	for _, k := range keys {
-		if k.Enabled == 1 && !failedKeys[k.ID] && !r.pen.KeyPenalized(k.ID) && !r.pen.ModelDeniedKey(k.ID, displayModel) {
-			available = append(available, k)
+		if k.Enabled != 1 || failedKeys[k.ID] {
+			continue
+		}
+		if !r.pen.KeyPenalized(k.ID) && !r.pen.ModelDeniedKey(k.ID, displayModel) {
+			healthy = append(healthy, k)
+		} else {
+			cooling = append(cooling, k)
 		}
 	}
-	if len(available) == 0 {
+	pool := healthy
+	if len(pool) == 0 {
+		// 全部处于冷却/拒权：仍尝试，避免单 Key 渠道直接 503。
+		// 坏 Key 的恢复探测由 puller 后台完成，正常请求优先健康 Key，不受探测干扰。
+		pool = cooling
+	}
+	if len(pool) == 0 {
 		return nil, "", errors.New("channel has no enabled key")
 	}
-	key := *weightedRandom(available, func(k *models.ChannelKey) int { return weightOf(k.Weight) })
+	key := *weightedRandom(pool, func(k *models.ChannelKey) int { return weightOf(k.Weight) })
 	apiKey, err := r.secret.Decrypt(key.APIKeyEnc)
 	if err != nil || apiKey == "" {
 		return nil, "", errors.New("decrypt key failed")
 	}
 	return key, apiKey, nil
+}
+
+// attemptBudget 根据候选数量给出单次请求的最大尝试次数（尝试之间不 sleep）。
+// 候选越多，越应轮询完 provider/Key 组合再报错；封顶避免极端长尾请求。
+func attemptBudget(cands []Candidate) int {
+	n := len(cands) * 4
+	if n < 5 {
+		n = 5
+	}
+	if n > 10 {
+		n = 10
+	}
+	return n
 }
 
 // isQuotaExceeded 从上游错误体识别"额度/余额用尽"类错误（429/402/403 常见）。
@@ -627,7 +773,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 	var protoKeyOwnerID int64
 	protoProvided := false
 	networkAttempts := 0
-	maxNetworkAttempts := 5
+	maxNetworkAttempts := attemptBudget(cands)
 
 	for {
 		// 客户端已断开（上下文取消）：不要再消耗失败转移预算去试上游。
@@ -659,6 +805,10 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			Model:   cand.Route.UpstreamModel,
 		})
 		if err != nil {
+			// 客户端取消/超时不代表上游故障，不应计入冷却。
+			if cerr := ctx.Err(); cerr != nil {
+				return nil, fmt.Errorf("request cancelled: %w", cerr)
+			}
 			// 网络错误/超时：冷却该渠道（连接级故障对所有 Key 一致）
 			networkAttempts++
 			lastNetworkErr = true
@@ -673,6 +823,9 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResp+1))
 		resp.Body.Close()
 		if err != nil {
+			if cerr := ctx.Err(); cerr != nil { // 客户端取消，不计惩罚
+				return nil, fmt.Errorf("request cancelled: %w", cerr)
+			}
 			// 响应体读取中断：连接在响应中途被掐断，同样视为纯网络故障
 			networkAttempts++
 			lastNetworkErr = true
@@ -705,12 +858,12 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			lastNetworkErr = false // 上游已响应：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 			if isQuotaExceeded(bodyStr) {
-				r.pen.PenalizeKey(key.ID, r.pen.QuotaPenalty()) // 额度/欠费/过期：Key 级长冷却
+				r.pen.PenalizeKeyWithProbe(key.ID, r.pen.QuotaPenalty(), quotaProbeInterval) // 额度/欠费/过期：Key 级长冷却
 			} else if code == http.StatusTooManyRequests {
 				r.pen.PenalizeKey(key.ID, keyRatePenalty) // 普通限流：Key 级短冷却
 			} else {
 				// 非额度类 403/402（如 access_denied）：该 Key 无此模型权限 → Key 级模型拒权
-				r.pen.FailModelKey(key.ID, displayModel, 10*time.Minute)
+				r.pen.FailModelKey(key.ID, displayModel, keyModelDenied)
 			}
 			failedKeys[key.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
@@ -722,7 +875,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			networkAttempts++
 			lastNetworkErr = false // 上游已响应 401：非纯网络故障
 			lastErr = fmt.Errorf("channel %s: unauthorized key", cand.Channel.Name)
-			r.pen.PenalizeKey(key.ID, 5*time.Minute)
+			r.pen.PenalizeKeyWithProbe(key.ID, keyAuthPenalty, keyProbeInterval)
 			failedKeys[key.ID] = true
 			if networkAttempts >= maxNetworkAttempts {
 				return nil, lastErr
@@ -743,7 +896,7 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 			// 确定性、模型级持久错误。标记拒权以快速跳过，不误伤整条渠道；记录体供透传。
 			networkAttempts++
 			lastNetworkErr = false
-			r.pen.DenyModel(cand.Channel.ID, displayModel, 30*time.Minute)
+			r.pen.DenyModel(cand.Channel.ID, displayModel, protoUnsupportedDeny)
 			r.recoverChannel(&cand.Channel)
 			excludedCh[cand.Channel.ID] = true
 			lastErr = fmt.Errorf("channel %s: model protocol unsupported (upstream 400)", cand.Channel.Name)
@@ -769,12 +922,14 @@ func (r *Router) ForwardChat(ctx context.Context, requestBody []byte, displayMod
 		case code >= http.StatusBadRequest:
 			// 其余 4xx（422 等）透传，不重试
 			r.recoverChannel(&cand.Channel)
+			r.pen.MarkKeySuccess(key.ID) // Key 至少鉴权/连接正常，解除冷却
 			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			r.pen.ClearModelDeniedKey(key.ID, displayModel)
 			return &Result{StatusCode: code, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, KeyOwnerID: key.UserID, Retries: networkAttempts}, nil
 		default:
-			// 成功（2xx）或上游 3xx：清除该渠道熔断并恢复，透传真实状态码
+			// 成功（2xx）或上游 3xx：清除该渠道熔断、Key 冷却并恢复，透传真实状态码
 			r.recoverChannel(&cand.Channel)
+			r.pen.MarkKeySuccess(key.ID) // 探测成功：立即让坏 Key 恢复可用
 			r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 			r.pen.ClearModelDeniedKey(key.ID, displayModel)
 			return &Result{StatusCode: resp.StatusCode, Body: body, ContentType: resp.Headers["Content-Type"], Channel: cand.Channel, Route: cand.Route, KeyID: key.ID, KeyOwnerID: key.UserID, Retries: networkAttempts}, nil
@@ -837,7 +992,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 	var protoKeyOwnerID int64
 	protoProvided := false
 	networkAttempts := 0
-	maxNetworkAttempts := 5
+	maxNetworkAttempts := attemptBudget(cands)
 
 	for {
 		// 客户端已断开：停止消耗失败转移预算。
@@ -868,6 +1023,10 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			Model:   cand.Route.UpstreamModel,
 		})
 		if err != nil {
+			// 客户端取消/超时不是上游故障，不计入冷却/故障转移预算。
+			if cerr := ctx.Err(); cerr != nil {
+				return nil, fmt.Errorf("request cancelled: %w", cerr)
+			}
 			var se *adapter.StatusError
 			if !errors.As(err, &se) {
 				// 网络/连接失败
@@ -889,7 +1048,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			case code == http.StatusBadRequest && bytes.Contains(se.Body, []byte(protoUnsupportedMarker)):
 				// 模型不支持当前调用协议：确定性模型级错误。标记拒权快速跳过、不误伤渠道，记录体供透传。
 				networkAttempts++
-				r.pen.DenyModel(cand.Channel.ID, displayModel, 30*time.Minute)
+				r.pen.DenyModel(cand.Channel.ID, displayModel, protoUnsupportedDeny)
 				r.recoverChannel(&cand.Channel)
 				excludedCh[cand.Channel.ID] = true
 				lastErr = fmt.Errorf("channel %s: model protocol unsupported (upstream 400)", cand.Channel.Name)
@@ -906,18 +1065,18 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 				networkAttempts++
 				lastErr = fmt.Errorf("channel %s: upstream status %d: %s", cand.Channel.Name, code, bodyStr)
 				if isQuotaExceeded(bodyStr) {
-					r.pen.PenalizeKey(key.ID, r.pen.QuotaPenalty())
+					r.pen.PenalizeKeyWithProbe(key.ID, r.pen.QuotaPenalty(), quotaProbeInterval)
 				} else if code == http.StatusTooManyRequests {
 					r.pen.PenalizeKey(key.ID, keyRatePenalty)
 				} else {
 					// 非额度类 403/402（access_denied 等）：该 Key 无此模型权限 → Key 级模型拒权
-					r.pen.FailModelKey(key.ID, displayModel, 10*time.Minute)
+					r.pen.FailModelKey(key.ID, displayModel, keyModelDenied)
 				}
 				failedKeys[key.ID] = true
 			case code == http.StatusUnauthorized:
 				networkAttempts++
 				lastErr = fmt.Errorf("channel %s: unauthorized key", cand.Channel.Name)
-				r.pen.PenalizeKey(key.ID, 5*time.Minute)
+				r.pen.PenalizeKeyWithProbe(key.ID, keyAuthPenalty, keyProbeInterval)
 				failedKeys[key.ID] = true
 			case code == http.StatusRequestTimeout || code >= http.StatusInternalServerError:
 				// 连接级/服务端故障：冷却整条渠道，指数退避
@@ -935,6 +1094,7 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			default:
 				// 其余 4xx 透传（非流，直接给客户端原始错误体）
 				r.recoverChannel(&cand.Channel)
+				r.pen.MarkKeySuccess(key.ID)
 				r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 				r.pen.ClearModelDeniedKey(key.ID, displayModel)
 				return &StreamResult{StatusCode: code, ContentType: se.HeaderMap["Content-Type"], Passthrough: se.Body,
@@ -968,6 +1128,9 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 		if firstErr != nil && !bytes.Contains(firstBuf, []byte("data:")) {
 			// 首事件前中断：视为未交付，走故障转移（连接已建但流即死 → 纯网络故障）
 			rc.Close()
+			if cerr := ctx.Err(); cerr != nil { // 客户端取消，不算上游故障
+				return nil, fmt.Errorf("request cancelled: %w", cerr)
+			}
 			networkAttempts++
 			lastNetworkErr = true
 			lastErr = fmt.Errorf("channel %s: stream died before first event: %v", cand.Channel.Name, firstErr)
@@ -978,8 +1141,9 @@ func (r *Router) ForwardChatStream(ctx context.Context, requestBody []byte, disp
 			}
 			continue
 		}
-		// 稳定交付：恢复渠道并绑定
+		// 稳定交付：恢复渠道、解除 Key 冷却并绑定
 		r.recoverChannel(&cand.Channel)
+		r.pen.MarkKeySuccess(key.ID)
 		r.pen.ClearModelDenied(cand.Channel.ID, displayModel)
 		r.pen.ClearModelDeniedKey(key.ID, displayModel)
 		return &StreamResult{StatusCode: http.StatusOK, Stream: rc, Buffered: firstBuf,

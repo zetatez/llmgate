@@ -593,10 +593,17 @@ func TestUserRevealKeyIsolation(t *testing.T) {
 	type keyList struct {
 		Data []userKeyView `json:"data"`
 	}
+	// 用户端 Key 列表必须带回 weight，否则编辑其他字段会把权重重置为 1。
+	if _, err := a.DB.Exec(`UPDATE channel_keys SET weight=5 WHERE user_id=(SELECT id FROM users WHERE username='alice')`); err != nil {
+		t.Fatal(err)
+	}
 	var ka keyList
 	decodeBody(t, doCookie(r, http.MethodGet, "/api/user/keys", "", aCookie), &ka)
 	if len(ka.Data) != 1 {
 		t.Fatalf("alice keys = %+v", ka.Data)
+	}
+	if ka.Data[0].Weight != 5 {
+		t.Fatalf("user key weight = %d, want 5", ka.Data[0].Weight)
 	}
 	aKeyID := ka.Data[0].ID
 

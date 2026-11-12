@@ -18,6 +18,7 @@ import (
 	"llmgate/internal/adapter"
 	"llmgate/internal/app"
 	"llmgate/internal/models"
+	"llmgate/internal/router"
 	"llmgate/internal/store"
 )
 
@@ -42,16 +43,23 @@ func CheckPassword(hash, password string) bool {
 }
 
 // RegisterUserPortal 挂载用户端路由（无模型同步回调，测试用）。
-func RegisterUserPortal(g *gin.RouterGroup, a *app.App) {
-	registerUserPortal(g, a, nil)
+func RegisterUserPortal(g *gin.RouterGroup, a *app.App, pens ...*router.Penalizer) {
+	registerUserPortal(g, a, nil, firstPen(pens))
 }
 
 // RegisterUserPortalWithSync 挂载用户端路由，并允许所有登录用户手动触发模型同步。
-func RegisterUserPortalWithSync(g *gin.RouterGroup, a *app.App, syncNow func() map[string]any) {
-	registerUserPortal(g, a, syncNow)
+func RegisterUserPortalWithSync(g *gin.RouterGroup, a *app.App, syncNow func() map[string]any, pens ...*router.Penalizer) {
+	registerUserPortal(g, a, syncNow, firstPen(pens))
 }
 
-func registerUserPortal(g *gin.RouterGroup, a *app.App, syncNow func() map[string]any) {
+func firstPen(pens []*router.Penalizer) *router.Penalizer {
+	if len(pens) > 0 {
+		return pens[0]
+	}
+	return nil
+}
+
+func registerUserPortal(g *gin.RouterGroup, a *app.App, syncNow func() map[string]any, pen *router.Penalizer) {
 	g.Use(csrfOriginCheck())
 	g.POST("/login", userLogin(a))
 	g.POST("/logout", userLogout(a))
@@ -71,7 +79,7 @@ func registerUserPortal(g *gin.RouterGroup, a *app.App, syncNow func() map[strin
 
 	authed.GET("/keys", userListKeys(a))
 	authed.POST("/keys", userAddKeys(a))
-	authed.PUT("/keys/:id", userUpdateKey(a))
+	authed.PUT("/keys/:id", userUpdateKey(a, pen))
 	authed.DELETE("/keys/:id", userDeleteKey(a))
 	authed.POST("/keys/:id/test", userTestKey(a))
 	authed.GET("/keys/:id/secret", userRevealKey(a))
@@ -292,6 +300,7 @@ type userKeyView struct {
 	Masked      string `json:"masked"`
 	KeyTail     string `json:"key_tail"`
 	Enabled     int    `json:"enabled"`
+	Weight      int    `json:"weight"`
 	LastUsedAt  int64  `json:"last_used_at"`
 	CreatedAt   int64  `json:"created_at"`
 }
@@ -332,7 +341,7 @@ func userListKeys(a *app.App) gin.HandlerFunc {
 			out = append(out, userKeyView{
 				ID: k.ID, ChannelID: k.ChannelID, ChannelName: names[k.ChannelID],
 				Name: k.Name, Source: k.Source, Remark: k.Remark,
-				Masked: "sk-****", KeyTail: a.KeyTail(k.APIKeyEnc), Enabled: k.Enabled,
+				Masked: "sk-****", KeyTail: a.KeyTail(k.APIKeyEnc), Enabled: k.Enabled, Weight: k.Weight,
 				LastUsedAt: k.LastUsedAt, CreatedAt: k.CreatedAt,
 			})
 		}
@@ -405,7 +414,7 @@ func ownedKey(a *app.App, c *gin.Context, keyID int64) *models.ChannelKey {
 	return k
 }
 
-func userUpdateKey(a *app.App) gin.HandlerFunc {
+func userUpdateKey(a *app.App, pen *router.Penalizer) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c, "id")
 		if !ok {
@@ -454,6 +463,9 @@ func userUpdateKey(a *app.App) gin.HandlerFunc {
 			if err := store.UpdateChannelKeySecret(a.DB, cur.ID, enc); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
+			}
+			if pen != nil {
+				pen.ClearKey(cur.ID) // 新密钥立即恢复可用，不再受旧密钥熔断影响
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"data": "ok"})

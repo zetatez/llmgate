@@ -83,8 +83,15 @@ const chartRows = computed(() =>
 const CHART_VIEW_HEIGHT = 420
 const VISIBLE_ROWS = 16
 
+// 每次搜索输入都会改变 chartRows；防抖并丢弃过期任务，避免连续键入时
+// 反复 dispose/init ECharts 造成主线程卡顿或实例泄漏。
+let chartTimer: ReturnType<typeof setTimeout> | null = null
+let renderSeq = 0
+
 async function renderChart() {
+  const seq = ++renderSeq
   await nextTick()
+  if (seq !== renderSeq) return // 已有更新的渲染任务，放弃本次
   if (!chartEl.value || !chartRows.value.length) {
     chart?.dispose()
     chart = null
@@ -135,7 +142,15 @@ function onResize() {
   chart?.resize()
 }
 
-watch([chartRows, tab], () => renderChart())
+function scheduleChart() {
+  if (chartTimer) clearTimeout(chartTimer)
+  chartTimer = setTimeout(() => {
+    chartTimer = null
+    renderChart()
+  }, 120)
+}
+
+watch([chartRows, tab], () => scheduleChart())
 
 
 
@@ -310,7 +325,13 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
+  if (chartTimer) {
+    clearTimeout(chartTimer)
+    chartTimer = null
+  }
+  renderSeq++ // 使进行中的异步渲染失效
   chart?.dispose()
+  chart = null
 })
 </script>
 
