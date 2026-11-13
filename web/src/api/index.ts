@@ -1,6 +1,6 @@
 import { adminApi, userApi } from './client'
 import type {
-  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelPrice, ModelRoute,
+  AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelRoute,
   ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User,
   UserChannel, UserKey, UserModelUsage, UserRoute, UserToken,
 } from './types'
@@ -39,7 +39,7 @@ export const modelRoutesApi = {
 export const usersApi = {
   list: () => adminApi.get<DataEnvelope<User[]>>('/users').then(unwrap),
   overview: (id: number) => adminApi.get<DataEnvelope<AdminUserDetail>>(`/users/${id}/overview`).then(unwrap),
-  create: (d: { name?: string; remark?: string; username: string; password: string; quota_limit: number; debt_floor_calls?: number; debt_floor_credit?: number }) =>
+  create: (d: { name?: string; remark?: string; username: string; password: string; debt_floor_calls?: number }) =>
     adminApi.post<DataEnvelope<User>>('/users', d).then(unwrap),
   update: (id: number, d: Partial<User> & { password?: string }) => adminApi.put<DataEnvelope<User>>(`/users/${id}`, d).then(unwrap),
   remove: (id: number) => adminApi.delete(`/users/${id}`),
@@ -59,9 +59,9 @@ export const portalApi = {
     userApi.put<DataEnvelope<{ id: number }>>(`/channels/${id}`, d).then(unwrap),
   removeChannel: (id: number) => userApi.delete(`/channels/${id}`),
   routes: () => userApi.get<DataEnvelope<UserRoute[]>>('/routes').then(unwrap),
-  createRoute: (d: { display_name: string; channel_id: number; upstream_model: string; priority?: number; weight?: number; enabled?: number; price_input?: number | null; price_output?: number | null }) =>
+  createRoute: (d: { display_name: string; channel_id: number; upstream_model: string; priority?: number; weight?: number; enabled?: number }) =>
     userApi.post<DataEnvelope<{ id: number }>>('/routes', d).then(unwrap),
-  updateRoute: (id: number, d: { display_name?: string; upstream_model?: string; priority?: number; weight?: number; enabled?: number; price_input?: number | null; price_output?: number | null }) =>
+  updateRoute: (id: number, d: { display_name?: string; upstream_model?: string; priority?: number; weight?: number; enabled?: number }) =>
     userApi.put<DataEnvelope<string>>(`/routes/${id}`, d).then(unwrap),
   removeRoute: (id: number) => userApi.delete(`/routes/${id}`),
   teamUsageByModel: (days: number) => userApi.get<DataEnvelope<UserModelUsage[]>>('/usage/by-user-model', { params: { days } }).then(unwrap),
@@ -83,7 +83,6 @@ export const portalApi = {
     userApi.get<DataEnvelope<RequestLog[]>>('/logs', { params }).then(unwrap),
   logsCount: (params: { display_model?: string; status?: string } = {}) =>
     userApi.get<DataEnvelope<number>>('/logs/count', { params }).then(unwrap),
-  pricing: () => userApi.get<DataEnvelope<ModelPrice[]>>('/pricing').then(unwrap),
   dashboard: (days = 7) => userApi.get<DataEnvelope<DashboardPayload>>('/dashboard', { params: { days } }).then(unwrap),
   members: () => userApi.get<DataEnvelope<MemberStat[]>>('/members').then(unwrap),
   gatewayEndpoints: () => userApi.get<DataEnvelope<string[]>>('/gateway-endpoints').then(unwrap),
@@ -99,14 +98,6 @@ export const logsApi = {
     adminApi.get<DataEnvelope<DashboardPayload>>('/logs/usage/dashboard', { params: { days } }).then(unwrap),
   usageByUserModel: (days: number) =>
     adminApi.get<DataEnvelope<UserModelUsage[]>>('/logs/usage/by-user-model', { params: { days } }).then(unwrap),
-}
-
-export const pricingApi = {
-  list: () => adminApi.get<DataEnvelope<ModelPrice[]>>('/pricing').then(unwrap),
-  save: (rows: Array<Pick<ModelPrice, 'model' | 'input' | 'output' | 'call'>>) =>
-    adminApi.put<DataEnvelope<ModelPrice[]>>('/pricing', { data: rows }).then(unwrap),
-  remove: (models: string[]) =>
-    adminApi.post<DataEnvelope<ModelPrice[]>>('/pricing/delete', { models }).then(unwrap),
 }
 
 export const membersApi = {
@@ -128,4 +119,4 @@ export const syncApi = {
   now: () => adminApi.post<DataEnvelope<SyncResult>>('/model-sync').then(unwrap),
 }
 
-export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelPrice, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserRoute, UserToken }
+export type { AdminUserDetail, Channel, ChannelDayStat, ChannelKeyItem, DashboardPayload, MemberStat, ModelRoute, ModelUsage, PortalUser, RequestLog, SettingItem, SettingValue, UsageModelPoint, UsagePoint, UsageSummary, User, UserChannel, UserKey, UserModelUsage, UserRoute, UserToken }

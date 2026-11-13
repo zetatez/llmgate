@@ -52,7 +52,7 @@ func newTestEnv(t *testing.T, upstreamURL string) *testEnv {
 	}
 	tokenEnc, _ := a.Secret.Encrypt(testToken)
 	uid, err := store.CreateUser(db, &models.User{
-		Name: "tester", TokenHash: app.HashToken(testToken), TokenEnc: tokenEnc, QuotaLimit: 0, QuotaUsed: 0, Status: 1,
+		Name: "tester", TokenHash: app.HashToken(testToken), TokenEnc: tokenEnc, Status: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +82,8 @@ func newTestEnv(t *testing.T, upstreamURL string) *testEnv {
 	return &testEnv{a: a, bus: bus, uh: uh, db: db, userID: uid}
 }
 
-func (e *testEnv) setQuota(limit, used float64) {
-	_, _ = e.db.Exec(`UPDATE users SET quota_limit=?, quota_used=? WHERE id=?`, limit, used, e.userID)
+func (e *testEnv) setCallsSpent(n int64) {
+	_, _ = e.db.Exec(`UPDATE users SET calls_spent=? WHERE id=?`, n, e.userID)
 }
 
 func (e *testEnv) setStatus(status int) {

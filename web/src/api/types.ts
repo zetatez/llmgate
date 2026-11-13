@@ -46,9 +46,6 @@ export interface ModelRoute {
   priority: number
   weight: number
   enabled: number
-  /** 路由级自定义单价 USD/百万tokens；null = 回退全局 model_pricing */
-  price_input?: number | null
-  price_output?: number | null
 }
 
 export interface User {
@@ -56,8 +53,6 @@ export interface User {
   name: string
   remark: string
   username: string
-  quota_limit: number
-  quota_used: number
   status: number
   has_token: boolean
   /** 仅创建用户时返回一次的网关 API_KEY 明文 */
@@ -72,11 +67,7 @@ export interface User {
   out_spent: number
   in_served: number
   out_served: number
-  credit_spent: number
-  credit_earned: number
-  credit_balance: number
   debt_floor_calls: number
-  debt_floor_credit: number
   last_login_at: number
   created_at: number
 }
@@ -96,8 +87,6 @@ export interface PortalUser {
   id: number
   username: string
   name: string
-  quota_limit: number
-  quota_used: number
   status: number
   last_login_at: number
   gateway_prefix: string
@@ -109,11 +98,7 @@ export interface PortalUser {
   out_spent: number
   in_served: number
   out_served: number
-  credit_spent: number
-  credit_earned: number
-  credit_balance: number
   debt_floor_calls: number
-  debt_floor_credit: number
 }
 
 /** 用户端：渠道（套餐，所有人可见；本人可改） */
@@ -148,8 +133,6 @@ export interface UserRoute {
   enabled: number
   effective_enabled: number
   channel_enabled: number
-  price_input?: number | null
-  price_output?: number | null
   is_mine: boolean
 }
 
@@ -191,7 +174,6 @@ export interface RequestLog {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
-  cost: number
   latency_ms: number
   status: string
   error_code: string
@@ -206,7 +188,6 @@ export interface UsagePoint {
   errors: number
   total_tokens: number
   prompt_tokens: number
-  cost: number
 }
 
 export interface UsageSummary {
@@ -216,7 +197,6 @@ export interface UsageSummary {
   total_tokens: number
   prompt_tokens: number
   completion_tokens: number
-  cost: number
 }
 
 export interface ChannelDayStat {
@@ -231,7 +211,6 @@ export interface UsageHourPoint {
   hour: string
   requests: number
   tokens: number
-  cost: number
 }
 
 export interface DashboardPayload {
@@ -273,7 +252,6 @@ export interface ModelUsage {
   total_tokens: number
   prompt_tokens: number
   completion_tokens: number
-  cost: number
 }
 
 export interface UserModelUsage {
@@ -284,15 +262,6 @@ export interface UserModelUsage {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
-  cost: number
-}
-/** 全局模型单价（USD / 1M tokens；call = USD / 次） */
-export interface ModelPrice {
-  model: string
-  input: number
-  output: number
-  call: number
-  updated_at: number
 }
 
 /** 成员公开数据（所有人可见） */
@@ -308,7 +277,4 @@ export interface MemberStat {
   out_spent: number
   in_served: number
   out_served: number
-  credit_spent: number
-  credit_earned: number
-  credit_balance: number
 }

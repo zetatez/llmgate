@@ -443,9 +443,9 @@ func handleAudioTranscription(a *app.App, bus *logbus.Bus, pen *router.Penalizer
 				}
 				logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.TotalTokens = prompt, completion, total
 			}
-			finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
+			finalizeLog(a, bus, logEntry)
 			if logEntry.Status == "success" {
-				_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+				_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 			}
 			resCT := res.ContentType
 			if resCT == "" {
@@ -457,7 +457,7 @@ func handleAudioTranscription(a *app.App, bus *logbus.Bus, pen *router.Penalizer
 
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-		finalizeLog(a, bus, logEntry, nil, nil)
+		finalizeLog(a, bus, logEntry)
 		code, msg := mapRouteError(ferr, model)
 		if retryAfter := retryAfterFor(code); retryAfter != "" {
 			c.Header("Retry-After", retryAfter)
@@ -525,9 +525,9 @@ func handleAudioSpeech(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.H
 			} else {
 				logEntry.ErrorCode = oneLine(string(res.Body), 200)
 			}
-			finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
+			finalizeLog(a, bus, logEntry)
 			if logEntry.Status == "success" {
-				_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+				_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 			}
 			resCT := res.ContentType
 			if resCT == "" {
@@ -539,7 +539,7 @@ func handleAudioSpeech(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.H
 
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-		finalizeLog(a, bus, logEntry, nil, nil)
+		finalizeLog(a, bus, logEntry)
 		code, msg := mapRouteError(ferr, meta.Model)
 		if retryAfter := retryAfterFor(code); retryAfter != "" {
 			c.Header("Retry-After", retryAfter)

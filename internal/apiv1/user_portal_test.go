@@ -318,7 +318,7 @@ func TestUserPortalLogsAndOverview(t *testing.T) {
 	aCookie := userLoginCookie(t, r, "alice", "secret1")
 
 	if err := store.InsertLogs(a.DB, []*models.RequestLog{
-		{UserID: uid, DisplayModel: "m", Status: "success", TotalTokens: 12, PromptTokens: 10, CompletionTokens: 2, Cost: 0.5, CreatedAt: models.Now()},
+		{UserID: uid, DisplayModel: "m", Status: "success", TotalTokens: 12, PromptTokens: 10, CompletionTokens: 2, CreatedAt: models.Now()},
 	}); err != nil {
 		t.Fatalf("insert logs: %v", err)
 	}

@@ -22,10 +22,6 @@ function humanNum(n: number | null | undefined): string {
   return String(n)
 }
 
-function money(v: number): string {
-  return (v ?? 0).toFixed(4)
-}
-
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase()
   if (!q) return list.value
@@ -46,7 +42,6 @@ const summary = computed(() => {
     joinedThisWeek: list.value.filter((m) => m.created_at >= weekAgo).length,
     requests: list.value.reduce((s, m) => s + m.calls_spent, 0),
     tokens: list.value.reduce((s, m) => s + m.in_spent + m.out_spent, 0),
-    spent: list.value.reduce((s, m) => s + m.credit_spent, 0),
   }
 })
 
@@ -80,7 +75,7 @@ onMounted(load)
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ summary.members }}</div><div class="sum-label">Members</div></el-card></el-col>
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ summary.joinedThisWeek }}</div><div class="sum-label">Joined this week</div></el-card></el-col>
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(summary.requests) }}</div><div class="sum-label">Total requests</div></el-card></el-col>
-      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(summary.tokens) }}</div><div class="sum-label">Total tokens · ${{ summary.spent.toFixed(2) }} spent</div></el-card></el-col>
+      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(summary.tokens) }}</div><div class="sum-label">Total tokens</div></el-card></el-col>
     </el-row>
 
     <el-card shadow="never" class="mt">
@@ -112,23 +107,15 @@ onMounted(load)
         <el-table-column label="Upload / Download" width="180" align="right">
           <template #default="{ row }">{{ humanNum(row.in_spent) }} / {{ humanNum(row.out_spent) }}</template>
         </el-table-column>
-        <el-table-column label="Spent ($)" width="120" align="right" sortable>
-          <template #default="{ row }">{{ money(row.credit_spent) }}</template>
-        </el-table-column>
         <el-table-column label="Contributed" width="170" align="right">
           <template #default="{ row }">
             <span>{{ row.calls_earned }} calls</span>
-            <div class="sub">{{ humanNum(row.in_served) }} / {{ humanNum(row.out_served) }} · ${{ money(row.credit_earned) }}</div>
+            <div class="sub">{{ humanNum(row.in_served) }} / {{ humanNum(row.out_served) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="Calls (bal)" width="110" align="right" sortable>
           <template #default="{ row }">
             <span :class="{ neg: row.calls_balance < 0 }">{{ row.calls_balance }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="Credit ($)" width="120" align="right" sortable>
-          <template #default="{ row }">
-            <span :class="{ neg: row.credit_balance < 0 }">{{ money(row.credit_balance) }}</span>
           </template>
         </el-table-column>
       </el-table>

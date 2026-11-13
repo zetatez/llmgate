@@ -20,7 +20,7 @@ func TestInsertLogsEmptyAndQueryFilters(t *testing.T) {
 	chanID := createChannelFor(t, db)
 	now := models.Now()
 	logs := []*models.RequestLog{
-		{UserID: 1, DisplayModel: "gpt", ChannelID: chanID, KeyID: 1, UpstreamModel: "u-gpt", PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, Cost: 0.1, LatencyMS: 100, Status: "success", CreatedAt: now - 86400},
+		{UserID: 1, DisplayModel: "gpt", ChannelID: chanID, KeyID: 1, UpstreamModel: "u-gpt", PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, LatencyMS: 100, Status: "success", CreatedAt: now - 86400},
 		{UserID: 1, DisplayModel: "gpt", ChannelID: chanID, KeyID: 2, UpstreamModel: "u-gpt", TotalTokens: 8, Status: "error", ErrorCode: "E1", CreatedAt: now - 3600},
 		{UserID: 2, DisplayModel: "claude", ChannelID: 0, UpstreamModel: "u-claude", TotalTokens: 30, Status: "success", Stream: 1, CreatedAt: now},
 	}
@@ -86,9 +86,9 @@ func TestUsageAggregations(t *testing.T) {
 	db := setupDB(t)
 	now := models.Now()
 	logs := []*models.RequestLog{
-		{UserID: 1, DisplayModel: "gpt", PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, Cost: 0.10, Status: "success", CreatedAt: now},
-		{UserID: 1, DisplayModel: "gpt", TotalTokens: 7, Cost: 0.05, Status: "error", CreatedAt: now},
-		{UserID: 2, DisplayModel: "claude", TotalTokens: 20, Cost: 0.20, Status: "success", CreatedAt: now},
+		{UserID: 1, DisplayModel: "gpt", PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, Status: "success", CreatedAt: now},
+		{UserID: 1, DisplayModel: "gpt", TotalTokens: 7, Status: "error", CreatedAt: now},
+		{UserID: 2, DisplayModel: "claude", TotalTokens: 20, Status: "success", CreatedAt: now},
 	}
 	if err := InsertLogs(db, logs); err != nil {
 		t.Fatal(err)

@@ -75,7 +75,7 @@ func handleResponses(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.Han
 		if merr != nil {
 			logEntry.Status = "error"
 			logEntry.ErrorCode = oneLine(merr.Error(), 200)
-			finalizeLog(a, bus, logEntry, nil, nil)
+			finalizeLog(a, bus, logEntry)
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": merr.Error(), "type": "invalid_request_error"}})
 			return
 		}
@@ -109,14 +109,14 @@ func responsesPlain(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rout
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 400 {
 			// 上游非 2xx（如协议透传错误）：原样透传，客户端可读到真实原因
-			finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
+			finalizeLog(a, bus, logEntry)
 			touchChannelKey(a.DB, res.KeyID)
 			c.Data(res.StatusCode, ct, res.Body)
 			return
 		}
 		// 2xx：将 chat completion 转成 Responses 对象
 		parseUsage(res.Body, logEntry)
-		finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
+		finalizeLog(a, bus, logEntry)
 		touchChannelKey(a.DB, res.KeyID)
 		out := chatToResponse(res.Body, model, res.Route.UpstreamModel, logEntry)
 		c.Data(http.StatusOK, "application/json", out)
@@ -125,7 +125,7 @@ func responsesPlain(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rout
 
 	logEntry.Status = "error"
 	logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-	finalizeLog(a, bus, logEntry, nil, nil)
+	finalizeLog(a, bus, logEntry)
 	code, msg := mapRouteError(ferr, model)
 	if ra := retryAfterFor(code); ra != "" {
 		c.Header("Retry-After", ra)
@@ -142,7 +142,7 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 	if ferr != nil {
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-		finalizeLog(a, bus, logEntry, nil, nil)
+		finalizeLog(a, bus, logEntry)
 		code, msg := mapRouteError(ferr, model)
 		if ra := retryAfterFor(code); ra != "" {
 			c.Header("Retry-After", ra)
@@ -155,9 +155,9 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 		if logEntry.Status == "error" {
 			logEntry.ErrorCode = http.StatusText(sr.StatusCode)
 		}
-		finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
+		finalizeLog(a, bus, logEntry)
 		if logEntry.Status == "success" {
-			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 		}
 		ct := sr.ContentType
 		if ct == "" {
@@ -279,9 +279,9 @@ func responsesStream(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Rou
 		flusher.Flush()
 	}
 
-	finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
+	finalizeLog(a, bus, logEntry)
 	if logEntry.Status == "success" {
-		_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+		_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 	}
 	touchChannelKey(a.DB, logEntry.KeyID)
 }

@@ -9,7 +9,7 @@ flowchart LR
 
     subgraph GW["llmgate"]
         direction LR
-        A(["auth"]) --> Q(["quota"]) --> R(["routing"]) --> F(["failover"])
+        A(["auth"]) --> Q(["ledger"]) --> R(["routing"]) --> F(["failover"])
     end
 
     CLI -- "OpenAI · SSE" --> A
@@ -36,8 +36,8 @@ flowchart LR
 - Per-user gateway tokens: users issue and revoke multiple `sk-` tokens for their own consumption; each token resolves to its owner.
 - Channel key pools with priority / weight based routing; downstream switch on rate limit, quota exhaustion, or upstream error.
 - Circuit breaker keyed to a consecutive-failure threshold (default 6 failures in 30s) with exponential backoff, cleared automatically after a successful probe.
-- Per-user quotas; API keys and gateway tokens stored AES-256-GCM encrypted; disabling a channel deactivates all of its keys and routes.
-- Per-user, per-model usage statistics and a dashboard; admin UI covering channels, routes, users, logs, and settings.
+- Per-user call ledger; API keys and gateway tokens stored AES-256-GCM encrypted; disabling a channel deactivates all of its keys and routes.
+- Billing records calls, upload tokens, and download tokens per user and per model; admin UI covering channels, routes, users, logs, and settings.
 
 ## Deploy
 
@@ -115,7 +115,7 @@ Without `aggregate=1` the gateway is a pure pass-through.
 For TTS upstreams that return PCM inside JSON (qwen/grok style), the gateway unwraps and
 wraps PCM as WAV; pass `"response_format":"pcm"` to receive raw PCM instead.
 
-Billing uses the same model price table:
+Billing only records call counts and upload/download token volumes per user and model:
 
 - transcription: upstream `usage` tokens when returned, otherwise WAV duration × 1000 tokens/s;
 - Deepgram pre-recorded: upstream `metadata.duration`, otherwise WAV header duration × 1000 tokens/s;

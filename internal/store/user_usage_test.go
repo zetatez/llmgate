@@ -71,9 +71,9 @@ func TestGetUserByUsernameAndTouchLogin(t *testing.T) {
 func TestUserUsageAggregates(t *testing.T) {
 	db := setupDB(t)
 	if err := InsertLogs(db, []*models.RequestLog{
-		{UserID: 1, DisplayModel: "m1", Status: "success", TotalTokens: 100, PromptTokens: 80, CompletionTokens: 20, Cost: 1.5, CreatedAt: models.Now()},
-		{UserID: 1, DisplayModel: "m2", Status: "error", TotalTokens: 0, Cost: 0, CreatedAt: models.Now()},
-		{UserID: 2, DisplayModel: "m1", Status: "success", TotalTokens: 50, Cost: 0.5, CreatedAt: models.Now()},
+		{UserID: 1, DisplayModel: "m1", Status: "success", TotalTokens: 100, PromptTokens: 80, CompletionTokens: 20, CreatedAt: models.Now()},
+		{UserID: 1, DisplayModel: "m2", Status: "error", TotalTokens: 0, CreatedAt: models.Now()},
+		{UserID: 2, DisplayModel: "m1", Status: "success", TotalTokens: 50, CreatedAt: models.Now()},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -109,9 +109,9 @@ func TestUserUsageAggregates(t *testing.T) {
 func TestUsageByUserAgg(t *testing.T) {
 	db := setupDB(t)
 	if err := InsertLogs(db, []*models.RequestLog{
-		{UserID: 1, DisplayModel: "m", Status: "success", PromptTokens: 8, CompletionTokens: 2, TotalTokens: 10, Cost: 0.5, CreatedAt: models.Now()},
-		{UserID: 1, DisplayModel: "m", Status: "error", PromptTokens: 3, CompletionTokens: 0, TotalTokens: 3, Cost: 0, CreatedAt: models.Now()},
-		{UserID: 2, DisplayModel: "m", Status: "success", PromptTokens: 5, CompletionTokens: 5, TotalTokens: 10, Cost: 0.2, CreatedAt: models.Now()},
+		{UserID: 1, DisplayModel: "m", Status: "success", PromptTokens: 8, CompletionTokens: 2, TotalTokens: 10, CreatedAt: models.Now()},
+		{UserID: 1, DisplayModel: "m", Status: "error", PromptTokens: 3, CompletionTokens: 0, TotalTokens: 3, CreatedAt: models.Now()},
+		{UserID: 2, DisplayModel: "m", Status: "success", PromptTokens: 5, CompletionTokens: 5, TotalTokens: 10, CreatedAt: models.Now()},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -121,11 +121,11 @@ func TestUsageByUserAgg(t *testing.T) {
 	}
 	// 按 token 降序：user1 13 > user2 10
 	u1 := list[0]
-	if u1.UserID != 1 || u1.Requests != 2 || u1.Success != 1 || u1.PromptTokens != 11 || u1.CompletionTokens != 2 || u1.TotalTokens != 13 || u1.Cost != 0.5 {
+	if u1.UserID != 1 || u1.Requests != 2 || u1.Success != 1 || u1.PromptTokens != 11 || u1.CompletionTokens != 2 || u1.TotalTokens != 13 {
 		t.Fatalf("user1 agg = %+v", u1)
 	}
 	u2 := list[1]
-	if u2.UserID != 2 || u2.Requests != 1 || u2.Success != 1 || u2.Cost != 0.2 {
+	if u2.UserID != 2 || u2.Requests != 1 || u2.Success != 1 {
 		t.Fatalf("user2 agg = %+v", u2)
 	}
 }
@@ -133,7 +133,7 @@ func TestUsageByUserAgg(t *testing.T) {
 func TestUsageByHour(t *testing.T) {
 	db := setupDB(t)
 	if err := InsertLogs(db, []*models.RequestLog{
-		{UserID: 1, DisplayModel: "m", Status: "success", TotalTokens: 10, Cost: 0.5, CreatedAt: models.Now()},
+		{UserID: 1, DisplayModel: "m", Status: "success", TotalTokens: 10, CreatedAt: models.Now()},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestUsageByHour(t *testing.T) {
 		t.Fatalf("UsageByHour = %d pts, err %v", len(pts), err)
 	}
 	last := pts[len(pts)-1]
-	if last.Requests != 1 || last.Tokens != 10 || last.Cost != 0.5 {
+	if last.Requests != 1 || last.Tokens != 10 {
 		t.Fatalf("last hour bucket = %+v", last)
 	}
 	for i, p := range pts {

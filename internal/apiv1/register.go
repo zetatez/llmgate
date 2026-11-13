@@ -57,7 +57,6 @@ func Register(admin *gin.RouterGroup, a *app.App, syncNow func() map[string]any,
 	RegisterUserRoutes(admin.Group("/users"), a)
 	RegisterLogRoutes(admin.Group("/logs"), a)
 	RegisterSettingRoutes(admin.Group("/settings"), a)
-	RegisterPricingRoutes(admin.Group("/pricing"), a)
 	admin.GET("/members", listMembers(a))
 	admin.GET("/gateway-endpoints", gatewayEndpoints(a))
 }

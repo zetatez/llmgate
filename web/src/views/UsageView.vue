@@ -24,25 +24,17 @@ function humanNum(n: number | null | undefined): string {
   if (abs >= 1e3) return +(n / 1e3).toFixed(1) + 'k'
   return String(n)
 }
-function money(v: number): string {
-  return (v ?? 0).toFixed(4)
-}
-
 interface Row {
   user_id: number
   user_name: string
   requests: number
   prompt: number
   completion: number
-  cost: number
   in_spent: number
   out_spent: number
   calls_spent: number
   calls_earned: number
   calls_balance: number
-  credit_spent: number
-  credit_earned: number
-  credit_balance: number
   models: UserModelUsage[]
 }
 
@@ -51,10 +43,9 @@ const rows = computed<Row[]>(() => {
   for (const u of users.value) {
     m.set(u.id, {
       user_id: u.id, user_name: u.username || u.name,
-      requests: 0, prompt: 0, completion: 0, cost: 0,
+      requests: 0, prompt: 0, completion: 0,
       in_spent: u.in_spent, out_spent: u.out_spent,
       calls_spent: u.calls_spent, calls_earned: u.calls_earned, calls_balance: u.calls_balance,
-      credit_spent: u.credit_spent, credit_earned: u.credit_earned, credit_balance: u.credit_balance,
       models: [],
     })
   }
@@ -63,10 +54,9 @@ const rows = computed<Row[]>(() => {
     if (!row) {
       row = {
         user_id: r.user_id, user_name: r.user_name || '—',
-        requests: 0, prompt: 0, completion: 0, cost: 0,
+        requests: 0, prompt: 0, completion: 0,
         in_spent: 0, out_spent: 0,
         calls_spent: 0, calls_earned: 0, calls_balance: 0,
-        credit_spent: 0, credit_earned: 0, credit_balance: 0,
         models: [],
       }
       m.set(r.user_id, row)
@@ -74,12 +64,11 @@ const rows = computed<Row[]>(() => {
     row.requests += r.requests
     row.prompt += r.prompt_tokens
     row.completion += r.completion_tokens
-    row.cost += r.cost
     row.models.push(r)
   }
   // 默认按请求数量倒序（Lifetime = 累计调用次数，Range = 区间请求数）
   const req = (r: Row) => (mode.value === 'lifetime' ? r.calls_spent : r.requests)
-  return [...m.values()].sort((a, b) => req(b) - req(a) || b.cost - a.cost)
+  return [...m.values()].sort((a, b) => req(b) - req(a))
 })
 
 const totals = computed(() =>
@@ -88,22 +77,19 @@ const totals = computed(() =>
     requests: s.requests + (mode.value === 'lifetime' ? u.calls_spent : u.requests),
     prompt: s.prompt + (mode.value === 'lifetime' ? u.in_spent : u.prompt),
     completion: s.completion + (mode.value === 'lifetime' ? u.out_spent : u.completion),
-    cost: s.cost + (mode.value === 'lifetime' ? u.credit_spent : u.cost),
     callsBalance: s.callsBalance + u.calls_balance,
-    creditBalance: s.creditBalance + u.credit_balance,
-  }), { users: 0, requests: 0, prompt: 0, completion: 0, cost: 0, callsBalance: 0, creditBalance: 0 }),
+  }), { users: 0, requests: 0, prompt: 0, completion: 0, callsBalance: 0 }),
 )
 
 // 普通用户：复用同一套 Billing 视图，仅展示自己的数据
 function selfToUser(m: PortalUser): User {
   return {
     id: m.id, name: m.name, remark: '', username: m.username,
-    quota_limit: m.quota_limit, quota_used: m.quota_used, status: m.status,
+    status: m.status,
     has_token: true, token_tail: '', token_expires_at: 0, token_last_used_at: 0,
     calls_spent: m.calls_spent, calls_earned: m.calls_earned, calls_balance: m.calls_balance,
     in_spent: m.in_spent, out_spent: m.out_spent, in_served: m.in_served, out_served: m.out_served,
-    credit_spent: m.credit_spent, credit_earned: m.credit_earned, credit_balance: m.credit_balance,
-    debt_floor_calls: m.debt_floor_calls, debt_floor_credit: m.debt_floor_credit,
+    debt_floor_calls: m.debt_floor_calls,
     last_login_at: m.last_login_at, created_at: 0,
   }
 }
@@ -132,11 +118,10 @@ function modelRows(r: Row): UserModelUsage[] {
 
 // 区间内按模型聚合（跨用户），用于 Top Models 图表
 const modelAgg = computed(() => {
-  const m = new Map<string, { tokens: number; cost: number; requests: number }>()
+  const m = new Map<string, { tokens: number; requests: number }>()
   for (const r of usage.value) {
-    const c = m.get(r.model) || { tokens: 0, cost: 0, requests: 0 }
+    const c = m.get(r.model) || { tokens: 0, requests: 0 }
     c.tokens += r.total_tokens
-    c.cost += r.cost
     c.requests += r.requests
     m.set(r.model, c)
   }
@@ -162,7 +147,7 @@ async function renderChart() {
       formatter: (params: any[]) => {
         const p = params[0]
         const row = data[p.dataIndex]
-        return `${p.name}<br/>tokens: ${humanNum(row.tokens)}<br/>requests: ${row.requests}<br/>cost: $${row.cost.toFixed(4)}`
+        return `${p.name}<br/>tokens: ${humanNum(row.tokens)}<br/>requests: ${row.requests}`
       },
     },
     grid: { left: 8, right: 24, top: 8, bottom: 8, containLabel: true },
@@ -223,7 +208,6 @@ onBeforeUnmount(() => {
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(totals.requests) }}</div><div class="sum-label">Requests</div></el-card></el-col>
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num">{{ humanNum(totals.prompt) }} / {{ humanNum(totals.completion) }}</div><div class="sum-label">Upload / Download tokens</div></el-card></el-col>
       <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.callsBalance < 0 }">{{ totals.callsBalance }}</div><div class="sum-label">Calls balance{{ isUser ? '' : ' (all users)' }}</div></el-card></el-col>
-      <el-col :xs="12" :md="6"><el-card shadow="never" class="sum"><div class="sum-num" :class="{ neg: totals.creditBalance < 0 }">${{ totals.creditBalance.toFixed(2) }}</div><div class="sum-label">Credit balance{{ isUser ? '' : ' (all users)' }}</div></el-card></el-col>
     </el-row>
 
     <el-card v-if="mode === 'range' && modelAgg.length" shadow="never" class="mt">
@@ -247,9 +231,6 @@ onBeforeUnmount(() => {
                 <el-table-column label="Total" width="110" align="right">
                   <template #default="{ row: m }">{{ humanNum(m.total_tokens) }}</template>
                 </el-table-column>
-                <el-table-column label="Cost ($)" width="110" align="right">
-                  <template #default="{ row: m }">{{ money(m.cost) }}</template>
-                </el-table-column>
               </el-table>
               <el-empty v-else description="No usage in this range" :image-size="40" />
             </div>
@@ -267,19 +248,10 @@ onBeforeUnmount(() => {
         <el-table-column label="Download" width="110" align="right">
           <template #default="{ row }">{{ humanNum(mode === 'lifetime' ? row.out_spent : row.completion) }}</template>
         </el-table-column>
-        <el-table-column label="Cost ($)" width="100" align="right">
-          <template #default="{ row }">{{ money(mode === 'lifetime' ? row.credit_spent : row.cost) }}</template>
-        </el-table-column>
         <el-table-column label="Calls balance" width="130" align="right" sortable>
           <template #default="{ row }">
             <span :class="{ neg: row.calls_balance < 0 }">{{ row.calls_balance }}</span>
             <div class="sub">spent {{ row.calls_spent }} · earned {{ row.calls_earned }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="Credit balance" width="140" align="right" sortable>
-          <template #default="{ row }">
-            <span :class="{ neg: row.credit_balance < 0 }">${{ row.credit_balance.toFixed(4) }}</span>
-            <div class="sub">spent ${{ row.credit_spent.toFixed(4) }} · earned ${{ row.credit_earned.toFixed(4) }}</div>
           </template>
         </el-table-column>
       </el-table>

@@ -63,7 +63,6 @@ llmgate/
 │   │   └── openai/             # chat/completions/embeddings 兼容实现
 │   ├── router/                 # 核心：模型路由选择、健康状态、故障转移
 │   ├── gateway/                # /v1/* 开放网关：鉴权、限流、转发、SSE
-│   ├── quota/                  # 额度计算、成本估算、用量统计
 │   ├── apiv1/                  # /api/admin/* 管理端
 │   └── web/                    # 内嵌前端静态资源
 ├── web/                        # Vue 前端源码
@@ -82,8 +81,10 @@ llmgate/
  | token_hash / token_enc       | string | 网关消费令牌（sha256 鉴权 / AES 密文回显）——**一人一 token** |
  | token_expires_at             | int    | 令牌过期时间（0 = 永不过期）                                |
  | token_last_used_at           | int    | 令牌最近使用时间                                            |
- | quota_limit / quota_used     | float  | 额度上限 / 已用（0 = 不限）                                 |
  | status / last_login_at       | int    | 启用禁用 / 最近登录                                         |
+ | calls_spent / calls_earned   | int    | 共享池记账：消费/被调用次数                                 |
+ | in_spent / out_spent         | int    | 消费的上传/下载 token 数                                    |
+ | in_served / out_served       | int    | Key 被使用时的上传/下载 token 数                            |
 
 > 消费令牌直接存于 users 表（无独立表）；`token_enc=''` 表示尚未创建令牌。
 
@@ -144,7 +145,6 @@ llmgate/
  | channel_id / key_id                              | int    | 实际使用的渠道与 Key                           |
  | upstream_model                                   | string | 上游真实模型                                   |
  | prompt_tokens / completion_tokens / total_tokens | int    | 用量（转发的响应里解析，流式按 finish 后上报） |
- | cost                                             | float  | 成本估算                                       |
  | latency_ms                                       | int    | 总耗时（含重试）                               |
  | status                                           | string | success / error                                |
  | error_code                                       | string | 失败原因（timeout / 429 / 5xx / network…）     |
@@ -190,7 +190,7 @@ llmgate/
  | GET  | `/v1/models`           | 返回所有 enabled 的对外模型名    |
 
 鉴权：`Authorization: Bearer sk-xxx`（对 `users.token_hash` 校验，解析出归属用户）；
-额度超额返回 403；Key 归属该用户（未录入任何 Key 的模型对该用户表现为 404）。
+调用次数透支到下限时返回 403；Key 归属该用户（未录入任何 Key 的模型对该用户表现为 404）。
 
 ### 用户端 `/api/user/*`（用户名 + 密码登录，httpOnly 会话）
  | 方法    | 路径                        | 说明                                     |
@@ -204,7 +204,7 @@ llmgate/
  | POST/PUT/DELETE | `/api/user/channels[/:id]` | 自建/修改/删除**自己的**渠道（套餐）    |
  | GET     | `/api/user/routes`          | 全部模型路由（所有人可见）；本人渠道的可改 |
  | POST/PUT/DELETE | `/api/user/routes[/:id]` | 在**自己的**渠道下新增/改/删路由        |
- | GET     | `/api/user/usage/by-user`   | 团队共享统计（每人请求/成功/上传/下载/费用） |
+ | GET     | `/api/user/usage/by-user`   | 团队共享统计（每人请求/成功/上传/下载 token） |
  | GET/PUT/DELETE | `/api/user/token`     | 本人唯一消费令牌（创建/改过期/吊销）      |
  | POST    | `/api/user/token/rotate`    | 轮换令牌密钥（旧令牌立即失效）            |
  | PUT     | `/api/user/password`        | 自助改密码（注销其它设备）               |
@@ -217,7 +217,7 @@ llmgate/
  | CRUD    | `/api/admin/channels`          | 渠道管理，含 `POST /:id/test`（测试连通性）    |
  | CRUD    | `/api/admin/channels/:id/keys` | 渠道 Key 池（可指派 Owner 给某用户）           |
  | CRUD    | `/api/admin/model-routes`      | 模型路由映射                                   |
- | CRUD    | `/api/admin/users`             | 用户账号（用户名/密码）、令牌、额度            |
+ | CRUD    | `/api/admin/users`             | 用户账号（用户名/密码）、令牌、调用透支下限            |
  | GET     | `/api/admin/users/:id/overview`| 某用户的 Key/令牌/用量聚合                     |
  | GET     | `/api/admin/logs` `/logs/count`| 请求日志（时间/模型/渠道/状态筛选 + 分页）     |
  | GET     | `/api/admin/usage/*`           | 聚合统计（按天/模型/用户）                     |
@@ -231,7 +231,7 @@ llmgate/
  | 页面     | 内容                                                                                |
  | ---      | ---                                                                                 |
  | 登录     | 双模式：**Admin**（admin token）/ **User**（用户名+密码）；会话为 httpOnly Cookie   |
- | 仪表盘   | 今日调用量/费用/Token 卡片，近 7/30 天趋势图（ECharts），渠道健康状态，最近失败列表 |
+ | 仪表盘   | 今日调用量/Token 卡片，近 7/30 天趋势图（ECharts），渠道健康状态，最近失败列表 |
  | 渠道管理 | 渠道表格 + 新增/编辑弹窗（BaseURL、优先级、权重、Key 池批量添加）、测试连接、启停；Key 可指派 Owner |
  | 模型路由 | 对外模型名视图，展开显示映射的各渠道与权重，编辑映射                                |
  | 用户管理 | 用户列表（用户名/密码）；令牌直接显示在用户行（创建/复制/轮换/吊销）；**用户详情**（Key/令牌/用量） |
@@ -277,19 +277,19 @@ services:
 
 ### Phase 2 —— 增强
 - SSE 流式转发 + 流中断错误事件
-- 多用户与额度（quota 累计、403 拦截）
+- 多用户与共享池记账（调用/Token 累计、403 拦截）
 - 健康探活任务 + cooldown 自动恢复
 - 429 惩罚机制、Key 池动态权重
-- 成本估算细化（每模型单价配置）
+- 账单细化（按用户×模型的调用次数与上传/下载 token）
 
 ### Phase 3 —— 扩展（按需）
 - 上游协议适配器扩展（Anthropic / Gemini）
 - 请求日志 Prometheus metrics 导出
 - 响应缓存（相同请求 hash 命中）
-- Webhook/邮件告警（渠道健康、配额告警）
+- Webhook/邮件告警（渠道健康、用量告警）
 
 ## 11. 约定与说明
-- 所有金额字段统一为美元 float（成本估算用）
+- 账单只记录调用次数与上传/下载 token 数，不涉及金额换算
 - 日志保留天数可配置，超期清理（后台定时任务）
 - API Key 一律加密存储，接口返回一律掩码（`sk-****ab12`）
 - 前端只展示统计与配置，不触碰原始密钥

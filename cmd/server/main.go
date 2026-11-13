@@ -22,10 +22,8 @@ import (
 	"llmgate/internal/config"
 	"llmgate/internal/gateway"
 	"llmgate/internal/logbus"
-	"llmgate/internal/models"
 	"llmgate/internal/outbound"
 	"llmgate/internal/puller"
-	"llmgate/internal/quota"
 	"llmgate/internal/router"
 	"llmgate/internal/store"
 	"llmgate/internal/web"
@@ -73,8 +71,6 @@ func main() {
 	}
 	// 历史账号兜底：所有用户默认拥有一个消费 API_KEY
 	backfillUserTokens(a)
-	// 旧版 settings.model_pricing → 独立价格表（仅表为空时执行一次）
-	importLegacyPricing(a)
 	apiv1.SetSessionTTL(cfg.SessionTTLHours * 3600)
 	log.Printf("session ttl: %d hours", cfg.SessionTTLHours)
 
@@ -223,31 +219,6 @@ func backfillUserTokens(a *app.App) {
 	if n > 0 {
 		log.Printf("backfilled API_KEY for %d user(s)", n)
 	}
-}
-
-// importLegacyPricing 将旧的 settings.model_pricing JSON 一次性导入独立价格表。
-func importLegacyPricing(a *app.App) {
-	n, err := store.CountModelPrices(a.DB)
-	if err != nil || n > 0 {
-		return
-	}
-	raw, err := a.GetSetting("model_pricing")
-	if err != nil || raw == "" {
-		return
-	}
-	m, err := quota.ParsePricing(raw)
-	if err != nil || len(m) == 0 {
-		return
-	}
-	rows := make([]models.ModelPrice, 0, len(m))
-	for model, p := range m {
-		rows = append(rows, models.ModelPrice{Model: model, Input: p.Input, Output: p.Output, Call: p.Call})
-	}
-	if err := store.UpsertModelPrices(a.DB, rows); err != nil {
-		log.Printf("warn: import legacy model pricing: %v", err)
-		return
-	}
-	log.Printf("imported %d model price(s) from legacy settings", len(rows))
 }
 
 // applyPenaltyTuning 用 settings 里的熔断参数覆盖共享 Penalizer 的默认值。

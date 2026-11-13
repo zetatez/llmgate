@@ -11,7 +11,7 @@ const saving = ref(false)
 const active = ref('')
 
 interface SettingMeta {
-  type: 'number' | 'pricing'
+  type: 'number'
   min?: number
   max?: number
   step?: number
@@ -262,15 +262,6 @@ onMounted(load)
   color: var(--ll-muted);
   word-break: break-all;
   max-width: 340px;
-}
-.pricing-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.pricing-preview {
-  color: var(--ll-muted);
-  font-size: 13px;
 }
 .mt {
   margin-top: 12px;

@@ -14,9 +14,7 @@ func TestModelRouteCRUD(t *testing.T) {
 		t.Fatalf("expected no routes, got %d", len(list))
 	}
 
-	pi := 0.5
-	po := 1.5
-	r := &models.ModelRoute{DisplayName: "gpt-4o", ChannelID: chanID, UpstreamModel: "gpt-4o", Priority: 1, Weight: 2, Enabled: 1, PriceInput: &pi, PriceOutput: &po}
+	r := &models.ModelRoute{DisplayName: "gpt-4o", ChannelID: chanID, UpstreamModel: "gpt-4o", Priority: 1, Weight: 2, Enabled: 1}
 	id, err := CreateModelRoute(db, r)
 	if err != nil {
 		t.Fatalf("create route: %v", err)
@@ -29,7 +27,7 @@ func TestModelRouteCRUD(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("get route: %+v err %v", got, err)
 	}
-	if got.DisplayName != "gpt-4o" || got.PriceInput == nil || *got.PriceInput != 0.5 || got.PriceOutput == nil || *got.PriceOutput != 1.5 {
+	if got.DisplayName != "gpt-4o" || got.Weight != 2 {
 		t.Fatalf("route mismatch: %+v", got)
 	}
 	if m, _ := GetModelRoute(db, 99999); m != nil {

@@ -19,7 +19,6 @@ import (
 	"llmgate/internal/app"
 	"llmgate/internal/logbus"
 	"llmgate/internal/models"
-	"llmgate/internal/quota"
 	"llmgate/internal/router"
 	"llmgate/internal/store"
 )
@@ -88,22 +87,10 @@ func gatewayAuth(a *app.App, rl *RateLimiter) gin.HandlerFunc {
 			})
 			return
 		}
-		if user.QuotaLimit > 0 && user.QuotaUsed >= user.QuotaLimit {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": gin.H{"message": "quota exceeded", "type": "quota_exceeded"},
-			})
-			return
-		}
 		// 共享池账本门槛：允许透支到债务下限（负数）
 		if user.CallsEarned-user.CallsSpent+user.BaseCalls <= user.DebtFloorCalls {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": gin.H{"message": "call credits exhausted", "type": "calls_exhausted"},
-			})
-			return
-		}
-		if user.CreditEarned-user.CreditSpent+user.BaseCredit <= user.DebtFloorCredit {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": gin.H{"message": "credit exhausted", "type": "credit_exhausted"},
 			})
 			return
 		}
@@ -263,25 +250,8 @@ func handleForward(a *app.App, bus *logbus.Bus, pen *router.Penalizer, upstreamP
 	}
 }
 
-func finalizeLog(a *app.App, bus *logbus.Bus, logEntry *models.RequestLog, priceIn, priceOut *float64) {
-	pricing := globalPricing(a)
-	// 成本计算：路由自定义单价优先，否则回退全局模型价格（按对外模型名）
-	logEntry.Cost = quota.EstimateCostRoute(pricing, priceIn, priceOut, logEntry.DisplayModel, logEntry.PromptTokens, logEntry.CompletionTokens)
+func finalizeLog(a *app.App, bus *logbus.Bus, logEntry *models.RequestLog) {
 	bus.Write(logEntry)
-}
-
-// globalPricing 读取全局价格表；表为空时回退旧 settings.model_pricing（兼容未迁移的部署）。
-func globalPricing(a *app.App) map[string]quota.ModelPrice {
-	if rows, err := store.ListModelPrices(a.DB); err == nil && len(rows) > 0 {
-		out := make(map[string]quota.ModelPrice, len(rows))
-		for _, p := range rows {
-			out[p.Model] = quota.ModelPrice{Input: p.Input, Output: p.Output, Call: p.Call}
-		}
-		return out
-	}
-	s, _ := a.GetSetting("model_pricing")
-	pricing, _ := quota.ParsePricing(s)
-	return pricing
 }
 
 // oneLine 把多行文本压成单行（用于日志/错误记录，避免换行破坏展示）。
@@ -312,9 +282,9 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 			logEntry.ErrorCode = http.StatusText(res.StatusCode)
 		}
 		parseUsage(res.Body, logEntry)
-		finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
+		finalizeLog(a, bus, logEntry)
 		if logEntry.Status == "success" {
-			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 		}
 		touchChannelKey(a.DB, res.KeyID)
 		c.Data(res.StatusCode, contentType(res), res.Body)
@@ -322,7 +292,7 @@ func handlePlainRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.Ro
 	}
 	logEntry.Status = "error"
 	logEntry.ErrorCode = oneLine(ferr.Error(), 200) // 单行：渠道 + 原因（如 channel opencode: upstream 403 ...）
-	finalizeLog(a, bus, logEntry, nil, nil)
+	finalizeLog(a, bus, logEntry)
 	code, msg := mapRouteError(ferr, model)
 	if retryAfter := retryAfterFor(code); retryAfter != "" {
 		c.Header("Retry-After", retryAfter)
@@ -349,7 +319,7 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	if ferr != nil {
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-		finalizeLog(a, bus, logEntry, nil, nil)
+		finalizeLog(a, bus, logEntry)
 		code, msg := mapRouteError(ferr, model)
 		if ra := retryAfterFor(code); ra != "" {
 			c.Header("Retry-After", ra)
@@ -370,9 +340,9 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 		if logEntry.Status == "error" {
 			logEntry.ErrorCode = http.StatusText(sr.StatusCode)
 		}
-		finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
+		finalizeLog(a, bus, logEntry)
 		if logEntry.Status == "success" {
-			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+			_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 		}
 		ct := sr.ContentType
 		if ct == "" {
@@ -448,9 +418,9 @@ func handleStreamRoute(c *gin.Context, a *app.App, bus *logbus.Bus, rt *router.R
 	}
 	_ = sr.Stream.Close()
 	parseUsageFromSSE(usageBuf.Bytes(), logEntry)
-	finalizeLog(a, bus, logEntry, sr.Route.PriceInput, sr.Route.PriceOutput)
+	finalizeLog(a, bus, logEntry)
 	if logEntry.Status == "success" {
-		_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+		_ = store.ApplyUsage(a.DB, logEntry.UserID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 	}
 	touchChannelKey(a.DB, logEntry.KeyID)
 }

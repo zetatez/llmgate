@@ -274,7 +274,7 @@ func TestUsersCRUD(t *testing.T) {
 	}
 
 	// 创建：username + password 必填，建号即下发一次性明文 API_KEY
-	cb := `{"name":"alice","remark":"r1","username":"alice","password":"secret1","quota_limit":100,"status":1}`
+	cb := `{"name":"alice","remark":"r1","username":"alice","password":"secret1","status":1}`
 	w = do(r, http.MethodPost, basePath+"/users", cb, tok, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("create user = %d, body=%s", w.Code, w.Body.String())
@@ -292,8 +292,8 @@ func TestUsersCRUD(t *testing.T) {
 	if created.Data.TokenTail != created.Data.Token[len(created.Data.Token)-4:] {
 		t.Fatalf("token tail mismatch: %+v", created.Data)
 	}
-	if created.Data.DebtFloorCalls != -1000 || created.Data.DebtFloorCredit != -50 {
-		t.Fatalf("default overdraft = %d / %v, want -1000 / -50", created.Data.DebtFloorCalls, created.Data.DebtFloorCredit)
+	if created.Data.DebtFloorCalls != -1000 {
+		t.Fatalf("default call overdraft = %d, want -1000", created.Data.DebtFloorCalls)
 	}
 	uid := created.Data.ID
 
@@ -312,7 +312,7 @@ func TestUsersCRUD(t *testing.T) {
 	}
 
 	// 更新（部分字段）
-	w = do(r, http.MethodPut, basePath+"/users/"+fmt.Sprint(uid), `{"name":"bob","status":0,"debt_floor_calls":-200,"debt_floor_credit":-10}`, tok, "")
+	w = do(r, http.MethodPut, basePath+"/users/"+fmt.Sprint(uid), `{"name":"bob","status":0,"debt_floor_calls":-200}`, tok, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("update user = %d, body=%s", w.Code, w.Body.String())
 	}
@@ -323,8 +323,8 @@ func TestUsersCRUD(t *testing.T) {
 	if uv.Data.Name != "bob" || uv.Data.Status != 0 {
 		t.Fatalf("update result = %+v", uv.Data)
 	}
-	if uv.Data.DebtFloorCalls != -200 || uv.Data.DebtFloorCredit != -10 {
-		t.Fatalf("overdraft update = %d / %v, want -200 / -10", uv.Data.DebtFloorCalls, uv.Data.DebtFloorCredit)
+	if uv.Data.DebtFloorCalls != -200 {
+		t.Fatalf("call overdraft update = %d, want -200", uv.Data.DebtFloorCalls)
 	}
 
 	if w := do(r, http.MethodPut, basePath+"/users/9999", `{"name":"x"}`, tok, ""); w.Code != http.StatusNotFound {
@@ -676,7 +676,7 @@ func TestModelRoutesCRUD(t *testing.T) {
 
 	chID := createChannelRaw(t, r, tok, "https://x.example.com/v1")
 
-	cb := fmt.Sprintf(`{"display_name":"m1","channel_id":%d,"upstream_model":"up-m1","priority":2,"weight":-1,"enabled":1,"price_input":0.1,"price_output":0.2}`, chID)
+	cb := fmt.Sprintf(`{"display_name":"m1","channel_id":%d,"upstream_model":"up-m1","priority":2,"weight":-1,"enabled":1}`, chID)
 	w := do(r, http.MethodPost, basePath+"/model-routes", cb, tok, "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("create route = %d, body=%s", w.Code, w.Body.String())
@@ -740,8 +740,8 @@ func seedLogs(t *testing.T, a *app.App) {
 	t.Helper()
 	db := a.DB
 
-	if _, err := db.Exec(`INSERT INTO users (name, remark, token_hash, token_enc, quota_limit, quota_used, status, created_at, updated_at)
-		VALUES ('u1','','','',0,0,1,1,1)`); err != nil {
+	if _, err := db.Exec(`INSERT INTO users (name, remark, token_hash, token_enc, status, created_at, updated_at)
+		VALUES ('u1','','','',1,1,1)`); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 
@@ -749,17 +749,16 @@ func seedLogs(t *testing.T, a *app.App) {
 	rows := []struct {
 		model, status string
 		tokens        int64
-		cost          float64
 	}{
-		{"m-a", "success", 100, 0.5},
-		{"m-a", "success", 200, 1.0},
-		{"m-b", "error", 50, 0.0},
+		{"m-a", "success", 100},
+		{"m-a", "success", 200},
+		{"m-b", "error", 50},
 	}
 	for _, x := range rows {
 		logs = append(logs, &models.RequestLog{
 			UserID: 1, DisplayModel: x.model, UpstreamModel: "up",
 			PromptTokens: 10, CompletionTokens: 5, TotalTokens: x.tokens,
-			Cost: x.cost, LatencyMS: 20, Status: x.status, CreatedAt: models.Now(),
+			LatencyMS: 20, Status: x.status, CreatedAt: models.Now(),
 		})
 	}
 	if err := store.InsertLogs(db, logs); err != nil {

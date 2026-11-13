@@ -5,7 +5,7 @@ import * as echarts from 'echarts'
 import { logsApi, portalApi, settingsApi } from '../api'
 import type { DashboardPayload } from '../api'
 import { ElMessage } from 'element-plus'
-import { Connection, ChatDotRound, Money, WarningFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
+import { Connection, ChatDotRound, WarningFilled, CopyDocument, Refresh } from '@element-plus/icons-vue'
 import { usageVendorOf } from '../utils/vendor'
 import { fmtShort } from '../utils/format'
 import { useCopy } from '../utils/copy'
@@ -26,7 +26,6 @@ const shareEl = ref<HTMLDivElement>()
 let shareChart: echarts.ECharts | null = null
 const hourEl = ref<HTMLDivElement>()
 let hourChart: echarts.ECharts | null = null
-const hourMode = ref<'cost' | 'tokens'>('cost')
 const shareMode = ref<'model' | 'vendor'>('model')
 const gatewayBase = ref('')
 const days = ref(7)
@@ -38,24 +37,6 @@ function humanNum(n: number | null | undefined): string {
   if (abs >= 1e6) return +(n / 1e6).toFixed(2) + 'M'
   if (abs >= 1e3) return +(n / 1e3).toFixed(1) + 'k'
   return String(n)
-}
-
-function humanMoney(n: number | null | undefined): string {
-  if (n == null || Number.isNaN(n)) return '-'
-  if (Math.abs(n) >= 1000) return (n / 1000).toFixed(2) + 'k'
-  return n.toFixed(4)
-}
-
-function money(v: number | null | undefined): string {
-  return (v ?? 0).toFixed(4)
-}
-
-// 均价金额格式化：越大越少小数位。
-function money2(v: number): string {
-  if (!v || Number.isNaN(v)) return '0.000'
-  if (v >= 100) return v.toFixed(2)
-  if (v >= 1) return v.toFixed(3)
-  return v.toFixed(4)
 }
 
 async function load() {
@@ -100,9 +81,8 @@ const range = computed(() => {
   return w.reduce((s, p) => ({
     req: s.req + (p.requests || 0),
     tokens: s.tokens + (p.total_tokens || 0),
-    cost: s.cost + (p.cost || 0),
     errors: s.errors + (p.errors || 0),
-  }), { req: 0, tokens: 0, cost: 0, errors: 0 })
+  }), { req: 0, tokens: 0, errors: 0 })
 })
 
 interface Stat {
@@ -120,7 +100,6 @@ const stats = computed<Stat[]>(() => {
   return [
     { label: 'Requests', value: humanNum(r.req), today: `today ${t?.total_requests ?? 0}`, icon: Connection, color: 'var(--el-color-primary)', bg: 'rgba(124,134,214,.15)' },
     { label: 'Tokens', value: humanNum(r.tokens), today: `today ${humanNum(t?.total_tokens)}`, icon: ChatDotRound, color: '#6f9a86', bg: 'rgba(111,154,134,.15)' },
-    { label: 'Spend ($)', value: humanMoney(r.cost), today: `today ${humanMoney(t?.cost)}`, icon: Money, color: '#b18a4f', bg: 'rgba(177,138,79,.16)' },
     { label: 'Errors', value: humanNum(r.errors), today: `today ${t?.errors ?? 0}`, icon: WarningFilled, color: r.errors > 0 ? '#c9808a' : '#6f9a86', bg: r.errors > 0 ? 'rgba(201,128,138,.16)' : 'rgba(111,154,134,.15)' },
   ]
 })
@@ -136,7 +115,6 @@ interface ModelRank {
   vendor: string
   requests: number
   tokens: number
-  cost: number
   share: number
   change: number | null
   isNew: boolean
@@ -157,7 +135,6 @@ const modelRanks = computed<ModelRank[]>(() => {
         vendor: usageVendorOf(m.model),
         requests: m.requests,
         tokens: m.total_tokens,
-        cost: m.cost,
         share: (m.total_tokens / total) * 100,
         change,
         isNew,
@@ -186,19 +163,17 @@ const sharePoints = computed(() =>
   shareMode.value === 'model' ? dailyModelPoints.value : dailyVendorPoints.value,
 )
 
-// 各模型成本：请求 / token / 花费 / 平均每 1M token 成本
-const modelCost = computed(() => {
+// 各模型用量：请求 / token
+const modelUsage = computed(() => {
   const cur = payload.value?.models || []
   return [...cur]
     .filter((m) => m.requests > 0)
-    .sort((a, b) => b.cost - a.cost)
+    .sort((a, b) => b.total_tokens - a.total_tokens)
     .slice(0, 10)
     .map((m) => ({
       model: m.model,
       requests: m.requests,
       tokens: m.total_tokens,
-      cost: m.cost,
-      perM: m.total_tokens > 0 ? (m.cost / m.total_tokens) * 1e6 : 0,
     }))
 })
 
@@ -207,26 +182,23 @@ function renderHourChart() {
   const hours = payload.value?.hours || []
   hourChart?.dispose()
   hourChart = echarts.init(hourEl.value)
-  const mode = hourMode.value
   hourChart.setOption({
     tooltip: {
       ...AXIS_TOOLTIP,
-      valueFormatter: (v: any) => (mode === 'cost' ? '$' + (v || 0).toFixed(4) : humanNum(v) + ' token'),
+      valueFormatter: (v: any) => humanNum(v) + ' token',
     },
     grid: { left: 56, right: 16, top: 16, bottom: 26 },
     xAxis: { type: 'category', data: hours.map((h) => h.hour), axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c', interval: 2 } },
-    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => (mode === 'cost' ? '$' + humanMoney(v) : humanNum(v)), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
+    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
     series: [{
       type: 'bar',
       barMaxWidth: 14,
-      data: hours.map((h) => (mode === 'cost' ? h.cost : h.tokens)),
+      data: hours.map((h) => h.tokens),
       itemStyle: { color: '#8b93d6', borderRadius: [3, 3, 0, 0] },
     }],
   })
   hourChart.resize()
 }
-
-watch(hourMode, () => renderHourChart())
 
 const MODEL_COLORS = PALETTE
 
@@ -245,7 +217,6 @@ function renderChart() {
     const idx = daysLabel.indexOf(m.date)
     if (idx >= 0) seriesByModel.get(m.model)![idx] += m.tokens
   }
-  const costs = daysLabel.map((d) => payload.value!.week.find((x) => x.date === d)?.cost || 0)
 
   chart?.dispose()
   chart = echarts.init(chartEl.value)
@@ -255,25 +226,19 @@ function renderChart() {
       formatter(params: any[]) {
         const p0 = params[0]
         let html = p0.axisValue + '<br/>'
-        const token = params.filter((p: any) => p.seriesName !== 'Spend ($)')
-        const total = token.reduce((s: number, p: any) => s + (p.value || 0), 0)
-        for (const p of token) {
+        const total = params.reduce((s: number, p: any) => s + (p.value || 0), 0)
+        for (const p of params) {
           const share = total > 0 ? ' (' + ((p.value / total) * 100).toFixed(1) + '%)' : ''
           html += `${p.marker}${p.seriesName}: ${humanNum(p.value)} token${share}<br/>`
         }
-        const sp = params.find((p: any) => p.seriesName === 'Spend ($)')
-        if (sp) html += `${sp.marker}Spend: $${(sp.value || 0).toFixed(4)}<br/>`
         html += `<b>Total: ${humanNum(total)} token</b>`
         return html
       },
     },
     legend: { type: 'scroll', top: 0, left: 0, right: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 12, textStyle: { color: '#8b909c', fontSize: 11 } },
-    grid: { left: 48, right: 48, top: 40, bottom: 26 },
+    grid: { left: 48, right: 20, top: 40, bottom: 26 },
     xAxis: { type: 'category', boundaryGap: false, data: daysLabel, axisTick: { show: false }, axisLine: { lineStyle: { color: '#2a2c33' } }, axisLabel: { color: '#8b909c' } },
-    yAxis: [
-      { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
-      { type: 'value', axisLabel: { formatter: (v: number) => '$' + humanMoney(v), color: '#b18a4f' }, splitLine: { show: false } },
-    ],
+    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => humanNum(v), color: '#8b909c' }, splitLine: { lineStyle: { color: '#23252c' } } },
     series: [
       ...topModelsArr.map((m, i) => ({
         name: m,
@@ -285,16 +250,6 @@ function renderChart() {
         areaStyle: { color: MODEL_COLORS[i % MODEL_COLORS.length], opacity: 0.55 },
         data: daysLabel.map((_, j) => seriesByModel.get(m)![j] || 0),
       })),
-      {
-        name: 'Spend ($)',
-        type: 'line',
-        yAxisIndex: 1,
-        smooth: true,
-        symbol: 'none',
-        data: costs,
-        lineStyle: { width: 2, color: '#b18a4f' },
-        itemStyle: { color: '#b18a4f' },
-      },
     ],
   })
 }
@@ -396,7 +351,7 @@ onBeforeUnmount(() => {
 
     <!-- 统计卡（区间） -->
     <el-row :gutter="14" class="mt">
-      <el-col v-for="s in stats" :key="s.label" :xs="12" :md="6">
+      <el-col v-for="s in stats" :key="s.label" :xs="12" :md="8">
         <el-card shadow="never" class="stat-card">
           <div class="stat-row">
             <div class="stat-icon" :style="{ background: s.bg, color: s.color }">
@@ -417,11 +372,7 @@ onBeforeUnmount(() => {
         <el-card shadow="never" class="chart-card">
           <template #header>
             <div class="head">
-              <span>Hourly (last 24h)</span>
-              <el-radio-group v-model="hourMode" size="small">
-                <el-radio-button value="cost">Cost</el-radio-button>
-                <el-radio-button value="tokens">Tokens</el-radio-button>
-              </el-radio-group>
+              <span>Hourly tokens (last 24h)</span>
             </div>
           </template>
           <div ref="hourEl" style="height: 208px"></div>
@@ -432,7 +383,7 @@ onBeforeUnmount(() => {
           <template #header>
             <div class="head">
               <span>Usage trend</span>
-              <span class="week-sum">{{ humanNum(range.tokens) }} tokens · ${{ range.cost.toFixed(2) }}</span>
+              <span class="week-sum">{{ humanNum(range.tokens) }} tokens</span>
             </div>
           </template>
           <template v-if="!weekEmpty">
@@ -494,14 +445,14 @@ onBeforeUnmount(() => {
       </el-col>
     </el-row>
 
-    <!-- 模型成本 -->
+    <!-- 模型用量 -->
     <el-row :gutter="14" class="mt">
       <el-col :span="24">
         <el-card shadow="never">
           <template #header>
-            <div class="head"><span>Model cost</span><span class="week-sum">selected period</span></div>
+            <div class="head"><span>Model usage</span><span class="week-sum">selected period</span></div>
           </template>
-          <el-table :data="modelCost" size="small">
+          <el-table :data="modelUsage" size="small">
             <el-table-column label="Model" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">
                 <span>{{ row.model }}</span>
@@ -512,14 +463,8 @@ onBeforeUnmount(() => {
             <el-table-column label="Tokens" width="120" align="right" sortable>
               <template #default="{ row }">{{ humanNum(row.tokens) }}</template>
             </el-table-column>
-            <el-table-column label="Cost ($)" width="120" align="right" sortable>
-              <template #default="{ row }">{{ money(row.cost) }}</template>
-            </el-table-column>
-            <el-table-column label="Avg $ / 1M" width="130" align="right" sortable>
-              <template #default="{ row }">${{ money2(row.perM) }}</template>
-            </el-table-column>
           </el-table>
-          <el-empty v-if="!modelCost.length" description="No usage yet" :image-size="50" />
+          <el-empty v-if="!modelUsage.length" description="No usage yet" :image-size="50" />
         </el-card>
       </el-col>
     </el-row>

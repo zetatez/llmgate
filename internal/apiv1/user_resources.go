@@ -264,20 +264,18 @@ func userDeleteChannel(a *app.App) gin.HandlerFunc {
 // ---------------- 路由（所有人可见；仅本人渠道可改） ----------------
 
 type userRouteView struct {
-	ID               int64    `json:"id"`
-	DisplayName      string   `json:"display_name"`
-	ChannelID        int64    `json:"channel_id"`
-	ChannelName      string   `json:"channel_name"`
-	ChannelUserID    int64    `json:"channel_user_id"`
-	UpstreamModel    string   `json:"upstream_model"`
-	Priority         int      `json:"priority"`
-	Weight           int      `json:"weight"`
-	Enabled          int      `json:"enabled"`
-	EffectiveEnabled int      `json:"effective_enabled"`
-	ChannelEnabled   int      `json:"channel_enabled"`
-	PriceInput       *float64 `json:"price_input"`
-	PriceOutput      *float64 `json:"price_output"`
-	IsMine           bool     `json:"is_mine"`
+	ID               int64  `json:"id"`
+	DisplayName      string `json:"display_name"`
+	ChannelID        int64  `json:"channel_id"`
+	ChannelName      string `json:"channel_name"`
+	ChannelUserID    int64  `json:"channel_user_id"`
+	UpstreamModel    string `json:"upstream_model"`
+	Priority         int    `json:"priority"`
+	Weight           int    `json:"weight"`
+	Enabled          int    `json:"enabled"`
+	EffectiveEnabled int    `json:"effective_enabled"`
+	ChannelEnabled   int    `json:"channel_enabled"`
+	IsMine           bool   `json:"is_mine"`
 }
 
 func channelMap(a *app.App) (map[int64]*models.Channel, error) {
@@ -311,7 +309,6 @@ func userListRoutes(a *app.App) gin.HandlerFunc {
 			v := userRouteView{
 				ID: r.ID, DisplayName: r.DisplayName, ChannelID: r.ChannelID,
 				UpstreamModel: r.UpstreamModel, Priority: r.Priority, Weight: r.Weight, Enabled: r.Enabled,
-				PriceInput: r.PriceInput, PriceOutput: r.PriceOutput,
 			}
 			if ch != nil {
 				v.ChannelName = ch.Name
@@ -356,14 +353,12 @@ func userCreateRoute(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		u := currentUser(c)
 		var b struct {
-			DisplayName   string   `json:"display_name"`
-			ChannelID     int64    `json:"channel_id"`
-			UpstreamModel string   `json:"upstream_model"`
-			Priority      int      `json:"priority"`
-			Weight        int      `json:"weight"`
-			Enabled       *int     `json:"enabled"`
-			PriceInput    *float64 `json:"price_input"`
-			PriceOutput   *float64 `json:"price_output"`
+			DisplayName   string `json:"display_name"`
+			ChannelID     int64  `json:"channel_id"`
+			UpstreamModel string `json:"upstream_model"`
+			Priority      int    `json:"priority"`
+			Weight        int    `json:"weight"`
+			Enabled       *int   `json:"enabled"`
 		}
 		if !decode(c, &b) {
 			return
@@ -388,7 +383,6 @@ func userCreateRoute(a *app.App) gin.HandlerFunc {
 		r := &models.ModelRoute{
 			DisplayName: strings.TrimSpace(b.DisplayName), ChannelID: b.ChannelID,
 			UpstreamModel: strings.TrimSpace(b.UpstreamModel), Priority: b.Priority, Weight: orInt(b.Weight, 1), Enabled: enabled,
-			PriceInput: b.PriceInput, PriceOutput: b.PriceOutput,
 		}
 		id, err := store.CreateModelRoute(a.DB, r)
 		if err != nil {
@@ -410,13 +404,11 @@ func userUpdateRoute(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			DisplayName   *string  `json:"display_name"`
-			UpstreamModel *string  `json:"upstream_model"`
-			Priority      *int     `json:"priority"`
-			Weight        *int     `json:"weight"`
-			Enabled       *int     `json:"enabled"`
-			PriceInput    *float64 `json:"price_input"`
-			PriceOutput   *float64 `json:"price_output"`
+			DisplayName   *string `json:"display_name"`
+			UpstreamModel *string `json:"upstream_model"`
+			Priority      *int    `json:"priority"`
+			Weight        *int    `json:"weight"`
+			Enabled       *int    `json:"enabled"`
 		}
 		if !decode(c, &b) {
 			return
@@ -435,12 +427,6 @@ func userUpdateRoute(a *app.App) gin.HandlerFunc {
 		}
 		if b.Enabled != nil {
 			cur.Enabled = *b.Enabled
-		}
-		if b.PriceInput != nil {
-			cur.PriceInput = b.PriceInput
-		}
-		if b.PriceOutput != nil {
-			cur.PriceOutput = b.PriceOutput
 		}
 		if err := store.UpdateModelRoute(a.DB, cur); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -467,26 +453,24 @@ func userDeleteRoute(a *app.App) gin.HandlerFunc {
 	}
 }
 
-// ---------------- 共享统计（所有人可见，含费用） ----------------
+// ---------------- 共享统计（所有人可见） ----------------
 
 // teamUsageRow 团队统计：消费 + 贡献两个方向。
 type teamUsageRow struct {
-	UserID           int64   `json:"user_id"`
-	UserName         string  `json:"user_name"`
-	Requests         int64   `json:"requests"`
-	Success          int64   `json:"success"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	TotalTokens      int64   `json:"total_tokens"`
-	Cost             float64 `json:"cost"`
-	EarnedCalls      int64   `json:"earned_calls"`
-	EarnedIn         int64   `json:"earned_in_tokens"`
-	EarnedOut        int64   `json:"earned_out_tokens"`
-	EarnedCost       float64 `json:"earned_cost"`
+	UserID           int64  `json:"user_id"`
+	UserName         string `json:"user_name"`
+	Requests         int64  `json:"requests"`
+	Success          int64  `json:"success"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+	EarnedCalls      int64  `json:"earned_calls"`
+	EarnedIn         int64  `json:"earned_in_tokens"`
+	EarnedOut        int64  `json:"earned_out_tokens"`
 }
 
-// userUsageByUser 返回按用户聚合的用量（消费：请求/成功/上传/下载/合计/费用；
-// 贡献：被他人使用 Key 的次数/token/收益），所有登录用户可见。
+// userUsageByUser 返回按用户聚合的用量（消费：请求/成功/上传/下载/合计；
+// 贡献：被他人使用 Key 的次数/上传/下载 token），所有登录用户可见。
 func userUsageByUser(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		days := 7
@@ -516,10 +500,10 @@ func userUsageByUser(a *app.App) gin.HandlerFunc {
 			seen[u.UserID] = true
 			row := teamUsageRow{
 				UserID: u.UserID, UserName: u.UserName, Requests: u.Requests, Success: u.Success,
-				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens, Cost: u.Cost,
+				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens,
 			}
 			if e, ok := earned[u.UserID]; ok {
-				row.EarnedCalls, row.EarnedIn, row.EarnedOut, row.EarnedCost = e.Calls, e.In, e.Out, e.Cost
+				row.EarnedCalls, row.EarnedIn, row.EarnedOut = e.Calls, e.In, e.Out
 			}
 			out = append(out, row)
 		}
@@ -530,7 +514,7 @@ func userUsageByUser(a *app.App) gin.HandlerFunc {
 			}
 			out = append(out, teamUsageRow{
 				UserID: id, UserName: names[id],
-				EarnedCalls: e.Calls, EarnedIn: e.In, EarnedOut: e.Out, EarnedCost: e.Cost,
+				EarnedCalls: e.Calls, EarnedIn: e.In, EarnedOut: e.Out,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"data": out})

@@ -10,10 +10,10 @@ import (
 )
 
 // queryLogSelect 附带渠道名/用户名（联表，仅查询用）
-const queryLogSelect = `lg.id, lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''), lg.display_model, lg.channel_id, lg.key_id, lg.key_owner_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.cost, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
+const queryLogSelect = `lg.id, lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''), lg.display_model, lg.channel_id, lg.key_id, lg.key_owner_id, COALESCE(ch.name,''), lg.upstream_model, lg.prompt_tokens, lg.completion_tokens, lg.total_tokens, lg.latency_ms, lg.status, lg.error_code, lg.stream, lg.created_at`
 
 // insertLogCols 不含 id，交由 AUTOINCREMENT 分配。
-const insertLogCols = `user_id, display_model, channel_id, key_id, key_owner_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, cost, latency_ms, status, error_code, stream, created_at`
+const insertLogCols = `user_id, display_model, channel_id, key_id, key_owner_id, upstream_model, prompt_tokens, completion_tokens, total_tokens, latency_ms, status, error_code, stream, created_at`
 
 // LogFilter 请求日志查询条件。
 type LogFilter struct {
@@ -33,15 +33,15 @@ func InsertLogs(db *sql.DB, logs []*models.RequestLog) error {
 		return nil
 	}
 	var sb strings.Builder
-	args := make([]any, 0, len(logs)*15)
+	args := make([]any, 0, len(logs)*14)
 	sb.WriteString(`INSERT INTO request_logs (` + insertLogCols + `) VALUES `)
 	for i, l := range logs {
 		if i > 0 {
 			sb.WriteString(",")
 		}
-		sb.WriteString("(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+		sb.WriteString("(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
 		args = append(args, l.UserID, l.DisplayModel, l.ChannelID, l.KeyID, l.KeyOwnerID, l.UpstreamModel,
-			l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.Cost, l.LatencyMS,
+			l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.LatencyMS,
 			l.Status, l.ErrorCode, l.Stream, l.CreatedAt)
 	}
 	_, err := db.Exec(sb.String(), args...)
@@ -92,7 +92,7 @@ func QueryLogs(db *sql.DB, f LogFilter) ([]*models.RequestLog, error) {
 	for rows.Next() {
 		l := &models.RequestLog{}
 		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.KeyOwnerID, &l.ChannelName, &l.UpstreamModel,
-			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
+			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.LatencyMS,
 			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -136,10 +136,9 @@ func CountLogs(db *sql.DB, f LogFilter) (int64, error) {
 
 // UsageHourPoint 每小时的用量。
 type UsageHourPoint struct {
-	Hour     string  `json:"hour"` // HH:00
-	Requests int64   `json:"requests"`
-	Tokens   int64   `json:"tokens"`
-	Cost     float64 `json:"cost"`
+	Hour     string `json:"hour"` // HH:00
+	Requests int64  `json:"requests"`
+	Tokens   int64  `json:"tokens"`
 }
 
 // UsageByHour 返回最近 hours 小时（含当前小时）按小时聚合，缺失补零。
@@ -152,7 +151,7 @@ func UsageByHour(db *sql.DB, hours int) ([]UsageHourPoint, error) {
 	startHour := time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, start.Location())
 	rows, err := db.Query(`
 		SELECT strftime('%Y-%m-%d %H', created_at, 'unixepoch', 'localtime') AS hr,
-			COUNT(*), SUM(total_tokens), SUM(cost)
+			COUNT(*), SUM(total_tokens)
 		FROM request_logs WHERE created_at >= ? GROUP BY hr`, startHour.Unix())
 	if err != nil {
 		return nil, err
@@ -162,11 +161,10 @@ func UsageByHour(db *sql.DB, hours int) ([]UsageHourPoint, error) {
 	for rows.Next() {
 		var hr string
 		var req, tok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&hr, &req, &tok, &cost); err != nil {
+		if err := rows.Scan(&hr, &req, &tok); err != nil {
 			return nil, err
 		}
-		m[hr] = UsageHourPoint{Requests: req.Int64, Tokens: tok.Int64, Cost: cost.Float64}
+		m[hr] = UsageHourPoint{Requests: req.Int64, Tokens: tok.Int64}
 	}
 	out := make([]UsageHourPoint, 0, hours)
 	for i := 0; i < hours; i++ {
@@ -180,13 +178,12 @@ func UsageByHour(db *sql.DB, hours int) ([]UsageHourPoint, error) {
 
 // UsagePoint 按天聚合的用量。
 type UsagePoint struct {
-	Date         string  `json:"date"` // YYYY-MM-DD
-	Requests     int64   `json:"requests"`
-	Success      int64   `json:"success"`
-	Errors       int64   `json:"errors"`
-	TotalTokens  int64   `json:"total_tokens"`
-	PromptTokens int64   `json:"prompt_tokens"`
-	Cost         float64 `json:"cost"`
+	Date         string `json:"date"` // YYYY-MM-DD
+	Requests     int64  `json:"requests"`
+	Success      int64  `json:"success"`
+	Errors       int64  `json:"errors"`
+	TotalTokens  int64  `json:"total_tokens"`
+	PromptTokens int64  `json:"prompt_tokens"`
 }
 
 // UsageModelPoint 每日×模型用量（用于仪表盘堆叠占比图）。
@@ -238,8 +235,7 @@ func UsageByDay(db *sql.DB, days int) ([]UsagePoint, error) {
 			SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
 			SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END),
 			SUM(total_tokens),
-			SUM(prompt_tokens),
-			SUM(cost)
+			SUM(prompt_tokens)
 		FROM request_logs
 		WHERE created_at >= ?
 		GROUP BY day
@@ -252,12 +248,10 @@ func UsageByDay(db *sql.DB, days int) ([]UsagePoint, error) {
 	for rows.Next() {
 		var p UsagePoint
 		var req, suc, errs, tok, ptok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&p.Date, &req, &suc, &errs, &tok, &ptok, &cost); err != nil {
+		if err := rows.Scan(&p.Date, &req, &suc, &errs, &tok, &ptok); err != nil {
 			return nil, err
 		}
 		p.Requests, p.Success, p.Errors, p.TotalTokens, p.PromptTokens = req.Int64, suc.Int64, errs.Int64, tok.Int64, ptok.Int64
-		p.Cost = cost.Float64
 		m[p.Date] = p
 	}
 	// 补齐缺日期
@@ -276,13 +270,12 @@ func UsageByDay(db *sql.DB, days int) ([]UsagePoint, error) {
 
 // UsageSummary 汇总统计。
 type UsageSummary struct {
-	TotalRequests    int64   `json:"total_requests"`
-	Success          int64   `json:"success"`
-	Errors           int64   `json:"errors"`
-	TotalTokens      int64   `json:"total_tokens"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	Cost             float64 `json:"cost"`
+	TotalRequests    int64 `json:"total_requests"`
+	Success          int64 `json:"success"`
+	Errors           int64 `json:"errors"`
+	TotalTokens      int64 `json:"total_tokens"`
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
 }
 
 // UsageSummaryRange 返回 [from,to] 区间汇总；from<=0 则统计全部。
@@ -294,8 +287,7 @@ func UsageSummaryRange(db *sql.DB, from int64) (UsageSummary, error) {
 			SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END),
 			SUM(total_tokens),
 			SUM(prompt_tokens),
-			SUM(completion_tokens),
-			SUM(cost)
+			SUM(completion_tokens)
 		FROM request_logs`
 	args := []any{}
 	if from > 0 {
@@ -304,25 +296,22 @@ func UsageSummaryRange(db *sql.DB, from int64) (UsageSummary, error) {
 	}
 	// 无日志时 SUM 返回 NULL，需用 Null 类型承接
 	var req, suc, errs, tok, ptok, ctok sql.NullInt64
-	var cost sql.NullFloat64
-	err := db.QueryRow(q, args...).Scan(&req, &suc, &errs, &tok, &ptok, &ctok, &cost)
+	err := db.QueryRow(q, args...).Scan(&req, &suc, &errs, &tok, &ptok, &ctok)
 	if err != nil && err != sql.ErrNoRows {
 		return s, err
 	}
 	s.TotalRequests, s.Success, s.Errors = req.Int64, suc.Int64, errs.Int64
 	s.TotalTokens, s.PromptTokens, s.CompletionTokens = tok.Int64, ptok.Int64, ctok.Int64
-	s.Cost = cost.Float64
 	return s, nil
 }
 
 // ModelUsage 单模型在区间内的聚合。
 type ModelUsage struct {
-	Model          string  `json:"model"`
-	Requests       int64   `json:"requests"`
-	TotalTokens    int64   `json:"total_tokens"`
-	PromptTokens   int64   `json:"prompt_tokens"`
-	CompletionToks int64   `json:"completion_tokens"`
-	Cost           float64 `json:"cost"`
+	Model          string `json:"model"`
+	Requests       int64  `json:"requests"`
+	TotalTokens    int64  `json:"total_tokens"`
+	PromptTokens   int64  `json:"prompt_tokens"`
+	CompletionToks int64  `json:"completion_tokens"`
 }
 
 // UsageByModel 按模型聚合区间 [from,to) 的用量，返回各模型降序。
@@ -333,8 +322,7 @@ func UsageByModel(db *sql.DB, from, to int64) ([]ModelUsage, error) {
 			COUNT(*),
 			SUM(CASE WHEN status='success' THEN total_tokens ELSE 0 END),
 			SUM(CASE WHEN status='success' THEN prompt_tokens ELSE 0 END),
-			SUM(CASE WHEN status='success' THEN completion_tokens ELSE 0 END),
-			SUM(CASE WHEN status='success' THEN cost ELSE 0 END)
+			SUM(CASE WHEN status='success' THEN completion_tokens ELSE 0 END)
 		FROM request_logs WHERE 1=1`
 	if from > 0 {
 		q += ` AND created_at >= ?`
@@ -355,13 +343,11 @@ func UsageByModel(db *sql.DB, from, to int64) ([]ModelUsage, error) {
 	for rows.Next() {
 		var m ModelUsage
 		var req, tok, ptok, ctok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&m.Model, &req, &tok, &ptok, &ctok, &cost); err != nil {
+		if err := rows.Scan(&m.Model, &req, &tok, &ptok, &ctok); err != nil {
 			return nil, err
 		}
 		m.Requests, m.TotalTokens = req.Int64, tok.Int64
 		m.PromptTokens, m.CompletionToks = ptok.Int64, ctok.Int64
-		m.Cost = cost.Float64
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -369,14 +355,13 @@ func UsageByModel(db *sql.DB, from, to int64) ([]ModelUsage, error) {
 
 // UserModelUsage 单个用户对单个模型的用量聚合。
 type UserModelUsage struct {
-	UserID         int64   `json:"user_id"`
-	UserName       string  `json:"user_name"`
-	Model          string  `json:"model"`
-	Requests       int64   `json:"requests"`
-	PromptTokens   int64   `json:"prompt_tokens"`
-	CompletionToks int64   `json:"completion_tokens"`
-	TotalTokens    int64   `json:"total_tokens"`
-	Cost           float64 `json:"cost"`
+	UserID         int64  `json:"user_id"`
+	UserName       string `json:"user_name"`
+	Model          string `json:"model"`
+	Requests       int64  `json:"requests"`
+	PromptTokens   int64  `json:"prompt_tokens"`
+	CompletionToks int64  `json:"completion_tokens"`
+	TotalTokens    int64  `json:"total_tokens"`
 }
 
 // UsageByUserModel 按 用户×模型 聚合区间 [from,to) 的用量（请求次数 / 上传token / 下载token / 费用）。
@@ -384,7 +369,7 @@ func UsageByUserModel(db *sql.DB, from, to int64) ([]UserModelUsage, error) {
 	q := `
 		SELECT lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''), lg.display_model,
 			COUNT(*),
-			SUM(lg.prompt_tokens), SUM(lg.completion_tokens), SUM(lg.total_tokens), SUM(lg.cost)
+			SUM(lg.prompt_tokens), SUM(lg.completion_tokens), SUM(lg.total_tokens)
 		FROM request_logs lg
 		LEFT JOIN users u ON u.id = lg.user_id
 		WHERE 1=1`
@@ -408,13 +393,11 @@ func UsageByUserModel(db *sql.DB, from, to int64) ([]UserModelUsage, error) {
 	for rows.Next() {
 		var m UserModelUsage
 		var req, ptok, ctok, ttok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&m.UserID, &m.UserName, &m.Model, &req, &ptok, &ctok, &ttok, &cost); err != nil {
+		if err := rows.Scan(&m.UserID, &m.UserName, &m.Model, &req, &ptok, &ctok, &ttok); err != nil {
 			return nil, err
 		}
 		m.Requests, m.PromptTokens = req.Int64, ptok.Int64
 		m.CompletionToks, m.TotalTokens = ctok.Int64, ttok.Int64
-		m.Cost = cost.Float64
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -422,14 +405,13 @@ func UsageByUserModel(db *sql.DB, from, to int64) ([]UserModelUsage, error) {
 
 // UserUsage 单个用户在区间内的用量聚合（含成功次数）。
 type UserUsage struct {
-	UserID           int64   `json:"user_id"`
-	UserName         string  `json:"user_name"`
-	Requests         int64   `json:"requests"`
-	Success          int64   `json:"success"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	TotalTokens      int64   `json:"total_tokens"`
-	Cost             float64 `json:"cost"`
+	UserID           int64  `json:"user_id"`
+	UserName         string `json:"user_name"`
+	Requests         int64  `json:"requests"`
+	Success          int64  `json:"success"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
 }
 
 // UsageByUser 按用户聚合区间 [from,to) 的用量（请求次数/成功次数/上传/下载/合计/费用），按 token 降序。
@@ -439,7 +421,7 @@ func UsageByUser(db *sql.DB, from, to int64) ([]UserUsage, error) {
 		SELECT lg.user_id, COALESCE(NULLIF(u.username,''), u.name, ''),
 			COUNT(*),
 			SUM(CASE WHEN lg.status='success' THEN 1 ELSE 0 END),
-			SUM(lg.prompt_tokens), SUM(lg.completion_tokens), SUM(lg.total_tokens), SUM(lg.cost)
+			SUM(lg.prompt_tokens), SUM(lg.completion_tokens), SUM(lg.total_tokens)
 		FROM request_logs lg
 		LEFT JOIN users u ON u.id = lg.user_id
 		WHERE 1=1`
@@ -462,13 +444,11 @@ func UsageByUser(db *sql.DB, from, to int64) ([]UserUsage, error) {
 	for rows.Next() {
 		var m UserUsage
 		var req, suc, ptok, ctok, ttok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&m.UserID, &m.UserName, &req, &suc, &ptok, &ctok, &ttok, &cost); err != nil {
+		if err := rows.Scan(&m.UserID, &m.UserName, &req, &suc, &ptok, &ctok, &ttok); err != nil {
 			return nil, err
 		}
 		m.Requests, m.Success = req.Int64, suc.Int64
 		m.PromptTokens, m.CompletionTokens, m.TotalTokens = ptok.Int64, ctok.Int64, ttok.Int64
-		m.Cost = cost.Float64
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -476,15 +456,14 @@ func UsageByUser(db *sql.DB, from, to int64) ([]UserUsage, error) {
 
 // UsageEarned 某用户作为"贡献者"在区间内被他人使用的聚合。
 type UsageEarned struct {
-	Calls int64   `json:"calls"`
-	In    int64   `json:"in_tokens"`
-	Out   int64   `json:"out_tokens"`
-	Cost  float64 `json:"cost"`
+	Calls int64 `json:"calls"`
+	In    int64 `json:"in_tokens"`
+	Out   int64 `json:"out_tokens"`
 }
 
 // UsageEarnedByUser 按贡献者(key_owner_id)聚合区间 [from,to) 的成功请求。
 func UsageEarnedByUser(db *sql.DB, from, to int64) (map[int64]UsageEarned, error) {
-	q := `SELECT key_owner_id, COUNT(*), SUM(prompt_tokens), SUM(completion_tokens), SUM(cost)
+	q := `SELECT key_owner_id, COUNT(*), SUM(prompt_tokens), SUM(completion_tokens)
 		FROM request_logs WHERE status='success' AND key_owner_id > 0`
 	args := []any{}
 	if from > 0 {
@@ -505,11 +484,10 @@ func UsageEarnedByUser(db *sql.DB, from, to int64) (map[int64]UsageEarned, error
 	for rows.Next() {
 		var id int64
 		var calls, in, oc sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&id, &calls, &in, &oc, &cost); err != nil {
+		if err := rows.Scan(&id, &calls, &in, &oc); err != nil {
 			return nil, err
 		}
-		out[id] = UsageEarned{Calls: calls.Int64, In: in.Int64, Out: oc.Int64, Cost: cost.Float64}
+		out[id] = UsageEarned{Calls: calls.Int64, In: in.Int64, Out: oc.Int64}
 	}
 	return out, rows.Err()
 }
@@ -576,7 +554,7 @@ func RecentFailures(db *sql.DB, n int) ([]*models.RequestLog, error) {
 	for rows.Next() {
 		l := &models.RequestLog{}
 		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.KeyOwnerID, &l.ChannelName, &l.UpstreamModel,
-			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
+			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.LatencyMS,
 			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
 			return nil, err
 		}

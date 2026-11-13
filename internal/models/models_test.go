@@ -15,12 +15,11 @@ func TestNow(t *testing.T) {
 	}
 }
 
-// 结构体 JSON 序列化应正确（可空价格指针、隐藏敏感字段）。
+// 结构体 JSON 序列化应正确（隐藏敏感字段）。
 func TestJSONTags(t *testing.T) {
-	pi := 0.5
 	r := ModelRoute{
 		ID: 1, DisplayName: "m", ChannelID: 2, UpstreamModel: "up",
-		Priority: 0, Weight: 1, Enabled: 1, PriceInput: &pi,
+		Priority: 0, Weight: 1, Enabled: 1,
 	}
 	b, err := json.Marshal(r)
 	if err != nil {
@@ -30,7 +29,7 @@ func TestJSONTags(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.ID != 1 || back.DisplayName != "m" || back.PriceInput == nil || *back.PriceInput != 0.5 {
+	if back.ID != 1 || back.DisplayName != "m" || back.Weight != 1 {
 		t.Fatalf("route json roundtrip mismatch: %+v", back)
 	}
 

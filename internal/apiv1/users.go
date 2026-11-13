@@ -26,45 +26,38 @@ func RegisterUserRoutes(g *gin.RouterGroup, a *app.App) {
 }
 
 type userView struct {
-	ID             int64   `json:"id"`
-	Name           string  `json:"name"`
-	Remark         string  `json:"remark"`
-	Username       string  `json:"username"`
-	QuotaLimit     float64 `json:"quota_limit"`
-	QuotaUsed      float64 `json:"quota_used"`
-	Status         int     `json:"status"`
-	HasToken       bool    `json:"has_token"`
-	TokenTail      string  `json:"token_tail"`
-	Token          string  `json:"token,omitempty"` // 仅创建时返回一次的明文
-	TokenExpiresAt int64   `json:"token_expires_at"`
-	TokenLastUsed  int64   `json:"token_last_used_at"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Remark         string `json:"remark"`
+	Username       string `json:"username"`
+	Status         int    `json:"status"`
+	HasToken       bool   `json:"has_token"`
+	TokenTail      string `json:"token_tail"`
+	Token          string `json:"token,omitempty"` // 仅创建时返回一次的明文
+	TokenExpiresAt int64  `json:"token_expires_at"`
+	TokenLastUsed  int64  `json:"token_last_used_at"`
 	// 共享池账本
-	CallsSpent      int64   `json:"calls_spent"`
-	CallsEarned     int64   `json:"calls_earned"`
-	CallsBalance    int64   `json:"calls_balance"`
-	InSpent         int64   `json:"in_spent"`
-	OutSpent        int64   `json:"out_spent"`
-	InServed        int64   `json:"in_served"`
-	OutServed       int64   `json:"out_served"`
-	CreditSpent     float64 `json:"credit_spent"`
-	CreditEarned    float64 `json:"credit_earned"`
-	CreditBalance   float64 `json:"credit_balance"`
-	DebtFloorCalls  int64   `json:"debt_floor_calls"`
-	DebtFloorCredit float64 `json:"debt_floor_credit"`
-	LastLoginAt     int64   `json:"last_login_at"`
-	CreatedAt       int64   `json:"created_at"`
+	CallsSpent     int64 `json:"calls_spent"`
+	CallsEarned    int64 `json:"calls_earned"`
+	CallsBalance   int64 `json:"calls_balance"`
+	InSpent        int64 `json:"in_spent"`
+	OutSpent       int64 `json:"out_spent"`
+	InServed       int64 `json:"in_served"`
+	OutServed      int64 `json:"out_served"`
+	DebtFloorCalls int64 `json:"debt_floor_calls"`
+	LastLoginAt    int64 `json:"last_login_at"`
+	CreatedAt      int64 `json:"created_at"`
 }
 
 func toUserView(a *app.App, u *models.User) userView {
 	return userView{
 		ID: u.ID, Name: u.Name, Remark: u.Remark, Username: u.Username,
-		QuotaLimit: u.QuotaLimit, QuotaUsed: u.QuotaUsed, Status: u.Status,
+		Status:   u.Status,
 		HasToken: u.TokenEnc != "", TokenTail: a.KeyTail(u.TokenEnc), TokenExpiresAt: u.TokenExpiresAt, TokenLastUsed: u.TokenLastUsed,
 		CallsSpent: u.CallsSpent, CallsEarned: u.CallsEarned, CallsBalance: u.CallsEarned - u.CallsSpent + u.BaseCalls,
 		InSpent: u.InSpent, OutSpent: u.OutSpent, InServed: u.InServed, OutServed: u.OutServed,
-		CreditSpent: u.CreditSpent, CreditEarned: u.CreditEarned, CreditBalance: u.CreditEarned - u.CreditSpent + u.BaseCredit,
-		DebtFloorCalls: u.DebtFloorCalls, DebtFloorCredit: u.DebtFloorCredit,
-		LastLoginAt: u.LastLoginAt, CreatedAt: u.CreatedAt,
+		DebtFloorCalls: u.DebtFloorCalls,
+		LastLoginAt:    u.LastLoginAt, CreatedAt: u.CreatedAt,
 	}
 }
 
@@ -86,14 +79,12 @@ func listUsers(a *app.App) gin.HandlerFunc {
 func createUser(a *app.App) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var b struct {
-			Name            string   `json:"name"`
-			Remark          string   `json:"remark"`
-			Username        string   `json:"username"`
-			Password        string   `json:"password"`
-			QuotaLimit      float64  `json:"quota_limit"`
-			Status          *int     `json:"status"`
-			DebtFloorCalls  *int64   `json:"debt_floor_calls"`
-			DebtFloorCredit *float64 `json:"debt_floor_credit"`
+			Name           string `json:"name"`
+			Remark         string `json:"remark"`
+			Username       string `json:"username"`
+			Password       string `json:"password"`
+			Status         *int   `json:"status"`
+			DebtFloorCalls *int64 `json:"debt_floor_calls"`
 		}
 		if !decode(c, &b) {
 			return
@@ -134,14 +125,11 @@ func createUser(a *app.App) gin.HandlerFunc {
 		}
 		u := &models.User{
 			Name: b.Name, Remark: b.Remark, Username: username, PasswordHash: pwHash,
-			TokenHash: app.HashToken("placeholder:" + placeholder), QuotaLimit: b.QuotaLimit, Status: status,
-			DebtFloorCalls: store.DefaultDebtFloorCalls, DebtFloorCredit: store.DefaultDebtFloorCredit,
+			TokenHash: app.HashToken("placeholder:" + placeholder), Status: status,
+			DebtFloorCalls: store.DefaultDebtFloorCalls,
 		}
 		if b.DebtFloorCalls != nil {
 			u.DebtFloorCalls = *b.DebtFloorCalls
-		}
-		if b.DebtFloorCredit != nil {
-			u.DebtFloorCredit = *b.DebtFloorCredit
 		}
 		id, err := store.CreateUser(a.DB, u)
 		if err != nil {
@@ -176,14 +164,12 @@ func updateUser(a *app.App) gin.HandlerFunc {
 			return
 		}
 		var b struct {
-			Name            *string  `json:"name"`
-			Remark          *string  `json:"remark"`
-			Username        *string  `json:"username"`
-			Password        *string  `json:"password"`
-			QuotaLimit      *float64 `json:"quota_limit"`
-			Status          *int     `json:"status"`
-			DebtFloorCalls  *int64   `json:"debt_floor_calls"`
-			DebtFloorCredit *float64 `json:"debt_floor_credit"`
+			Name           *string `json:"name"`
+			Remark         *string `json:"remark"`
+			Username       *string `json:"username"`
+			Password       *string `json:"password"`
+			Status         *int    `json:"status"`
+			DebtFloorCalls *int64  `json:"debt_floor_calls"`
 		}
 		if !decode(c, &b) {
 			return
@@ -199,14 +185,8 @@ func updateUser(a *app.App) gin.HandlerFunc {
 		if b.Remark != nil {
 			cur.Remark = *b.Remark
 		}
-		if b.QuotaLimit != nil {
-			cur.QuotaLimit = *b.QuotaLimit
-		}
 		if b.DebtFloorCalls != nil {
 			cur.DebtFloorCalls = *b.DebtFloorCalls
-		}
-		if b.DebtFloorCredit != nil {
-			cur.DebtFloorCredit = *b.DebtFloorCredit
 		}
 		newUsername := strings.ToLower(strings.TrimSpace(cur.Username))
 		if b.Username != nil {

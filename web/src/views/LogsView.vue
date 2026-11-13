@@ -27,10 +27,6 @@ function fmtTime(ts: number) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-function money(v: number) {
-  return (v ?? 0).toFixed(4)
-}
-
 function baseParams(): Record<string, string | number> {
   const params: Record<string, string | number> = {}
   if (status.value) params.status = status.value
@@ -153,9 +149,6 @@ onMounted(async () => {
       <el-table-column label="Tokens" width="90" class-name="nowrap">
         <template #default="{ row }">{{ row.total_tokens }}</template>
       </el-table-column>
-      <el-table-column label="Cost ($)" width="100" class-name="nowrap">
-        <template #default="{ row }">{{ money(row.cost) }}</template>
-      </el-table-column>
       <el-table-column prop="latency_ms" label="Latency (ms)" width="100" class-name="nowrap" />
       <el-table-column label="Status" width="90">
         <template #default="{ row }">
@@ -187,7 +180,6 @@ onMounted(async () => {
           <el-tag :type="detail.row.status === 'success' ? 'success' : 'danger'" size="small">{{ detail.row.status }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="Tokens">{{ detail.row.total_tokens }} ({{ detail.row.prompt_tokens }} / {{ detail.row.completion_tokens }})</el-descriptions-item>
-        <el-descriptions-item label="Cost ($)">{{ money(detail.row.cost) }}</el-descriptions-item>
         <el-descriptions-item label="Latency">{{ detail.row.latency_ms }} ms</el-descriptions-item>
         <el-descriptions-item v-if="detail.row.error_code" label="Error">
           <pre class="error-detail">{{ detail.row.error_code }}</pre>

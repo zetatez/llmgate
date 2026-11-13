@@ -115,8 +115,8 @@ func handleRealtime(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gin.Hand
 			LatencyMS:     dur.Milliseconds(),
 			CreatedAt:     models.Now(),
 		}
-		finalizeLog(a, bus, le, cand.Route.PriceInput, cand.Route.PriceOutput)
-		_ = store.ApplyUsage(a.DB, user.ID, key.UserID, tokens, 0, le.Cost)
+		finalizeLog(a, bus, le)
+		_ = store.ApplyUsage(a.DB, user.ID, key.UserID, tokens, 0)
 	}
 }
 

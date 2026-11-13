@@ -28,15 +28,8 @@ async function copyGatewayBase(url: string) {
   if (await copy(url, 'gw:' + url)) ElMessage.success('Copied')
 }
 
-// 透支额度（美元）：负数显示为 -$50.00
-function creditLimit(v: number | undefined): string {
-  const n = v ?? 0
-  return n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`
-}
-
-
-const dialog = reactive({ visible: false, username: '', password: '', confirm: '', name: '', remark: '', quota_limit: 0, debt_floor_calls: -1000, debt_floor_credit: -50 })
-const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', quota_limit: 0, status: 1, debt_floor_calls: -1000, debt_floor_credit: -50 })
+const dialog = reactive({ visible: false, username: '', password: '', confirm: '', name: '', remark: '', debt_floor_calls: -1000 })
+const editDialog = reactive({ visible: false, id: 0, username: '', password: '', name: '', remark: '', status: 1, debt_floor_calls: -1000 })
 
 async function load() {
   loading.value = true
@@ -47,7 +40,7 @@ async function load() {
 
 // 打开新增用户弹窗（默认不限额度：0 = 无限）
 function openCreateUser() {
-  Object.assign(dialog, { visible: true, username: '', password: '', confirm: '', name: '', remark: '', quota_limit: 0, debt_floor_calls: -1000, debt_floor_credit: -50 })
+  Object.assign(dialog, { visible: true, username: '', password: '', confirm: '', name: '', remark: '', debt_floor_calls: -1000 })
 }
 
 const createdToken = reactive({ visible: false, username: '', token: '' })
@@ -59,9 +52,8 @@ async function create() {
   try {
     const u = await usersApi.create({
       name: dialog.name, remark: dialog.remark, username: dialog.username.trim(),
-      password: dialog.password, quota_limit: +dialog.quota_limit || 0,
+      password: dialog.password,
       debt_floor_calls: Math.round(+dialog.debt_floor_calls || 0),
-      debt_floor_credit: +dialog.debt_floor_credit || 0,
     })
     ElMessage.success('User created')
     dialog.visible = false
@@ -94,17 +86,16 @@ async function toggleUserStatus(u: User) {
 function openEdit(u: User) {
   Object.assign(editDialog, {
     visible: true, id: u.id, username: u.username, password: '', name: u.name, remark: u.remark,
-    quota_limit: u.quota_limit, status: u.status,
-    debt_floor_calls: u.debt_floor_calls ?? -1000, debt_floor_credit: u.debt_floor_credit ?? -50,
+    status: u.status,
+    debt_floor_calls: u.debt_floor_calls ?? -1000,
   })
 }
 
 async function saveEdit() {
   const payload: Record<string, unknown> = {
     username: editDialog.username, name: editDialog.name, remark: editDialog.remark,
-    quota_limit: +editDialog.quota_limit || 0, status: editDialog.status,
+    status: editDialog.status,
     debt_floor_calls: Math.round(+editDialog.debt_floor_calls || 0),
-    debt_floor_credit: +editDialog.debt_floor_credit || 0,
   }
   if (editDialog.password) {
     if (editDialog.password.length < 6) { ElMessage.warning('Password must be at least 6 characters'); return }
@@ -182,10 +173,6 @@ async function openDetails(u: User) {
   }
 }
 
-function money(v?: number) {
-  return (v ?? 0).toFixed(4)
-}
-
 onMounted(() => {
   load()
   loadGatewayBase()
@@ -237,11 +224,6 @@ onMounted(() => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Quota ($)" width="140">
-          <template #default="{ row }">
-            <span>{{ row.quota_used.toFixed(4) }} / {{ row.quota_limit ? row.quota_limit : 'unlimited' }}</span>
-          </template>
-        </el-table-column>
         <el-table-column label="Calls" width="80" align="right">
           <template #default="{ row }">
             <span :style="{ color: row.calls_balance < 0 ? '#c9808a' : '' }">{{ row.calls_balance }}</span>
@@ -250,12 +232,6 @@ onMounted(() => {
         <el-table-column label="Overdraft" width="110" align="right">
           <template #default="{ row }">
             <span>{{ row.debt_floor_calls }} calls</span>
-            <div class="u-sub">{{ creditLimit(row.debt_floor_credit) }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="Credit ($)" width="100" align="right">
-          <template #default="{ row }">
-            <span :style="{ color: row.credit_balance < 0 ? '#c9808a' : '' }">{{ row.credit_balance.toFixed(4) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="Status" width="80">
@@ -282,16 +258,9 @@ onMounted(() => {
         <el-form-item label="Confirm" required><el-input v-model="dialog.confirm" type="password" show-password /></el-form-item>
         <el-form-item label="Name"><el-input v-model="dialog.name" placeholder="display name (optional)" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="dialog.remark" /></el-form-item>
-        <el-form-item label="Quota limit ($)">
-          <el-input-number v-model="dialog.quota_limit" :min="0" :precision="4" />
-          <span class="tip">0 = unlimited</span>
-        </el-form-item>
         <el-form-item label="Overdraft (calls)">
           <el-input-number v-model="dialog.debt_floor_calls" :min="-100000" :max="0" />
           <span class="tip">negative = allowed debt</span>
-        </el-form-item>
-        <el-form-item label="Overdraft ($)">
-          <el-input-number v-model="dialog.debt_floor_credit" :min="-100000" :max="0" :precision="4" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -319,15 +288,9 @@ onMounted(() => {
         <el-form-item label="New Password"><el-input v-model="editDialog.password" type="password" show-password placeholder="leave empty to keep current" /></el-form-item>
         <el-form-item label="Name"><el-input v-model="editDialog.name" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="editDialog.remark" /></el-form-item>
-        <el-form-item label="Quota limit ($)">
-          <el-input-number v-model="editDialog.quota_limit" :min="0" :precision="4" />
-        </el-form-item>
         <el-form-item label="Overdraft (calls)">
           <el-input-number v-model="editDialog.debt_floor_calls" :min="-100000" :max="0" />
           <span class="tip">negative = allowed debt</span>
-        </el-form-item>
-        <el-form-item label="Overdraft ($)">
-          <el-input-number v-model="editDialog.debt_floor_credit" :min="-100000" :max="0" :precision="4" />
         </el-form-item>
         <el-form-item label="Status">
           <el-switch v-model="editDialog.status" :active-value="1" :inactive-value="0" active-text="Enabled" inactive-text="Disabled" />
@@ -344,15 +307,11 @@ onMounted(() => {
         <template v-if="details.data">
           <el-descriptions :column="3" border size="small" class="mb">
             <el-descriptions-item label="Name">{{ details.data.user.name || '—' }}</el-descriptions-item>
-            <el-descriptions-item label="Quota ($)">
-              {{ money(details.data.user.quota_used) }} / {{ details.data.user.quota_limit ? money(details.data.user.quota_limit) : 'unlimited' }}
-            </el-descriptions-item>
             <el-descriptions-item label="Status">
               <el-tag :type="details.data.user.status === 1 ? 'success' : 'info'" size="small">{{ details.data.user.status === 1 ? 'Enabled' : 'Disabled' }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="Today req">{{ details.data.today.total_requests }}</el-descriptions-item>
             <el-descriptions-item label="Total req">{{ details.data.total.total_requests }}</el-descriptions-item>
-            <el-descriptions-item label="Total cost ($)">{{ money(details.data.total.cost) }}</el-descriptions-item>
             <el-descriptions-item label="Created">{{ fmtDate(details.data.user.created_at) }}</el-descriptions-item>
             <el-descriptions-item label="Last login">{{ fmtDateTime(details.data.user.last_login_at, 'never') }}</el-descriptions-item>
           </el-descriptions>
@@ -383,7 +342,6 @@ onMounted(() => {
                 <el-table-column prop="model" label="Model" min-width="140" show-overflow-tooltip />
                 <el-table-column prop="requests" label="Requests" width="100" sortable />
                 <el-table-column prop="total_tokens" label="Tokens" width="110" sortable />
-                <el-table-column label="Cost ($)" width="100" sortable><template #default="{ row }">{{ money(row.cost) }}</template></el-table-column>
               </el-table>
               <el-empty v-if="!details.data.by_model.length" description="No usage" />
             </el-tab-pane>

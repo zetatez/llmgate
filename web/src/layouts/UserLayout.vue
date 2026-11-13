@@ -15,10 +15,9 @@ const menus = [
   { path: '/user/overview', label: 'Overview', icon: 'Odometer' },
   { path: '/user/channels', label: 'Channels', icon: 'Connection' },
   { path: '/user/routes', label: 'Routes', icon: 'Share' },
-  { path: '/user/pricing', label: 'Pricing', icon: 'Coin' },
   { path: '/user/account', label: 'Account', icon: 'User' },
   { path: '/user/members', label: 'Members', icon: 'UserFilled' },
-  { path: '/user/credits', label: 'Billing', icon: 'Wallet' },
+  { path: '/user/billing', label: 'Billing', icon: 'Wallet' },
   { path: '/user/logs', label: 'Logs', icon: 'Document' },
 ]
 

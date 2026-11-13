@@ -99,9 +99,9 @@ func handleDeepgramListenHTTP(a *app.App, bus *logbus.Bus, pen *router.Penalizer
 			} else {
 				logEntry.ErrorCode = oneLine(string(res.Body), 200)
 			}
-			finalizeLog(a, bus, logEntry, res.Route.PriceInput, res.Route.PriceOutput)
+			finalizeLog(a, bus, logEntry)
 			if logEntry.Status == "success" {
-				_ = store.ApplyUsage(a.DB, user.ID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens, logEntry.Cost)
+				_ = store.ApplyUsage(a.DB, user.ID, logEntry.KeyOwnerID, logEntry.PromptTokens, logEntry.CompletionTokens)
 			}
 			resCT := res.ContentType
 			if resCT == "" {
@@ -113,7 +113,7 @@ func handleDeepgramListenHTTP(a *app.App, bus *logbus.Bus, pen *router.Penalizer
 
 		logEntry.Status = "error"
 		logEntry.ErrorCode = oneLine(ferr.Error(), 200)
-		finalizeLog(a, bus, logEntry, nil, nil)
+		finalizeLog(a, bus, logEntry)
 		code, msg := mapRouteError(ferr, model)
 		if retryAfter := retryAfterFor(code); retryAfter != "" {
 			c.Header("Retry-After", retryAfter)
@@ -199,7 +199,7 @@ func handleDeepgramListen(a *app.App, bus *logbus.Bus, pen *router.Penalizer) gi
 			LatencyMS:     dur.Milliseconds(),
 			CreatedAt:     models.Now(),
 		}
-		finalizeLog(a, bus, le, cand.Route.PriceInput, cand.Route.PriceOutput)
-		_ = store.ApplyUsage(a.DB, user.ID, key.UserID, tokens, 0, le.Cost)
+		finalizeLog(a, bus, le)
+		_ = store.ApplyUsage(a.DB, user.ID, key.UserID, tokens, 0)
 	}
 }

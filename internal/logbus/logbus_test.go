@@ -48,7 +48,7 @@ func waitLogs(t *testing.T, db *sql.DB, want int) {
 func mkLog() *models.RequestLog {
 	return &models.RequestLog{
 		UserID: 1, DisplayModel: "m", ChannelID: 2, KeyID: 3, UpstreamModel: "up",
-		PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30, Cost: 0.5,
+		PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30,
 		LatencyMS: 100, Status: "success", Stream: 0, CreatedAt: 123456,
 	}
 }

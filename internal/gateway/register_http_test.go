@@ -33,9 +33,9 @@ func TestGatewayAuthInvalidToken(t *testing.T) {
 	}
 }
 
-func TestGatewayAuthQuotaExceeded(t *testing.T) {
+func TestGatewayAuthCallsExhausted(t *testing.T) {
 	e := newTestEnv(t, "")
-	e.setQuota(100, 200)
+	e.setCallsSpent(2000)
 	rec := e.doAuth(http.MethodGet, "/v1/models", "")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("want 403, got %d", rec.Code)

@@ -91,7 +91,6 @@ func registerUserPortal(g *gin.RouterGroup, a *app.App, syncNow func() map[strin
 
 	authed.GET("/logs", userLogs(a))
 	authed.GET("/logs/count", userLogsCount(a))
-	authed.GET("/pricing", listPricing(a))
 	authed.GET("/members", listMembers(a))
 	authed.GET("/gateway-endpoints", gatewayEndpoints(a))
 	if syncNow != nil {
@@ -197,37 +196,30 @@ func currentUser(c *gin.Context) *models.User {
 
 // portalUserView 用户端展示的自身信息。
 type portalUserView struct {
-	ID            int64   `json:"id"`
-	Username      string  `json:"username"`
-	Name          string  `json:"name"`
-	QuotaLimit    float64 `json:"quota_limit"`
-	QuotaUsed     float64 `json:"quota_used"`
-	Status        int     `json:"status"`
-	LastLoginAt   int64   `json:"last_login_at"`
-	GatewayPrefix string  `json:"gateway_prefix"`
-	// 共享池账本
-	CallsSpent      int64   `json:"calls_spent"`
-	CallsEarned     int64   `json:"calls_earned"`
-	CallsBalance    int64   `json:"calls_balance"`
-	InSpent         int64   `json:"in_spent"`
-	OutSpent        int64   `json:"out_spent"`
-	InServed        int64   `json:"in_served"`
-	OutServed       int64   `json:"out_served"`
-	CreditSpent     float64 `json:"credit_spent"`
-	CreditEarned    float64 `json:"credit_earned"`
-	CreditBalance   float64 `json:"credit_balance"`
-	DebtFloorCalls  int64   `json:"debt_floor_calls"`
-	DebtFloorCredit float64 `json:"debt_floor_credit"`
+	ID            int64  `json:"id"`
+	Username      string `json:"username"`
+	Name          string `json:"name"`
+	Status        int    `json:"status"`
+	LastLoginAt   int64  `json:"last_login_at"`
+	GatewayPrefix string `json:"gateway_prefix"`
+	// 共享池账本：仅调用次数与上传/下载 token
+	CallsSpent     int64 `json:"calls_spent"`
+	CallsEarned    int64 `json:"calls_earned"`
+	CallsBalance   int64 `json:"calls_balance"`
+	InSpent        int64 `json:"in_spent"`
+	OutSpent       int64 `json:"out_spent"`
+	InServed       int64 `json:"in_served"`
+	OutServed      int64 `json:"out_served"`
+	DebtFloorCalls int64 `json:"debt_floor_calls"`
 }
 
 func toPortalUser(u *models.User) portalUserView {
 	return portalUserView{
 		ID: u.ID, Username: u.Username, Name: u.Name,
-		QuotaLimit: u.QuotaLimit, QuotaUsed: u.QuotaUsed, Status: u.Status, LastLoginAt: u.LastLoginAt,
+		Status: u.Status, LastLoginAt: u.LastLoginAt,
 		CallsSpent: u.CallsSpent, CallsEarned: u.CallsEarned, CallsBalance: u.CallsEarned - u.CallsSpent + u.BaseCalls,
 		InSpent: u.InSpent, OutSpent: u.OutSpent, InServed: u.InServed, OutServed: u.OutServed,
-		CreditSpent: u.CreditSpent, CreditEarned: u.CreditEarned, CreditBalance: u.CreditEarned - u.CreditSpent + u.BaseCredit,
-		DebtFloorCalls: u.DebtFloorCalls, DebtFloorCredit: u.DebtFloorCredit,
+		DebtFloorCalls: u.DebtFloorCalls,
 	}
 }
 

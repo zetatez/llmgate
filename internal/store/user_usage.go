@@ -18,8 +18,7 @@ func UserUsageByDay(db *sql.DB, userID int64, days int) ([]UsagePoint, error) {
 			SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
 			SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END),
 			SUM(total_tokens),
-			SUM(prompt_tokens),
-			SUM(cost)
+			SUM(prompt_tokens)
 		FROM request_logs
 		WHERE user_id = ? AND created_at >= ?
 		GROUP BY day
@@ -32,12 +31,10 @@ func UserUsageByDay(db *sql.DB, userID int64, days int) ([]UsagePoint, error) {
 	for rows.Next() {
 		var p UsagePoint
 		var req, suc, errs, tok, ptok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&p.Date, &req, &suc, &errs, &tok, &ptok, &cost); err != nil {
+		if err := rows.Scan(&p.Date, &req, &suc, &errs, &tok, &ptok); err != nil {
 			return nil, err
 		}
 		p.Requests, p.Success, p.Errors, p.TotalTokens, p.PromptTokens = req.Int64, suc.Int64, errs.Int64, tok.Int64, ptok.Int64
-		p.Cost = cost.Float64
 		m[p.Date] = p
 	}
 	out := make([]UsagePoint, 0, days)
@@ -62,8 +59,7 @@ func UserUsageSummary(db *sql.DB, userID int64, from int64) (UsageSummary, error
 			SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END),
 			SUM(total_tokens),
 			SUM(prompt_tokens),
-			SUM(completion_tokens),
-			SUM(cost)
+			SUM(completion_tokens)
 		FROM request_logs WHERE user_id = ?`
 	args := []any{userID}
 	if from > 0 {
@@ -71,14 +67,12 @@ func UserUsageSummary(db *sql.DB, userID int64, from int64) (UsageSummary, error
 		args = append(args, from)
 	}
 	var req, suc, errs, tok, ptok, ctok sql.NullInt64
-	var cost sql.NullFloat64
-	err := db.QueryRow(q, args...).Scan(&req, &suc, &errs, &tok, &ptok, &ctok, &cost)
+	err := db.QueryRow(q, args...).Scan(&req, &suc, &errs, &tok, &ptok, &ctok)
 	if err != nil && err != sql.ErrNoRows {
 		return s, err
 	}
 	s.TotalRequests, s.Success, s.Errors = req.Int64, suc.Int64, errs.Int64
 	s.TotalTokens, s.PromptTokens, s.CompletionTokens = tok.Int64, ptok.Int64, ctok.Int64
-	s.Cost = cost.Float64
 	return s, nil
 }
 
@@ -90,8 +84,7 @@ func UserUsageByModel(db *sql.DB, userID, from, to int64) ([]ModelUsage, error) 
 			COUNT(*),
 			SUM(CASE WHEN status='success' THEN total_tokens ELSE 0 END),
 			SUM(CASE WHEN status='success' THEN prompt_tokens ELSE 0 END),
-			SUM(CASE WHEN status='success' THEN completion_tokens ELSE 0 END),
-			SUM(CASE WHEN status='success' THEN cost ELSE 0 END)
+			SUM(CASE WHEN status='success' THEN completion_tokens ELSE 0 END)
 		FROM request_logs WHERE user_id = ?`
 	if from > 0 {
 		q += ` AND created_at >= ?`
@@ -111,12 +104,10 @@ func UserUsageByModel(db *sql.DB, userID, from, to int64) ([]ModelUsage, error) 
 	for rows.Next() {
 		var m ModelUsage
 		var req, ttok, ptok, ctok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&m.Model, &req, &ttok, &ptok, &ctok, &cost); err != nil {
+		if err := rows.Scan(&m.Model, &req, &ttok, &ptok, &ctok); err != nil {
 			return nil, err
 		}
 		m.Requests, m.TotalTokens, m.PromptTokens, m.CompletionToks = req.Int64, ttok.Int64, ptok.Int64, ctok.Int64
-		m.Cost = cost.Float64
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -162,7 +153,7 @@ func UserUsageByHour(db *sql.DB, userID int64, hours int) ([]UsageHourPoint, err
 	startHour := time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, start.Location())
 	rows, err := db.Query(`
 		SELECT strftime('%Y-%m-%d %H', created_at, 'unixepoch', 'localtime') AS hr,
-			COUNT(*), SUM(total_tokens), SUM(cost)
+			COUNT(*), SUM(total_tokens)
 		FROM request_logs WHERE user_id = ? AND created_at >= ? GROUP BY hr`, userID, startHour.Unix())
 	if err != nil {
 		return nil, err
@@ -172,11 +163,10 @@ func UserUsageByHour(db *sql.DB, userID int64, hours int) ([]UsageHourPoint, err
 	for rows.Next() {
 		var hr string
 		var req, tok sql.NullInt64
-		var cost sql.NullFloat64
-		if err := rows.Scan(&hr, &req, &tok, &cost); err != nil {
+		if err := rows.Scan(&hr, &req, &tok); err != nil {
 			return nil, err
 		}
-		m[hr] = UsageHourPoint{Requests: req.Int64, Tokens: tok.Int64, Cost: cost.Float64}
+		m[hr] = UsageHourPoint{Requests: req.Int64, Tokens: tok.Int64}
 	}
 	out := make([]UsageHourPoint, 0, hours)
 	for i := 0; i < hours; i++ {
@@ -235,7 +225,7 @@ func UserRecentFailures(db *sql.DB, userID int64, n int) ([]*models.RequestLog, 
 	for rows.Next() {
 		l := &models.RequestLog{}
 		if err := rows.Scan(&l.ID, &l.UserID, &l.UserName, &l.DisplayModel, &l.ChannelID, &l.KeyID, &l.KeyOwnerID, &l.ChannelName, &l.UpstreamModel,
-			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.Cost, &l.LatencyMS,
+			&l.PromptTokens, &l.CompletionTokens, &l.TotalTokens, &l.LatencyMS,
 			&l.Status, &l.ErrorCode, &l.Stream, &l.CreatedAt); err != nil {
 			return nil, err
 		}

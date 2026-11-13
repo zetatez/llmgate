@@ -14,7 +14,7 @@ func TestUserCRUD(t *testing.T) {
 		t.Fatalf("expected no users, got %d", len(list))
 	}
 
-	u := &models.User{Name: "u1", Remark: "r", TokenHash: "h1", TokenEnc: "e1", QuotaLimit: 100, Status: 1}
+	u := &models.User{Name: "u1", Remark: "r", TokenHash: "h1", TokenEnc: "e1", Status: 1}
 	id, err := CreateUser(db, u)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -27,7 +27,7 @@ func TestUserCRUD(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("get user: %+v err %v", got, err)
 	}
-	if got.Name != "u1" || got.QuotaLimit != 100 || got.QuotaUsed != 0 || got.TokenHash != "h1" || got.TokenEnc != "e1" {
+	if got.Name != "u1" || got.TokenHash != "h1" || got.TokenEnc != "e1" {
 		t.Fatalf("user mismatch: %+v", got)
 	}
 
@@ -51,7 +51,6 @@ func TestUserCRUD(t *testing.T) {
 
 	// 更新。
 	got.Name = "u1-upd"
-	got.QuotaLimit = 200
 	got.Status = 0
 	if err := UpdateUser(db, got); err != nil {
 		t.Fatalf("update user: %v", err)
@@ -60,7 +59,7 @@ func TestUserCRUD(t *testing.T) {
 		t.Fatal("expected error updating missing user")
 	}
 	up, _ := GetUser(db, id)
-	if up.Name != "u1-upd" || up.QuotaLimit != 200 || up.Status != 0 {
+	if up.Name != "u1-upd" || up.Status != 0 {
 		t.Fatalf("updated user mismatch: %+v", up)
 	}
 
@@ -85,43 +84,47 @@ func TestUserCRUD(t *testing.T) {
 	}
 }
 
-func TestAddUserQuota(t *testing.T) {
+func TestApplyUsage(t *testing.T) {
 	db := setupDB(t)
 
-	// 无上限用户（limit=0）。
-	u0 := &models.User{Name: "free", TokenHash: "h-free", QuotaLimit: 0}
-	id0, err := CreateUser(db, u0)
+	consumer := &models.User{Name: "consumer", TokenHash: "h-consumer", Status: 1}
+	consumerID, err := CreateUser(db, consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := AddUserQuota(db, id0, 10.5); err != nil {
-		t.Fatalf("add quota free: %v", err)
-	}
-	gu, _ := GetUser(db, id0)
-	if gu.QuotaUsed != 10.5 {
-		t.Fatalf("quota_used should be 10.5, got %v", gu.QuotaUsed)
-	}
-
-	// 有上限用户：可累加直到达到上限。
-	u1 := &models.User{Name: "cap", TokenHash: "h-cap", QuotaLimit: 100}
-	id1, err := CreateUser(db, u1)
+	owner := &models.User{Name: "owner", TokenHash: "h-owner", Status: 1}
+	ownerID, err := CreateUser(db, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := AddUserQuota(db, id1, 60); err != nil {
-		t.Fatalf("add quota cap: %v", err)
+
+	if err := ApplyUsage(db, consumerID, ownerID, 100, 20); err != nil {
+		t.Fatalf("apply usage: %v", err)
 	}
-	if err := AddUserQuota(db, id1, 50); err != nil {
-		t.Fatalf("add quota over cap: %v", err)
+	got, _ := GetUser(db, consumerID)
+	if got.CallsSpent != 1 || got.InSpent != 100 || got.OutSpent != 20 {
+		t.Fatalf("consumer billing = %+v", got)
 	}
-	gc, _ := GetUser(db, id1)
-	// 第二次 60+50>100，仅累加 60（60+40<=100 不成立），故为 60。
-	if gc.QuotaUsed != 60 {
-		t.Fatalf("expected capped quota 60, got %v", gc.QuotaUsed)
+	gotOwner, _ := GetUser(db, ownerID)
+	if gotOwner.CallsEarned != 1 || gotOwner.InServed != 100 || gotOwner.OutServed != 20 {
+		t.Fatalf("owner billing = %+v", gotOwner)
 	}
 
-	// 不存在用户。
-	if err := AddUserQuota(db, 99999, 1); err == nil {
-		t.Fatal("expected error adding quota for missing user")
+	// 自用：两侧相抵，但计数仍各 +1（用于展示）。
+	if err := ApplyUsage(db, consumerID, consumerID, 5, 5); err != nil {
+		t.Fatalf("apply self usage: %v", err)
+	}
+	got, _ = GetUser(db, consumerID)
+	if got.CallsSpent != 2 || got.CallsEarned != 1 || got.InSpent != 105 || got.InServed != 5 {
+		t.Fatalf("self usage billing = %+v", got)
+	}
+
+	// 平台 Key（owner=0）只累计消费者。
+	if err := ApplyUsage(db, consumerID, 0, 1, 2); err != nil {
+		t.Fatalf("apply platform usage: %v", err)
+	}
+	got, _ = GetUser(db, consumerID)
+	if got.CallsSpent != 3 || got.InSpent != 106 || got.OutSpent != 27 {
+		t.Fatalf("platform usage billing = %+v", got)
 	}
 }
