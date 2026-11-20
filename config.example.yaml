@@ -1,0 +1,33 @@
+# llmgate 配置示例：复制为 config.yaml 后按需修改（config.yaml 已被 gitignore）。
+# 所有项均可省略，省略即用内置默认值；修改后执行 make restart 生效。
+
+# 管理端登录令牌（登录页选 Admin 时填写）。留空则首次启动自动生成并打印到日志。
+admin_token: ""
+
+# 上游 API Key 加密种子（32 字节 hex）。留空则首次启动生成；固定它可避免重启后已存 Key 解不开。
+encrypt_seed: ""
+
+# HTTP 监听地址。容器内默认 :3210（由镜像 ENV 提供），本地 go run 默认 :8080。
+# http_addr: ":3210"
+
+# SQLite 数据库文件路径。容器内默认 /data/llmgate.db，本地默认 ./data/llmgate.db。
+# db_path: /data/llmgate.db
+
+# OpenAI 兼容网关前缀，默认 /（即对外 /v1）。
+# gateway_prefix: /
+
+# gin 日志级别：debug / release。
+# log_level: release
+
+# 应用时区。
+# tz: Asia/Shanghai
+
+# 登录会话有效期（小时）。
+# session_ttl_hours: 720
+
+# 上游出站代理（socks5:// 或 http://）；留空直连。
+# proxy: socks5://127.0.0.1:7891
+
+# 受信反向代理（CIDR/IP）。留空表示不信任任何代理，不采信 X-Forwarded-For。
+# trusted_proxies:
+#   - 127.0.0.1

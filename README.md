@@ -42,8 +42,8 @@ flowchart LR
 ## Deploy
 
 ```bash
-cp .env.example .env           # set LGM_ADMIN_TOKEN
-docker compose up -d --build   # open http://localhost:3210
+cp config.example.yaml config.yaml   # optional: set admin_token / encrypt_seed
+docker compose up -d --build         # open http://localhost:3210
 ```
 
 Setup: sign in with the admin token, create a channel and (optionally) test it, then create user accounts under **Users**. A user then signs in with their username and password, adds their own API keys under **My API Keys**, and issues a gateway token under **My Tokens**.
@@ -127,7 +127,9 @@ Upstream support is required for each endpoint; if a provider only offers chat-b
 
 ## Configuration
 
-Main environment variables are documented in [`.env.example`](.env.example) (`LGM_ADMIN_TOKEN`, `LGM_HTTP_ADDR`, `LGM_PROXY`, ...). Circuit-breaker parameters can be tuned in the admin Settings.
+Runtime settings live in `config.yaml` (see [`config.example.yaml`](config.example.yaml)); it is mounted into the container read-only, and changes take effect after `docker compose restart`. Every key is optional and falls back to a built-in default: `admin_token`, `encrypt_seed`, `http_addr`, `db_path`, `gateway_prefix`, `log_level`, `tz`, `session_ttl_hours`, `proxy`, `trusted_proxies`. A typo in a key name is a startup error.
+
+The legacy `LGM_*` environment variables are still read for backward compatibility, but the config file takes precedence. Circuit-breaker parameters can be tuned in the admin Settings.
 
 ## Docs
 

@@ -34,6 +34,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	if cfg.Source != "" {
+		log.Printf("config: %s", cfg.Source)
+	}
 
 	// 设置应用时区（SQLite 'localtime' 依赖进程 TZ 环境变量，需与 LGM_TZ 保持一致）
 	if loc, err := time.LoadLocation(cfg.TZ); err == nil {

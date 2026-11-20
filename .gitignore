@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# 本地配置（含令牌与加密种子）
+config.yaml
+
 # 前端产物
 web/node_modules
 web/dist

@@ -3,22 +3,8 @@ services:
     build:
       context: .
     network_mode: host
-    environment:
-      - LGM_ADMIN_TOKEN=${LGM_ADMIN_TOKEN:-}
-      - LGM_ENCRYPT_SEED=${LGM_ENCRYPT_SEED:-}
-      - LGM_GATEWAY_PREFIX=${LGM_GATEWAY_PREFIX:-/}
-      - LGM_HTTP_ADDR=${LGM_HTTP_ADDR:-:3210}
-      - LGM_LOG_LEVEL=${LGM_LOG_LEVEL:-release}
-      - LGM_TZ=${LGM_TZ:-Asia/Shanghai}
-      - TZ=${LGM_TZ:-Asia/Shanghai}
-      - LGM_PROXY=${LGM_PROXY:-}
-      - LGM_TRUSTED_PROXIES=${LGM_TRUSTED_PROXIES:-}
-      - LGM_SESSION_TTL_HOURS=${LGM_SESSION_TTL_HOURS:-720}
-      - LGM_DB_PATH=/data/llmgate.db
     volumes:
       - ./data:/data
+      - ./config.yaml:/app/config.yaml:ro
     restart: always
-    # 停机宽限：给长流式足够的自然收尾时间，避免 docker 在默认 10s 后 SIGKILL 掐断在途流。
-    # 服务在流跑完后会正常退出（无需等满该时长）；仅当确实有长流时才等待其自然结束。
-    # 应大于应用内 LGM_SHUTDOWN_GRACE（默认 280s），否则会被 docker 抢先 SIGKILL。
     stop_grace_period: 10s

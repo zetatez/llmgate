@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func unsetAll(t *testing.T) {
 	t.Helper()
@@ -94,5 +97,89 @@ func TestLoadPrefixValidation(t *testing.T) {
 	unsetAll(t)
 	if cfg, err := Load(); err != nil || cfg.GatewayPrefix != "/" {
 		t.Fatalf("empty prefix should default to /, got %q err=%v", cfg.GatewayPrefix, err)
+	}
+}
+
+func writeConfigFile(t *testing.T, body string) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile(ConfigPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+func TestLoadFromFile(t *testing.T) {
+	unsetAll(t)
+	writeConfigFile(t, `
+admin_token: "filetok"
+encrypt_seed: "deadbeef"
+http_addr: ":1234"
+log_level: debug
+trusted_proxies:
+  - 10.0.0.1
+  - 127.0.0.1/8
+session_ttl_hours: 12
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Source != ConfigPath {
+		t.Errorf("Source = %q, want %q", cfg.Source, ConfigPath)
+	}
+	if cfg.AdminToken != "filetok" || cfg.EncryptSeed != "deadbeef" {
+		t.Errorf("secrets from file not applied: %+v", cfg)
+	}
+	if cfg.HTTPAddr != ":1234" || cfg.LogLevel != "debug" || cfg.SessionTTLHours != 12 {
+		t.Errorf("scalars from file not applied: %+v", cfg)
+	}
+	want := []string{"10.0.0.1", "127.0.0.1/8"}
+	if len(cfg.TrustedProxies) != len(want) {
+		t.Fatalf("TrustedProxies = %v, want %v", cfg.TrustedProxies, want)
+	}
+	for i := range want {
+		if cfg.TrustedProxies[i] != want[i] {
+			t.Fatalf("TrustedProxies[%d] = %q, want %q", i, cfg.TrustedProxies[i], want[i])
+		}
+	}
+	// 文件里没写的字段保持默认
+	if cfg.DBPath != "./data/llmgate.db" || cfg.GatewayPrefix != "/" || cfg.TZ != "Asia/Shanghai" {
+		t.Errorf("untouched defaults changed: %+v", cfg)
+	}
+}
+
+func TestFileOverridesEnv(t *testing.T) {
+	unsetAll(t)
+	t.Setenv("LGM_LOG_LEVEL", "release")
+	writeConfigFile(t, "log_level: debug\n")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.LogLevel != "debug" {
+		t.Errorf("LogLevel = %q, want debug (file wins over env)", cfg.LogLevel)
+	}
+}
+
+func TestFileRejectsUnknownField(t *testing.T) {
+	unsetAll(t)
+	writeConfigFile(t, "admin_tokne: typo\n")
+	if _, err := Load(); err == nil {
+		t.Fatal("unknown field should be rejected")
+	}
+}
+
+func TestMissingFileUsesDefaults(t *testing.T) {
+	unsetAll(t)
+	t.Chdir(t.TempDir())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Source != "" {
+		t.Errorf("Source = %q, want empty", cfg.Source)
+	}
+	if cfg.HTTPAddr != ":8080" {
+		t.Errorf("HTTPAddr = %q, want default :8080", cfg.HTTPAddr)
 	}
 }
