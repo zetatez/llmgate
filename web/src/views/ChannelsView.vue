@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { channelsApi, portalApi, syncApi, usersApi } from '../api'
 import type { Channel, ChannelKeyItem, User, UserChannel, UserKey } from '../api'
@@ -18,6 +18,8 @@ const list = ref<Channel[]>([])
 const loading = ref(false)
 const selected = ref<Channel | null>(null)
 const users = ref<User[]>([])
+// 渠道表实例：程序化选中首行时用 setCurrentRow 同步高亮
+const channelTable = ref<{ setCurrentRow: (row: Channel) => void } | null>(null)
 
 const channelDialog = reactive({ visible: false, editing: false, id: 0, name: '', base_url: '', adapter: 'openai', priority: 0, weight: 1, timeout_ms: 60000, enabled: 1, keys: '', headers: '', note: '', mode: 'create' as 'reuse' | 'create', reuseId: 0 })
 
@@ -374,7 +376,19 @@ onMounted(async () => {
   } else {
     loadUsers()
   }
-  load()
+  try {
+    await load()
+  } catch {
+    return // 列表加载失败时保持未选中，显示占位卡片
+  }
+  // 首次加载后默认选中第一个渠道，Keys 面板与日志过滤随之就位
+  await nextTick()
+  const first = list.value[0]
+  if (!first || selected.value) return
+  // 先同步表格高亮（current-change 会走上面的 selectChannel 并加载 Key），
+  // 未能触发时再兜底选中一次，保证只加载一次 Key。
+  channelTable.value?.setCurrentRow(first)
+  if (selected.value !== first) selectChannel(first)
 })
 </script>
 
@@ -405,6 +419,7 @@ onMounted(async () => {
             </div>
           </template>
           <el-table
+            ref="channelTable"
             v-loading="loading"
             :data="list"
             size="small"

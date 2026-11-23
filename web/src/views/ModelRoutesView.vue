@@ -302,8 +302,11 @@ onMounted(load)
 
 <template>
   <div>
+    <!-- 上下两段：Synced Models 固定 62% 视口高度，Custom Routes 吃满剩余空间 -->
+    <div class="routes-page">
+    <section class="routes-synced">
     <!-- 自动同步的模型路由 -->
-    <el-card shadow="never">
+    <el-card shadow="never" class="route-card">
       <template #header>
         <div class="head">
           <span>Synced Models</span>
@@ -327,11 +330,12 @@ onMounted(load)
         </el-check-tag>
       </div>
 
+      <div class="table-wrap">
       <el-table
         v-loading="loading"
         :data="paged"
         size="small"
-        max-height="60vh"
+        height="100%"
         row-key="display_name"
         :expand-row-keys="expandedKeys"
         default-sort="{ prop: 'display_name', order: 'ascending' }"
@@ -383,6 +387,7 @@ onMounted(load)
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <el-alert v-if="!filtered.length && !loading" class="mt" title="No matching routes." type="info" :closable="false" />
       <el-alert v-if="statusFilter === 'inactive' && filtered.length && !loading" class="mt" title="No active channel; enable the channel or route." type="warning" :closable="false" />
@@ -398,16 +403,19 @@ onMounted(load)
         />
       </div>
     </el-card>
+    </section>
 
+    <section class="routes-custom">
     <!-- 自定义路由分组（一个名字挂多个渠道×上游） -->
-    <el-card shadow="never" class="mt">
+    <el-card shadow="never" class="route-card">
       <template #header>
         <div class="head">
           <span>Custom Routes</span>
           <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCustomCreate">New Custom Route</el-button>
         </div>
       </template>
-      <el-table v-loading="loading" :data="customGroups" size="small" row-key="display_name" max-height="50vh">
+      <div class="table-wrap">
+      <el-table v-loading="loading" :data="customGroups" size="small" row-key="display_name" height="100%">
             <el-table-column type="expand">
               <template #default="{ row }">
                 <el-table :data="row.routes" size="small" class="inner-table">
@@ -448,9 +456,12 @@ onMounted(load)
               </template>
             </el-table-column>
       </el-table>
+      </div>
       <el-alert v-if="!customGroups.length && !loading" class="mt" title="No custom routes yet." type="info" :closable="false" />
       <p class="tip-line">Upstreams are tried by priority/weight; unavailable ones are skipped.</p>
     </el-card>
+    </section>
+    </div>
 
     <!-- 自定义路由：新增/编辑 -->
     <el-dialog v-model="customDialog.visible" :title="customDialog.editing ? 'Edit Custom Route' : 'New Custom Route'" width="900px">
@@ -531,6 +542,23 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* 视口锁定：视口减去顶栏(32px)与 .main 上下内边距(2×16px) = 64px */
+.routes-page { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 64px); min-height: 560px; }
+/* Synced Models 固定 62%，Custom Routes 吃剩余空间 */
+.routes-synced { flex: 0 0 62%; min-height: 0; display: flex; flex-direction: column; }
+.routes-custom { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.route-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.route-card :deep(.el-card__body) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* 表格撑满卡片剩余空间并内部滚动；工具栏/提示/分页保持固定高度 */
+.table-wrap { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.vendor-bar, .routes-synced .el-alert, .routes-synced .pager,
+.routes-custom .el-alert, .routes-custom .tip-line { flex-shrink: 0; }
+/* 窄屏：取消视口锁定，两表各 40vh，避免被压成 0 */
+@media (max-width: 900px) {
+  .routes-page { height: auto; min-height: 0; }
+  .routes-synced, .routes-custom { flex: 0 0 auto; }
+  .table-wrap { flex: 0 0 auto; height: 40vh; overflow: visible; }
+}
 .head { display: flex; justify-content: space-between; align-items: center; }
 .vendor-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
 .vendor-bar :deep(.el-check-tag) { font-size: 11px; padding: 2px 7px; line-height: 18px; }
