@@ -17,7 +17,6 @@ const search = ref('')
 const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
 const vendor = ref('all')
 const expandedKeys = ref<string[]>([])
-const activeTab = ref('synced')
 const page = ref(1)
 const pageSize = ref(20)
 
@@ -35,7 +34,7 @@ interface Group {
 const groups = computed<Group[]>(() => {
   const m = new Map<string, ModelRoute[]>()
   for (const r of list.value) {
-    // 自定义路由只在 Custom Routes 标签页展示，不混入 Synced Models
+    // 自定义路由只在 Custom Routes 区块展示，不混入 Synced Models
     if (isCustomRoute(r)) continue
     if (!m.has(r.display_name)) m.set(r.display_name, [])
     m.get(r.display_name)!.push(r)
@@ -303,43 +302,41 @@ onMounted(load)
 
 <template>
   <div>
-    <el-tabs v-model="activeTab">
-      <!-- Tab1：自动同步的模型路由 -->
-      <el-tab-pane label="Synced Models" name="synced">
-        <el-card shadow="never">
-          <template #header>
-            <div class="head">
-              <span />
-              <div>
-                <el-input v-model="search" placeholder="Search model / channel / upstream model" clearable style="width: 260px" class="mr" />
-                <el-radio-group v-model="statusFilter" size="small" class="mr">
-                  <el-radio-button value="all">All</el-radio-button>
-                  <el-radio-button value="active">Active</el-radio-button>
-                  <el-radio-button value="inactive">Inactive</el-radio-button>
-                </el-radio-group>
-                <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCreate()">Add Route</el-button>
-              </div>
-            </div>
-          </template>
-
-          <div class="vendor-bar">
-            <span class="vendor-label">Vendor</span>
-            <el-check-tag :checked="vendor === 'all'" @change="vendor = 'all'">All</el-check-tag>
-            <el-check-tag v-for="v in vendors" :key="v.name" :checked="vendor === v.name" @change="vendor = v.name">
-              {{ v.name }}<span class="vendor-count">{{ v.count }}</span>
-            </el-check-tag>
+    <!-- 自动同步的模型路由 -->
+    <el-card shadow="never">
+      <template #header>
+        <div class="head">
+          <span>Synced Models</span>
+          <div>
+            <el-input v-model="search" placeholder="Search model / channel / upstream model" clearable style="width: 260px" class="mr" />
+            <el-radio-group v-model="statusFilter" size="small" class="mr">
+              <el-radio-button value="all">All</el-radio-button>
+              <el-radio-button value="active">Active</el-radio-button>
+              <el-radio-button value="inactive">Inactive</el-radio-button>
+            </el-radio-group>
+            <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCreate()">Add Route</el-button>
           </div>
+        </div>
+      </template>
 
-          <el-table
-            v-loading="loading"
-            :data="paged"
-            size="small"
-            height="68vh"
-            row-key="display_name"
-            :expand-row-keys="expandedKeys"
-            default-sort="{ prop: 'display_name', order: 'ascending' }"
-            @row-click="onRowClick"
-          >
+      <div class="vendor-bar">
+        <span class="vendor-label">Vendor</span>
+        <el-check-tag :checked="vendor === 'all'" @change="vendor = 'all'">All</el-check-tag>
+        <el-check-tag v-for="v in vendors" :key="v.name" :checked="vendor === v.name" @change="vendor = v.name">
+          {{ v.name }}<span class="vendor-count">{{ v.count }}</span>
+        </el-check-tag>
+      </div>
+
+      <el-table
+        v-loading="loading"
+        :data="paged"
+        size="small"
+        max-height="60vh"
+        row-key="display_name"
+        :expand-row-keys="expandedKeys"
+        default-sort="{ prop: 'display_name', order: 'ascending' }"
+        @row-click="onRowClick"
+      >
         <el-table-column type="expand">
           <template #default="{ row }">
             <el-table :data="row.routes" size="small" class="inner-table" @row-click.stop>
@@ -401,18 +398,16 @@ onMounted(load)
         />
       </div>
     </el-card>
-      </el-tab-pane>
 
-      <!-- Tab2：自定义路由分组（一个名字挂多个渠道×上游） -->
-      <el-tab-pane label="Custom Routes" name="custom">
-        <el-card shadow="never">
-          <template #header>
-            <div class="head">
-              <span>Custom Routes</span>
-              <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCustomCreate">New Custom Route</el-button>
-            </div>
-          </template>
-          <el-table v-loading="loading" :data="customGroups" size="small" row-key="display_name">
+    <!-- 自定义路由分组（一个名字挂多个渠道×上游） -->
+    <el-card shadow="never" class="mt">
+      <template #header>
+        <div class="head">
+          <span>Custom Routes</span>
+          <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCustomCreate">New Custom Route</el-button>
+        </div>
+      </template>
+      <el-table v-loading="loading" :data="customGroups" size="small" row-key="display_name" max-height="50vh">
             <el-table-column type="expand">
               <template #default="{ row }">
                 <el-table :data="row.routes" size="small" class="inner-table">
@@ -452,12 +447,10 @@ onMounted(load)
                 </template>
               </template>
             </el-table-column>
-          </el-table>
-          <el-alert v-if="!customGroups.length && !loading" class="mt" title="No custom routes yet." type="info" :closable="false" />
-          <p class="tip-line">Upstreams are tried by priority/weight; unavailable ones are skipped.</p>
-        </el-card>
-      </el-tab-pane>
-    </el-tabs>
+      </el-table>
+      <el-alert v-if="!customGroups.length && !loading" class="mt" title="No custom routes yet." type="info" :closable="false" />
+      <p class="tip-line">Upstreams are tried by priority/weight; unavailable ones are skipped.</p>
+    </el-card>
 
     <!-- 自定义路由：新增/编辑 -->
     <el-dialog v-model="customDialog.visible" :title="customDialog.editing ? 'Edit Custom Route' : 'New Custom Route'" width="900px">

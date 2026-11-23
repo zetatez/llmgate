@@ -15,10 +15,7 @@ const menus = [
   { path: '/user/overview', label: 'Overview', icon: 'Odometer' },
   { path: '/user/channels', label: 'Channels', icon: 'Connection' },
   { path: '/user/routes', label: 'Routes', icon: 'Share' },
-  { path: '/user/account', label: 'Account', icon: 'User' },
-  { path: '/user/members', label: 'Members', icon: 'UserFilled' },
   { path: '/user/billing', label: 'Billing', icon: 'Wallet' },
-  { path: '/user/logs', label: 'Logs', icon: 'Document' },
 ]
 
 const active = computed(() => route.path)
@@ -69,8 +66,8 @@ onMounted(async () => {
       </el-menu>
       <div class="right">
         <span class="who">{{ displayName }}</span>
-        <el-button link type="primary" @click="openPassword">Password</el-button>
-        <el-button link type="danger" @click="logout"><el-icon><SwitchButton /></el-icon>&nbsp;Logout</el-button>
+        <el-button link type="primary" size="small" @click="openPassword">Password</el-button>
+        <el-button link type="danger" size="small" @click="logout"><el-icon><SwitchButton /></el-icon>&nbsp;Logout</el-button>
       </div>
     </header>
     <main class="main">
@@ -110,7 +107,7 @@ onMounted(async () => {
   flex-direction: column;
 }
 .topbar {
-  height: 40px;
+  height: 32px;
   background: var(--ll-card);
   border-bottom: 1px solid var(--ll-border);
   display: flex;
@@ -130,20 +127,20 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 .logo-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
   background: linear-gradient(135deg, #c3c7d1, #9aa0aa);
   box-shadow: inset 0 0 0 1px rgba(31, 36, 48, .18);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 12px;
+  font-size: 11px;
   color: #1f2430;
 }
 .logo-text {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -156,7 +153,8 @@ onMounted(async () => {
   --el-menu-text-color: var(--ll-muted);
   --el-menu-hover-text-color: var(--ll-ink);
   --el-menu-active-color: var(--el-color-primary);
-  --el-menu-item-height: 40px;
+  --el-menu-item-height: 32px;
+  --el-menu-item-font-size: 12px;
 }
 .topmenu :deep(.el-menu-item) {
   border-bottom: 2px solid transparent;

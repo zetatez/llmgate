@@ -18,7 +18,6 @@ const loading = ref(false)
 // 与 admin 共用同一套仪表盘布局，仅数据范围不同
 const props = defineProps<{ scope?: 'admin' | 'user' }>()
 const isUser = computed(() => props.scope === 'user')
-const channelsPath = computed(() => (isUser.value ? '/user/channels' : '/channels'))
 const logsPath = computed(() => (isUser.value ? '/user/logs' : '/logs'))
 const chartEl = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
@@ -125,7 +124,6 @@ const modelRanks = computed<ModelRank[]>(() => {
   const total = cur.reduce((s, m) => s + m.total_tokens, 0) || 1
   return [...cur]
     .sort((a, b) => b.total_tokens - a.total_tokens)
-    .slice(0, 12)
     .map((m) => {
       const p = prevMap.get(m.model) ?? 0
       const isNew = p === 0 && m.total_tokens > 0
@@ -141,6 +139,10 @@ const modelRanks = computed<ModelRank[]>(() => {
       }
     })
 })
+
+// Top Models 卡：前 8 名常驻，其余在固定高度的区域内滚动，卡片高度不随模型数增长
+const topModelRanks = computed(() => modelRanks.value.slice(0, 8))
+const moreModelRanks = computed(() => modelRanks.value.slice(8))
 
 // 按日份额：模型 / 厂商 / 渠道
 const dailyModelPoints = computed<DailyTokenPoint[]>(() =>
@@ -162,20 +164,6 @@ const dailyVendorPoints = computed<DailyTokenPoint[]>(() => {
 const sharePoints = computed(() =>
   shareMode.value === 'model' ? dailyModelPoints.value : dailyVendorPoints.value,
 )
-
-// 各模型用量：请求 / token
-const modelUsage = computed(() => {
-  const cur = payload.value?.models || []
-  return [...cur]
-    .filter((m) => m.requests > 0)
-    .sort((a, b) => b.total_tokens - a.total_tokens)
-    .slice(0, 10)
-    .map((m) => ({
-      model: m.model,
-      requests: m.requests,
-      tokens: m.total_tokens,
-    }))
-})
 
 function renderHourChart() {
   if (!hourEl.value) return
@@ -355,7 +343,7 @@ onBeforeUnmount(() => {
         <el-card shadow="never" class="stat-card">
           <div class="stat-row">
             <div class="stat-icon" :style="{ background: s.bg, color: s.color }">
-              <el-icon :size="20"><component :is="s.icon" /></el-icon>
+              <el-icon :size="14"><component :is="s.icon" /></el-icon>
             </div>
             <div class="stat-meta">
               <div class="stat-num">{{ s.value }}</div>
@@ -405,22 +393,45 @@ onBeforeUnmount(() => {
             </div>
           </template>
           <template v-if="modelRanks.length">
-            <div v-for="(m, i) in modelRanks" :key="m.model" class="rank-item">
-              <span class="rank-no">{{ i + 1 }}</span>
-              <div class="rank-body">
-                <div class="rank-head">
-                  <span class="model-name" :title="m.model">{{ m.model }}</span>
-                  <span class="vendor">{{ m.vendor }}</span>
-                  <span class="rank-val">{{ humanNum(m.tokens) }} <span class="dim">tok</span></span>
-                  <span class="rank-share">{{ m.share.toFixed(1) }}%</span>
-                  <span v-if="m.isNew" class="change new">new</span>
-                  <span v-else-if="m.change !== null" class="change" :class="m.change >= 0 ? 'up' : 'down'">
-                    {{ m.change >= 0 ? '▲' : '▼' }}{{ Math.abs(m.change).toFixed(0) }}%
-                  </span>
-                  <span v-else class="change dim">—</span>
+            <!-- 高度锁定为 8 行：前 8 名直接展示，其余在卡内滚动 -->
+            <div class="rank-scroll">
+              <div v-for="(m, i) in topModelRanks" :key="m.model" class="rank-item">
+                <span class="rank-no">{{ i + 1 }}</span>
+                <div class="rank-body">
+                  <div class="rank-head">
+                    <span class="model-name" :title="m.model">{{ m.model }}</span>
+                    <span class="vendor">{{ m.vendor }}</span>
+                    <span class="rank-val">{{ humanNum(m.tokens) }} <span class="dim">tok</span></span>
+                    <span class="rank-share">{{ m.share.toFixed(1) }}%</span>
+                    <span v-if="m.isNew" class="change new">new</span>
+                    <span v-else-if="m.change !== null" class="change" :class="m.change >= 0 ? 'up' : 'down'">
+                      {{ m.change >= 0 ? '▲' : '▼' }}{{ Math.abs(m.change).toFixed(0) }}%
+                    </span>
+                    <span v-else class="change dim">—</span>
+                  </div>
+                  <div class="bar"><div class="bar-inner" :style="{ width: m.share + '%', background: PALETTE[i % PALETTE.length] }"></div></div>
                 </div>
-                <div class="bar"><div class="bar-inner" :style="{ width: m.share + '%', background: PALETTE[i % PALETTE.length] }"></div></div>
               </div>
+              <template v-if="moreModelRanks.length">
+                <div class="rank-divider">more models</div>
+                <div v-for="(m, i) in moreModelRanks" :key="m.model" class="rank-item">
+                  <span class="rank-no">{{ i + 9 }}</span>
+                  <div class="rank-body">
+                    <div class="rank-head">
+                      <span class="model-name" :title="m.model">{{ m.model }}</span>
+                      <span class="vendor">{{ m.vendor }}</span>
+                      <span class="rank-val">{{ humanNum(m.tokens) }} <span class="dim">tok</span></span>
+                      <span class="rank-share">{{ m.share.toFixed(1) }}%</span>
+                      <span v-if="m.isNew" class="change new">new</span>
+                      <span v-else-if="m.change !== null" class="change" :class="m.change >= 0 ? 'up' : 'down'">
+                        {{ m.change >= 0 ? '▲' : '▼' }}{{ Math.abs(m.change).toFixed(0) }}%
+                      </span>
+                      <span v-else class="change dim">—</span>
+                    </div>
+                    <div class="bar"><div class="bar-inner" :style="{ width: m.share + '%', background: PALETTE[(i + 8) % PALETTE.length] }"></div></div>
+                  </div>
+                </div>
+              </template>
             </div>
           </template>
           <el-empty v-else description="No model usage yet" :image-size="50" />
@@ -445,53 +456,9 @@ onBeforeUnmount(() => {
       </el-col>
     </el-row>
 
-    <!-- 模型用量 -->
+    <!-- 底部：最近失败 -->
     <el-row :gutter="14" class="mt">
       <el-col :span="24">
-        <el-card shadow="never">
-          <template #header>
-            <div class="head"><span>Model usage</span><span class="week-sum">selected period</span></div>
-          </template>
-          <el-table :data="modelUsage" size="small">
-            <el-table-column label="Model" min-width="200" show-overflow-tooltip>
-              <template #default="{ row }">
-                <span>{{ row.model }}</span>
-                <el-tag class="ml" size="small" effect="plain">{{ usageVendorOf(row.model) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="requests" label="Requests" width="110" align="right" sortable />
-            <el-table-column label="Tokens" width="120" align="right" sortable>
-              <template #default="{ row }">{{ humanNum(row.tokens) }}</template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!modelUsage.length" description="No usage yet" :image-size="50" />
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 底部两栏：渠道 / 失败 -->
-    <el-row :gutter="14" class="mt">
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header>
-            <div class="head"><span>Channels</span><el-button link type="primary" size="small" @click="router.push(channelsPath)">Manage</el-button></div>
-          </template>
-          <el-table :data="payload?.channel_stats ?? []" size="small">
-            <el-table-column prop="name" label="Channel" />
-            <el-table-column prop="health" label="Status" width="105">
-              <template #default="{ row }">
-                <el-tag :type="row.health === 'cooldown' ? 'danger' : 'success'" size="small" effect="light">{{ row.health === 'cooldown' ? 'Cooldown' : 'Healthy' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="today_requests" label="Req" align="right" />
-            <el-table-column label="Err" align="right">
-              <template #default="{ row }"><span :class="row.today_errors > 0 ? 'err' : ''">{{ row.today_errors }}</span></template>
-            </el-table-column>
-          </el-table>
-          <el-alert v-if="!payload?.channel_stats?.length" class="mt" title="No channels configured" type="info" :closable="false" />
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="12">
         <el-card shadow="never">
           <template #header>
             <div class="head">
@@ -557,36 +524,44 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .stat-card {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+/* 扁平 KPI：收紧卡片内边距，数值与 today 同排一行 */
+.stat-card :deep(.el-card__body) {
+  padding: 6px 10px;
 }
 .stat-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .stat-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 .stat-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
   min-width: 0;
 }
 .stat-num {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--ll-ink);
-  line-height: 1.2;
+  line-height: 1.1;
   white-space: nowrap;
 }
 .stat-label {
   color: var(--ll-muted);
-  font-size: 13px;
-  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.1;
   white-space: nowrap;
 }
 .stat-today {
@@ -608,6 +583,19 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 10px;
   padding: 5px 0;
+}
+/* 8 行 × 40.5px：<=8 个模型时自然高度、无滚动；更多时卡片保持同高并内部滚动 */
+.rank-scroll {
+  max-height: 324px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.rank-divider {
+  margin: 6px 0 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ll-border);
+  font-size: 11px;
+  color: var(--ll-muted);
 }
 .rank-no {
   width: 20px;

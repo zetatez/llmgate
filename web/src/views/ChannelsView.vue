@@ -5,6 +5,7 @@ import { channelsApi, portalApi, syncApi, usersApi } from '../api'
 import type { Channel, ChannelKeyItem, User, UserChannel, UserKey } from '../api'
 import { fmtDateTime } from '../utils/format'
 import { useCopy } from '../utils/copy'
+import RequestLogsPanel from '../components/RequestLogsPanel.vue'
 
 // 与 admin 共用同一套页面；scope=user 时使用用户端 API，数据与权限按本人收窄
 const props = defineProps<{ scope?: 'admin' | 'user' }>()
@@ -196,6 +197,10 @@ const keyFilter = ref('')
 const statusFilter = ref<'all' | 'enabled' | 'disabled'>('all')
 const keysLoading = ref(false)
 
+// 渠道表固定 5 行：紧凑样式下行高 28px、表头 32px（见下方 .channel-table 规则）。
+// 5 行 + 表头 = 5 × 28 + 32 = 172px
+const CHANNEL_TABLE_H = 172
+
 const filteredKeys = computed(() => {
   const q = keyFilter.value.trim().toLowerCase()
   return keys.value.filter((k) => {
@@ -375,155 +380,183 @@ onMounted(async () => {
 
 <template>
   <div>
-    <!-- Channel list + key pool below -->
-    <el-card shadow="never">
-      <template #header>
-        <div class="head">
-          <span />
-          <div>
-            <el-button v-if="!isUser" size="small" class="mr" :loading="clearing" :disabled="clearing" @click="clearCooldowns">
-              {{ clearing ? 'Clearing…' : 'Clear cooldowns' }}
-            </el-button>
-            <el-button
-              size="small"
-              class="mr"
-              :loading="syncing"
-              :disabled="syncing"
-              @click="syncNow"
-            >
-              {{ syncing ? 'Syncing…' : 'Sync All Routes' }}
-            </el-button>
-            <el-button type="primary" size="small" @click="openCreate">Add Channel</el-button>
-          </div>
-        </div>
-      </template>
-      <el-table v-loading="loading" :data="list" size="small" highlight-current-row @current-change="(row: Channel) => row && selectChannel(row)">
-        <el-table-column prop="name" label="Name" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="adapter" label="Adapter" width="100" />
-        <el-table-column prop="base_url" label="Base URL" min-width="260" show-overflow-tooltip />
-        <el-table-column label="Owner" width="130" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-tag v-if="row.user_id" size="small" type="success" effect="light">{{ ownerName(row.user_id) }}</el-tag>
-            <span v-else class="dim">Admin</span>
+    <!-- 上下布局：上方渠道 + Key（区域内部滚动），下方固定约 33vh 的请求日志 -->
+    <div class="channels-page">
+      <div class="channels-main">
+        <el-card shadow="never" class="channel-card">
+          <template #header>
+            <div class="head">
+              <span class="dim">{{ list.length }} channel(s)</span>
+              <div>
+                <el-button v-if="!isUser" size="small" class="mr" :loading="clearing" :disabled="clearing" @click="clearCooldowns">
+                  {{ clearing ? 'Clearing…' : 'Clear cooldowns' }}
+                </el-button>
+                <el-button
+                  size="small"
+                  class="mr"
+                  :loading="syncing"
+                  :disabled="syncing"
+                  @click="syncNow"
+                >
+                  {{ syncing ? 'Syncing…' : 'Sync All Routes' }}
+                </el-button>
+                <el-button type="primary" size="small" @click="openCreate">Add Channel</el-button>
+              </div>
+            </div>
           </template>
-        </el-table-column>
-        <el-table-column label="Status" width="90">
-          <template #default="{ row }">
-            <el-switch :model-value="row.enabled === 1" :disabled="isUser && row.user_id !== myID" @change="toggleChannel(row)" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="priority" label="Priority" width="80" />
-        <el-table-column prop="weight" label="Weight" width="80" />
-        <el-table-column v-if="!isUser" label="Keys / Routes" width="120" align="right">
-          <template #default="{ row }">{{ row.key_count ?? 0 }} / {{ row.route_count ?? 0 }}</template>
-        </el-table-column>
-        <el-table-column label="Health" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.health_state === 'cooldown' ? 'danger' : 'success'" size="small">{{ row.health_state === 'cooldown' ? 'Cooling' : 'OK' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Actions" width="230" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="!isUser && row.adapter !== 'deepgram'" link type="primary" size="small" @click.stop="testChannel(row)">Test</el-button>
-            <template v-if="!isUser || row.user_id === myID">
-              <el-button link type="primary" size="small" @click.stop="openEdit(row)">Edit</el-button>
-              <el-button link type="danger" size="small" @click.stop="removeChannel(row)">Delete</el-button>
-            </template>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- Selected channel key pool -->
-    <el-card v-if="selected" shadow="never" class="mt">
-      <template #header>
-        <div class="head">
-          <span>
-            Keys · <b>{{ selected.name }}</b>
-            <el-tag size="small" class="ml">{{ keyStats.total }} key(s)</el-tag>
-            <el-tag v-if="keyStats.enabled < keyStats.total" type="warning" size="small" class="ml">{{ keyStats.enabled }} enabled</el-tag>
-          </span>
-          <div class="toolbar">
-            <el-input v-model="keyFilter" placeholder="Search name/remark/tail" clearable style="width: 200px" class="mr" />
-            <el-select v-model="statusFilter" style="width: 110px" class="mr">
-              <el-option label="All" value="all" />
-              <el-option label="Enabled" value="enabled" />
-              <el-option label="Disabled" value="disabled" />
-            </el-select>
-            <span class="count">showing {{ filteredKeys.length }}/{{ keys.length }}</span>
-            <el-button size="small" class="ml" @click="openAdd('batch')">Bulk Import</el-button>
-            <el-button type="primary" size="small" @click="openAdd('single')">Add Key</el-button>
-          </div>
-        </div>
-      </template>
-
-      <el-alert
-        v-if="selected && selected.enabled !== 1"
-        type="warning"
-        :closable="false"
-        class="mb"
-        title="Channel disabled; its keys are unused."
-      />
-
-      <!-- 行式表格：一次载入全部，表头冻结，支持快速滚动与搜索 -->
-      <el-table v-loading="keysLoading" :data="filteredKeys" size="small" height="520" row-key="id">
-        <el-table-column type="index" label="#" width="45" />
-        <el-table-column label="Name" min-width="130" show-overflow-tooltip>
-          <template #default="{ row }"><b :class="{ dim: !row.name }">{{ row.name || 'Unnamed' }}</b></template>
-        </el-table-column>
-        <el-table-column label="Owner" width="120" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-tag v-if="row.user_id" size="small" type="success">{{ row.owner_name || '—' }}</el-tag>
-            <el-tag v-else size="small" type="info">Admin</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Remark" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.remark || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="Key" width="210">
-          <template #default="{ row }">
-            <code :class="{ dim: !row.key_tail }">{{ row.masked }}{{ row.key_tail }}</code>
-            <el-dropdown trigger="click" class="ml" @command="(cmd: any) => copyKey(row, cmd)">
-              <el-button link type="primary" size="small">Copy</el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="full">Copy full key</el-dropdown-item>
-                  <el-dropdown-item command="ak">Copy AK</el-dropdown-item>
-                  <el-dropdown-item command="sk">Copy SK</el-dropdown-item>
-                </el-dropdown-menu>
+          <el-table
+            v-loading="loading"
+            :data="list"
+            size="small"
+            :height="CHANNEL_TABLE_H"
+            class="channel-table"
+            highlight-current-row
+            empty-text="No channels yet"
+            @current-change="(row: Channel) => row && selectChannel(row)"
+          >
+            <el-table-column prop="name" label="Name" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="adapter" label="Adapter" width="100" />
+            <el-table-column prop="base_url" label="Base URL" min-width="260" show-overflow-tooltip />
+            <el-table-column label="Owner" width="130" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-tag v-if="row.user_id" size="small" type="success" effect="light">{{ ownerName(row.user_id) }}</el-tag>
+                <span v-else class="dim">Admin</span>
               </template>
-            </el-dropdown>
+            </el-table-column>
+            <el-table-column label="Status" width="90">
+              <template #default="{ row }">
+                <el-switch :model-value="row.enabled === 1" :disabled="isUser && row.user_id !== myID" @change="toggleChannel(row)" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="priority" label="Priority" width="80" />
+            <el-table-column prop="weight" label="Weight" width="80" />
+            <el-table-column v-if="!isUser" label="Keys / Routes" width="120" align="right">
+              <template #default="{ row }">{{ row.key_count ?? 0 }} / {{ row.route_count ?? 0 }}</template>
+            </el-table-column>
+            <el-table-column label="Health" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.health_state === 'cooldown' ? 'danger' : 'success'" size="small">{{ row.health_state === 'cooldown' ? 'Cooling' : 'OK' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="230" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="!isUser && row.adapter !== 'deepgram'" link type="primary" size="small" @click.stop="testChannel(row)">Test</el-button>
+                <template v-if="!isUser || row.user_id === myID">
+                  <el-button link type="primary" size="small" @click.stop="openEdit(row)">Edit</el-button>
+                  <el-button link type="danger" size="small" @click.stop="removeChannel(row)">Delete</el-button>
+                </template>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <!-- 选中渠道的 Key 池：内联跟随在渠道列表下方，不放进任何 Tab -->
+        <el-card v-if="selected" shadow="never" class="keys-card">
+          <template #header>
+            <div class="head">
+              <span>
+                Keys · <b>{{ selected.name }}</b>
+                <el-tag size="small" class="ml">{{ keyStats.total }} key(s)</el-tag>
+                <el-tag v-if="keyStats.enabled < keyStats.total" type="warning" size="small" class="ml">{{ keyStats.enabled }} enabled</el-tag>
+              </span>
+              <div class="toolbar">
+                <el-input v-model="keyFilter" placeholder="Search name/remark/tail" clearable style="width: 200px" class="mr" />
+                <el-select v-model="statusFilter" style="width: 110px" class="mr">
+                  <el-option label="All" value="all" />
+                  <el-option label="Enabled" value="enabled" />
+                  <el-option label="Disabled" value="disabled" />
+                </el-select>
+                <span class="count">showing {{ filteredKeys.length }}/{{ keys.length }}</span>
+                <el-button size="small" class="ml" @click="openAdd('batch')">Bulk Import</el-button>
+                <el-button type="primary" size="small" @click="openAdd('single')">Add Key</el-button>
+              </div>
+            </div>
           </template>
-        </el-table-column>
-        <el-table-column label="Weight" width="100">
-          <template #default="{ row }">
-            <el-input-number :model-value="row.weight" :min="1" size="small" controls-position="right" style="width: 90px" @change="(v: any) => updateKeyWeight(row, v)" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="last_used_at" label="Last used" width="140" sortable>
-          <template #default="{ row }">{{ fmtDateTime(row.last_used_at, 'never') }}</template>
-        </el-table-column>
-        <el-table-column label="Status" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-switch :model-value="row.enabled === 1" @change="toggleKey(row)" />
-            <el-tooltip :content="row.effective_enabled ? 'Key and channel enabled: participates in routing' : (selected?.enabled ? 'Key is individually disabled' : 'Channel is disabled: key is stored but not used')">
-              <el-tag v-if="row.enabled && !row.effective_enabled" type="info" size="small" class="ml">channel off</el-tag>
-              <el-tag v-else :type="row.effective_enabled ? 'success' : 'info'" size="small" class="ml">
-                {{ row.effective_enabled ? 'Active' : 'Off' }}
-              </el-tag>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column label="Actions" width="170" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="selected?.adapter !== 'deepgram'" link type="primary" size="small" @click="testKeyAction(row)">Test</el-button>
-            <el-button link type="primary" size="small" @click="openEditKey(row)">Edit</el-button>
-            <el-button link type="danger" size="small" @click="removeKey(row)">Remove</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!keysLoading && !keys.length" description="No keys yet" />
-    </el-card>
+
+          <el-alert
+            v-if="selected.enabled !== 1"
+            type="warning"
+            :closable="false"
+            class="mb"
+            title="Channel disabled; its keys are unused."
+          />
+
+          <!-- 行式表格：一次载入全部，表头冻结，支持快速滚动与搜索 -->
+          <!-- 外层占满卡片剩余高度（扣除禁用告警），表格在内部滚动 -->
+          <div class="keys-table-wrap">
+          <el-table v-loading="keysLoading" :data="filteredKeys" size="small" height="100%" row-key="id" class="keys-table" empty-text="No keys yet">
+            <el-table-column type="index" label="#" width="45" />
+            <el-table-column label="Name" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }"><b :class="{ dim: !row.name }">{{ row.name || 'Unnamed' }}</b></template>
+            </el-table-column>
+            <el-table-column label="Owner" width="120" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-tag v-if="row.user_id" size="small" type="success">{{ row.owner_name || '—' }}</el-tag>
+                <el-tag v-else size="small" type="info">Admin</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="Remark" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.remark || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="Key" width="210">
+              <template #default="{ row }">
+                <code :class="{ dim: !row.key_tail }">{{ row.masked }}{{ row.key_tail }}</code>
+                <el-dropdown trigger="click" class="ml" @command="(cmd: any) => copyKey(row, cmd)">
+                  <el-button link type="primary" size="small">Copy</el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="full">Copy full key</el-dropdown-item>
+                      <el-dropdown-item command="ak">Copy AK</el-dropdown-item>
+                      <el-dropdown-item command="sk">Copy SK</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-table-column>
+            <el-table-column label="Weight" width="100">
+              <template #default="{ row }">
+                <el-input-number :model-value="row.weight" :min="1" size="small" controls-position="right" style="width: 90px" @change="(v: any) => updateKeyWeight(row, v)" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="last_used_at" label="Last used" width="140" sortable>
+              <template #default="{ row }">{{ fmtDateTime(row.last_used_at, 'never') }}</template>
+            </el-table-column>
+            <el-table-column label="Status" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-switch :model-value="row.enabled === 1" @change="toggleKey(row)" />
+                <el-tooltip :content="row.effective_enabled ? 'Key and channel enabled: participates in routing' : (selected?.enabled ? 'Key is individually disabled' : 'Channel is disabled: key is stored but not used')">
+                  <el-tag v-if="row.enabled && !row.effective_enabled" type="info" size="small" class="ml">channel off</el-tag>
+                  <el-tag v-else :type="row.effective_enabled ? 'success' : 'info'" size="small" class="ml">
+                    {{ row.effective_enabled ? 'Active' : 'Off' }}
+                  </el-tag>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="170" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="selected?.adapter !== 'deepgram'" link type="primary" size="small" @click="testKeyAction(row)">Test</el-button>
+                <el-button link type="primary" size="small" @click="openEditKey(row)">Edit</el-button>
+                <el-button link type="danger" size="small" @click="removeKey(row)">Remove</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          </div>
+        </el-card>
+        <el-card v-else shadow="never" class="placeholder-card">
+          <el-empty description="Select a channel to manage its keys" :image-size="40" />
+        </el-card>
+      </div>
+
+      <div class="channels-logs">
+        <RequestLogsPanel
+          dense
+          fill
+          :scope="scope"
+          compact
+          :channel-id="selected?.id ?? null"
+        />
+      </div>
+    </div>
 
     <!-- Channel edit / create -->
     <el-dialog v-model="channelDialog.visible" :title="channelDialog.editing ? 'Edit Channel' : (isUser ? 'Add Channel / Key' : 'Add Channel')" width="560px">
@@ -556,7 +589,7 @@ onMounted(async () => {
           <el-input v-model="channelDialog.keys" type="textarea" :rows="3" placeholder="name=key, one per line (values may be AK:SK)" />
         </el-form-item>
         <el-form-item v-else label="API Keys">
-          <div class="tip">Keys are managed in the <b>Keys</b> panel below this list: select the channel, then use <b>Edit</b> on a key to replace its secret.</div>
+          <div class="tip">Keys are managed in the <b>Keys</b> tab above: select the channel, then use <b>Edit</b> on a key to replace its secret.</div>
         </el-form-item>
         <el-form-item label="Note"><el-input v-model="channelDialog.note" /></el-form-item>
         <el-form-item label="Extra Headers">
@@ -618,7 +651,48 @@ onMounted(async () => {
 
 <style scoped>
 .head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.toolbar { display: flex; align-items: center; }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+/* 上下布局：页面高度锁定为视口减去顶栏(32px)与 main 上下内边距(2×16px) = 64px */
+.channels-page { display: flex; flex-direction: column; gap: 8px; height: calc(100vh - 64px); min-height: 520px; }
+.channels-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.channel-card { flex: 0 0 auto; }
+/* Keys 卡片吃掉剩余高度，表格在卡片内部滚动，页面本身不滚动 */
+.keys-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.keys-card :deep(.el-card__body) { padding: 6px 10px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.keys-table-wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.keys-table { flex: 1 1 auto; min-height: 0; }
+.placeholder-card { flex: 0 0 auto; }
+/* 收紧两张卡片的头部/内边距与标题字号 */
+.channel-card :deep(.el-card__header),
+.keys-card :deep(.el-card__header),
+.channel-card :deep(.el-card__body) { padding: 6px 10px; }
+.channel-card .head,
+.keys-card .head { font-size: 12px; gap: 6px; }
+.keys-card .count { font-size: 11px; }
+.channel-card :deep(.el-tag),
+.keys-card :deep(.el-tag) { font-size: 10px; height: 18px; padding: 0 4px; }
+/* 渠道/Keys 表：11px 字号 + 紧凑行距；行高固定，保证渠道表正好 5 行 */
+.channel-table :deep(.el-table),
+.keys-table :deep(.el-table) { font-size: 11px; }
+.channel-table :deep(.el-table .cell),
+.keys-table :deep(.el-table .cell) { padding: 0 5px; line-height: 1.3; }
+.channel-table :deep(.el-table__cell),
+.keys-table :deep(.el-table__cell) { padding: 3px 5px; }
+.channel-table :deep(.el-table__header .el-table__cell) { height: 32px; font-size: 11px; }
+.channel-table :deep(.el-table__body .el-table__cell) { height: 28px; }
+/* 只隐藏渠道表与 Keys 表的纵向滚动条，滚轮/键盘滚动仍可用 */
+.channel-table :deep(.el-scrollbar__bar.is-vertical),
+.keys-table :deep(.el-scrollbar__bar.is-vertical) { display: none; }
+/* 日志固定在底部约 1/3 视口高度，高度与上方 Key 内容无关 */
+.channels-logs { flex: 0 0 33%; min-height: 200px; max-height: 50vh; display: flex; flex-direction: column; overflow: hidden; }
+.channels-logs > * { min-height: 0; }
+/* 窄屏：取消视口锁定，页面自然流动，日志移到渠道/Key 之后 */
+@media (max-width: 900px) {
+  .channels-page { height: auto; min-height: 0; }
+  .channels-main { display: block; overflow: visible; }
+  .keys-card, .placeholder-card { display: block; margin-top: 12px; }
+  .channels-logs { flex: 0 0 auto; height: 33vh; min-height: 200px; }
+}
 .tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
 .mt { margin-top: 12px; }
 .mr { margin-right: 8px; }
