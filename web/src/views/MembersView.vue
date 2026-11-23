@@ -134,10 +134,10 @@ onMounted(load)
 .search { width: 240px; }
 .member { display: flex; align-items: center; gap: 8px; }
 .u { font-weight: 600; color: var(--ll-ink); }
-.you { font-size: 10px; padding: 0 5px; border-radius: 4px; background: rgba(139, 147, 214, .2); color: #aeb5ee; }
+.you { font-size: 10px; padding: 0 5px; border-radius: 4px; background: rgba(138, 144, 160, .22); color: var(--el-color-primary-dark-2); }
 .sub { font-size: 11px; color: var(--ll-muted); }
 .bar { height: 4px; border-radius: 2px; background: var(--ll-soft); margin-top: 5px; overflow: hidden; max-width: 260px; }
-.bar-inner { height: 100%; border-radius: 2px; background: linear-gradient(90deg, #8b93d6, #b5a7dd); }
+.bar-inner { height: 100%; border-radius: 2px; background: linear-gradient(90deg, #a8aebc, #6b7280); }
 .neg { color: #c9808a; }
-:deep(.me-row) { background: rgba(139, 147, 214, .08); }
+:deep(.me-row) { background: rgba(138, 144, 160, .10); }
 </style>

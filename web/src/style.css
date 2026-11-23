@@ -1,12 +1,14 @@
 :root {
-  /* 品牌色：柔和靛蓝 */
-  --el-color-primary: #8b93d6;
-  --el-color-primary-light-3: #a3a9df;
-  --el-color-primary-light-5: #bcbfe9;
-  --el-color-primary-light-7: #d3d5f1;
-  --el-color-primary-light-8: #dfe0f4;
-  --el-color-primary-light-9: #f4f5fc;
-  --el-color-primary-dark-2: #6f76ab;
+  /* 品牌色：中性灰 */
+  --el-color-primary: #6b7280;
+  --el-color-primary-light-3: #8a90a0;
+  --el-color-primary-light-5: #a8aebc;
+  --el-color-primary-light-7: #c3c7d1;
+  --el-color-primary-light-8: #d5d8df;
+  --el-color-primary-light-9: #eceef2;
+  --el-color-primary-dark-2: #4b5563;
+  --ll-on-primary: #ffffff;
+  --ll-on-primary-soft: #1f2430;
 
   --el-border-radius-base: 8px;
   --el-border-radius-small: 6px;
@@ -52,13 +54,15 @@ html.dark {
   --el-table-row-hover-bg-color: #1d1f25;
   --el-mask-color: rgba(0, 0, 0, 0.6);
 
-  --el-color-primary: #9aa2e0;
-  --el-color-primary-light-3: #6f76ab;
-  --el-color-primary-light-5: #565b85;
-  --el-color-primary-light-7: #3d415f;
-  --el-color-primary-light-8: #30344a;
-  --el-color-primary-light-9: #23263a;
-  --el-color-primary-dark-2: #aab1e6;
+  --el-color-primary: #a8aebc;
+  --el-color-primary-light-3: #8a90a0;
+  --el-color-primary-light-5: #6e7482;
+  --el-color-primary-light-7: #4a4f5a;
+  --el-color-primary-light-8: #383c45;
+  --el-color-primary-light-9: #262a31;
+  --el-color-primary-dark-2: #c3c7d1;
+  --ll-on-primary: #17181c;
+  --ll-on-primary-soft: #e6e8ee;
 
   --ll-bg: #0e0f12;
   --ll-card: #17181c;
@@ -129,6 +133,25 @@ body {
 /* ---- Element Plus 细节 ---- */
 .el-button {
   font-weight: 500;
+}
+/* 灰色主按钮：浅色主题白字，深色主题深墨字；禁用态用更浅的底 + 反色字 */
+.el-button--primary {
+  --el-button-text-color: var(--ll-on-primary);
+  --el-button-hover-text-color: var(--ll-on-primary);
+  --el-button-active-text-color: var(--ll-on-primary);
+  --el-button-disabled-text-color: var(--ll-on-primary-soft);
+  --el-button-disabled-bg-color: var(--el-color-primary-light-7);
+  --el-button-disabled-border-color: var(--el-color-primary-light-7);
+  --el-button-hover-bg-color: var(--el-color-primary-dark-2);
+  --el-button-hover-border-color: var(--el-color-primary-dark-2);
+}
+.el-button--primary.is-plain {
+  --el-button-hover-text-color: var(--ll-on-primary);
+  --el-button-active-text-color: var(--ll-on-primary);
+}
+.el-button--primary.is-text,
+.el-button--primary.is-link {
+  --el-button-hover-link-text-color: var(--el-color-primary-dark-2);
 }
 .el-card__header {
   font-weight: 600;

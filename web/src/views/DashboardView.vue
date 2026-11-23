@@ -98,7 +98,7 @@ const stats = computed<Stat[]>(() => {
   const r = range.value
   const t = payload.value?.today
   return [
-    { label: 'Requests', value: humanNum(r.req), today: `today ${t?.total_requests ?? 0}`, icon: Connection, color: 'var(--el-color-primary)', bg: 'rgba(124,134,214,.15)' },
+    { label: 'Requests', value: humanNum(r.req), today: `today ${t?.total_requests ?? 0}`, icon: Connection, color: 'var(--el-color-primary)', bg: 'rgba(138,144,160,.16)' },
     { label: 'Tokens', value: humanNum(r.tokens), today: `today ${humanNum(t?.total_tokens)}`, icon: ChatDotRound, color: '#6f9a86', bg: 'rgba(111,154,134,.15)' },
     { label: 'Errors', value: humanNum(r.errors), today: `today ${t?.errors ?? 0}`, icon: WarningFilled, color: r.errors > 0 ? '#c9808a' : '#6f9a86', bg: r.errors > 0 ? 'rgba(201,128,138,.16)' : 'rgba(111,154,134,.15)' },
   ]
@@ -194,7 +194,7 @@ function renderHourChart() {
       type: 'bar',
       barMaxWidth: 14,
       data: hours.map((h) => h.tokens),
-      itemStyle: { color: '#8b93d6', borderRadius: [3, 3, 0, 0] },
+      itemStyle: { color: '#8a90a0', borderRadius: [3, 3, 0, 0] },
     }],
   })
   hourChart.resize()

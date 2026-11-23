@@ -133,13 +133,14 @@ onMounted(async () => {
   width: 24px;
   height: 24px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #8b93d6, #b5a7dd);
+  background: linear-gradient(135deg, #c3c7d1, #9aa0aa);
+  box-shadow: inset 0 0 0 1px rgba(31, 36, 48, .18);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
   font-size: 12px;
-  color: #fff;
+  color: #1f2430;
 }
 .logo-text {
   font-size: 13px;
@@ -165,7 +166,7 @@ onMounted(async () => {
 }
 .topmenu :deep(.el-menu-item.is-active) {
   color: var(--el-color-primary);
-  border-bottom: 2px solid #8b93d6;
+  border-bottom: 2px solid var(--el-color-primary);
   background: transparent;
 }
 .m-label {

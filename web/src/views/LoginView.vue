@@ -110,7 +110,7 @@ async function onUserSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(900px 480px at 50% -10%, rgba(139,147,214,.20), transparent 60%), var(--ll-bg);
+  background: radial-gradient(900px 480px at 50% -10%, rgba(138,144,160,.18), transparent 60%), var(--ll-bg);
   overflow: hidden;
 }
 .blob {
@@ -123,14 +123,14 @@ async function onUserSubmit() {
 .blob-1 {
   width: 420px;
   height: 420px;
-  background: #8b93d6;
+  background: #8a90a0;
   top: -120px;
   right: -80px;
 }
 .blob-2 {
   width: 360px;
   height: 360px;
-  background: #b5a7dd;
+  background: #a8aebc;
   bottom: -120px;
   left: -60px;
 }
@@ -152,13 +152,14 @@ async function onUserSubmit() {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #8b93d6, #b5a7dd);
+  background: linear-gradient(135deg, #c3c7d1, #9aa0aa);
+  box-shadow: inset 0 0 0 1px rgba(31, 36, 48, .18);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
   font-size: 18px;
-  color: #fff;
+  color: #1f2430;
   flex-shrink: 0;
 }
 .brand-text {

@@ -1,7 +1,7 @@
 /** 图表统一配色（贴近 opencode data 的低饱和深色调）。 */
 export const PALETTE = [
-  '#8b93d6', '#8fae9b', '#d3b27f', '#c98b96', '#7a93b8',
-  '#b5a7dd', '#a3b0c2', '#d9a05f', '#9aa7c9', '#c9c2dc',
+  '#7d8592', '#8fae9b', '#d3b27f', '#c98b96', '#7a93b8',
+  '#b9bec8', '#a3b0c2', '#d9a05f', '#5d646f', '#d2d5db',
 ]
 
 /** 深色的 axis tooltip 基样式。 */
