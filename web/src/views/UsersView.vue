@@ -532,10 +532,11 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-          <div class="usage-meta">
+          <!-- admin lifetime 视图不再显示汇总来源提示；user 视图与 admin 区间视图保留原有说明 -->
+          <div v-if="isUser || mode === 'range'" class="usage-meta">
             <span class="hint">{{ isUser
               ? (mode === 'lifetime' ? 'Lifetime totals from member accounts.' : 'Aggregated from request logs in the selected range.')
-              : (mode === 'lifetime' ? 'Per-user totals from user accounts.' : 'Per user, from request logs in the selected range.') }}</span>
+              : 'Per user, from request logs in the selected range.' }}</span>
             <el-input v-if="isUser" v-model="search" placeholder="Search member" clearable size="small" class="search" />
           </div>
           <!-- 汇总卡片仅用于 user 的成员/账期视图；admin 这里只看每用户数字 -->

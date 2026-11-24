@@ -12,6 +12,7 @@ const menus = [
   { path: '/channels', label: 'Channels', icon: 'Connection' },
   { path: '/model-routes', label: 'Routes', icon: 'Share' },
   { path: '/users', label: 'Users', icon: 'User' },
+  { path: '/logs', label: 'Logs', icon: 'Document' },
   { path: '/settings', label: 'Settings', icon: 'Setting' },
 ]
 
@@ -82,8 +83,8 @@ async function logout() {
   width: 20px;
   height: 20px;
   border-radius: 6px;
-  background: linear-gradient(135deg, #c3c7d1, #9aa0aa);
-  box-shadow: inset 0 0 0 1px rgba(31, 36, 48, .18);
+  background: linear-gradient(135deg, #e2e5ea, #b6bcc6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .45), 0 0 0 1px rgba(0, 0, 0, .22);
   display: inline-flex;
   align-items: center;
   justify-content: center;

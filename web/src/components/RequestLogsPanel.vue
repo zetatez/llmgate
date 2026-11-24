@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { channelsApi, logsApi, portalApi, usersApi } from '../api'
 import type { RequestLog, User } from '../api'
 
@@ -27,6 +28,7 @@ const users = ref<User[]>([])
 const page = ref(1)
 const size = ref(50)
 const total = ref(0)
+const clearing = ref(false)
 
 function fmtTime(ts: number) {
   if (!ts) return '-'
@@ -108,6 +110,20 @@ function onSizeChange() {
   load()
 }
 
+// 与 ChannelsView 相同的清理动作：重置冷却由管理员接口提供，用户端无等价接口
+async function clearCooldowns() {
+  clearing.value = true
+  try {
+    await channelsApi.resetPenalties()
+    ElMessage.success('Cooldowns cleared')
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'Failed to clear cooldowns')
+  } finally {
+    clearing.value = false
+  }
+}
+
 // Channels 页选中渠道时锁定过滤；清空选择（null）则回到全部渠道
 watch(
   () => props.channelId,
@@ -138,8 +154,22 @@ onMounted(async () => {
 <template>
   <el-card shadow="never" class="logs-panel" :class="{ compact, dense, fill }">
     <template #header>
-      <div v-if="compact" class="panel-title">
-        Recent requests<span v-if="list.length" class="panel-count"> · latest {{ list.length }}</span>
+      <div v-if="compact" class="panel-head">
+        <div class="panel-title">
+          Recent requests<span v-if="list.length" class="panel-count"> · latest {{ list.length }}</span>
+        </div>
+        <el-button
+          v-if="!isUser"
+          link
+          type="primary"
+          size="small"
+          class="panel-action"
+          :loading="clearing"
+          :disabled="clearing"
+          @click="clearCooldowns"
+        >
+          {{ clearing ? 'Clearing…' : 'Clear cooldowns' }}
+        </el-button>
       </div>
       <div v-else class="filters">
         <el-input
@@ -176,6 +206,9 @@ onMounted(async () => {
         />
         <el-button type="primary" @click="search">Search</el-button>
         <el-button @click="resetFilters">Reset</el-button>
+        <el-button v-if="!isUser" size="small" :loading="clearing" :disabled="clearing" @click="clearCooldowns">
+          {{ clearing ? 'Clearing…' : 'Clear cooldowns' }}
+        </el-button>
         <el-select v-model="size" style="width: 120px" @change="onSizeChange">
           <el-option label="50 / page" :value="50" />
           <el-option label="100 / page" :value="100" />
@@ -208,10 +241,10 @@ onMounted(async () => {
           {{ row.channel_name ? `${row.channel_name}/${row.upstream_model}` : row.upstream_model || '—' }}
         </template>
       </el-table-column>
-      <el-table-column v-if="compact" label="Tokens" min-width="120" class-name="nowrap">
+      <el-table-column v-if="compact" label="Tokens" min-width="120" class-name="nowrap" show-overflow-tooltip>
         <template #default="{ row }">{{ row.total_tokens }} ({{ row.prompt_tokens }} / {{ row.completion_tokens }})</template>
       </el-table-column>
-      <el-table-column v-else label="Tokens" width="90" class-name="nowrap">
+      <el-table-column v-else label="Tokens" width="90" class-name="nowrap" show-overflow-tooltip>
         <template #default="{ row }">{{ row.total_tokens }}</template>
       </el-table-column>
       <el-table-column prop="latency_ms" label="Latency (ms)" :width="compact ? 130 : 100" class-name="nowrap" />
@@ -220,7 +253,7 @@ onMounted(async () => {
           <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="error_code" label="Error" min-width="180">
+      <el-table-column prop="error_code" label="Error" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.error_code" class="error-cell">{{ row.error_code }}</span>
           <span v-else class="dim">—</span>
@@ -248,6 +281,19 @@ onMounted(async () => {
   color: var(--ll-ink);
   margin-bottom: 8px;
 }
+/* 窄栏标题行：标题 + 行内动作，高度不随按钮变化 */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.panel-head .panel-title {
+  margin-bottom: 0;
+}
+.panel-action {
+  flex-shrink: 0;
+}
 .panel-count {
   font-weight: 400;
   color: var(--ll-muted);
@@ -263,11 +309,18 @@ onMounted(async () => {
   justify-content: flex-end;
   margin-top: 12px;
 }
+.log-table :deep(.el-table .cell) {
+  line-height: 1.4;
+}
+/* 每条日志只占一行：超长错误信息截断，完整内容由 tooltip 展示 */
 .error-cell {
-  white-space: pre-wrap;
-  word-break: break-word;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 .dim {
   color: var(--ll-muted);

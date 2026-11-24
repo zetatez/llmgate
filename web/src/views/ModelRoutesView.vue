@@ -20,7 +20,7 @@ const expandedKeys = ref<string[]>([])
 const page = ref(1)
 const pageSize = ref(20)
 
-const dialog = reactive({ visible: false, editing: false, id: 0, display_name: '', channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1 })
+const dialog = reactive({ visible: false, id: 0, display_name: '', channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1 })
 
 interface Group {
   display_name: string
@@ -85,7 +85,7 @@ const filtered = computed(() => {
   return sortActiveFirst(out)
 })
 
-// 每个渠道已同步的上游模型名（用于自定义路由/新增路由的搜索下拉）
+// 每个渠道已同步的上游模型名（用于自定义路由的搜索下拉）
 const paged = computed(() => {
   const start = (page.value - 1) * pageSize.value
   return filtered.value.slice(start, start + pageSize.value)
@@ -255,13 +255,9 @@ function onRowClick(row: Group) {
   }
 }
 
-function openCreate(prefillModel = '') {
-  Object.assign(dialog, { visible: true, editing: false, id: 0, display_name: prefillModel, channel_id: 0, upstream_model: '', priority: 0, weight: 1, enabled: 1 })
-}
-
 function openEdit(r: ModelRoute) {
   Object.assign(dialog, {
-    visible: true, editing: true, id: r.id, display_name: r.display_name, channel_id: r.channel_id, upstream_model: r.upstream_model,
+    visible: true, id: r.id, display_name: r.display_name, channel_id: r.channel_id, upstream_model: r.upstream_model,
     priority: r.priority, weight: r.weight, enabled: r.enabled,
   })
 }
@@ -280,8 +276,7 @@ async function submit() {
     enabled: dialog.enabled,
   }
   try {
-    if (dialog.editing) await apiUpdate(dialog.id, d)
-    else await apiCreate(d)
+    await apiUpdate(dialog.id, d)
     ElMessage.success('Saved')
     dialog.visible = false
     load()
@@ -317,7 +312,6 @@ onMounted(load)
               <el-radio-button value="active">Active</el-radio-button>
               <el-radio-button value="inactive">Inactive</el-radio-button>
             </el-radio-group>
-            <el-button type="primary" size="small" :disabled="isUser && !channelOptions.length" @click="openCreate()">Add Route</el-button>
           </div>
         </div>
       </template>
@@ -366,9 +360,6 @@ onMounted(load)
                 </template>
               </el-table-column>
             </el-table>
-            <el-button size="small" class="mt add-route-btn" @click.stop="openCreate(row.display_name)">
-              + Add another channel for this model
-            </el-button>
           </template>
         </el-table-column>
 
@@ -501,7 +492,7 @@ onMounted(load)
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dialog.visible" :title="dialog.editing ? 'Edit Route' : 'Add Route'" width="480px">
+    <el-dialog v-model="dialog.visible" title="Edit Route" width="480px">
       <el-form label-width="140px">
         <el-form-item label="Model name" required>
           <el-input v-model="dialog.display_name" placeholder="e.g. deepseek-chat" />
@@ -568,7 +559,6 @@ onMounted(load)
 .mt { margin-top: 8px; }
 .tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
 .inner-table { margin: 4px 16px 0; }
-.add-route-btn { margin-left: 16px; }
 .row-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .row-line .el-select { flex-shrink: 0; }
 .row-block { margin-bottom: 10px; }

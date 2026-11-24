@@ -16,12 +16,24 @@
   /* 语义变量（浅色） */
   --ll-bg: #f6f7fa;
   --ll-card: #ffffff;
-  --ll-soft: #f1f2f7;
-  --ll-border: #ececf1;
+  --ll-soft: #f2f4f7;
+  --ll-border: #e9ecf1;
   --ll-hover: #f5f6fb;
   --ll-ink: #1f2430;
-  --ll-muted: #8a90a0;
+  --ll-muted: #5b6472;
   --ll-card-radius: 12px;
+
+  /* Element Plus 默认的次要/占位文字在浅色底上偏淡，这里改用同一中性灰 */
+  --el-text-color-secondary: #5b6472;
+  --el-text-color-placeholder: #858b98;
+
+  /* 浅色边框/表格线：细如发丝，明显弱于文字 */
+  --el-border-color: #e6e9ef;
+  --el-border-color-light: #eaedf2;
+  --el-border-color-lighter: #eef0f4;
+  --el-border-color-extra-light: #f2f4f7;
+  --el-table-border-color: #eef0f4;
+  --el-border-color-hover: #d5d9e1;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   line-height: 1.5;
@@ -39,15 +51,17 @@ html.dark {
   --el-fill-color-lighter: #1c1e24;
   --el-fill-color-extra-light: #191b20;
   --el-fill-color-dark: #2a2c33;
-  --el-border-color: #2a2c33;
-  --el-border-color-light: #262830;
-  --el-border-color-lighter: #22242b;
-  --el-border-color-extra-light: #1e2027;
-  --el-text-color-primary: #e6e8ee;
-  --el-text-color-regular: #c3c7d1;
-  --el-text-color-secondary: #8b909c;
-  --el-text-color-placeholder: #6b707c;
-  --el-text-color-disabled: #565b66;
+  --el-border-color: #2a2d34;
+  --el-border-color-light: #262930;
+  --el-border-color-lighter: #23262c;
+  --el-border-color-extra-light: #1f2228;
+  --el-border-color-hover: #34383f;
+  --el-table-border-color: #272a31;
+  --el-text-color-primary: #f2f4f8;
+  --el-text-color-regular: #e3e7ee;
+  --el-text-color-secondary: #c2c8d2;
+  --el-text-color-placeholder: #9aa1ad;
+  --el-text-color-disabled: #7d838f;
   --el-table-header-bg-color: #202229;
   --el-table-header-text-color: #a8aebc;
   --el-table-tr-bg-color: #17181c;
@@ -67,10 +81,10 @@ html.dark {
   --ll-bg: #0e0f12;
   --ll-card: #17181c;
   --ll-soft: #202229;
-  --ll-border: #262830;
+  --ll-border: #2a2d34;
   --ll-hover: #1d1f25;
-  --ll-ink: #e6e8ee;
-  --ll-muted: #8b909c;
+  --ll-ink: #f2f4f8;
+  --ll-muted: #c2c8d2;
 
   color-scheme: dark;
 }
@@ -158,9 +172,6 @@ body {
   color: var(--ll-ink);
   padding: 14px 16px;
   border-bottom: 1px solid var(--ll-border);
-}
-.el-table {
-  --el-table-border-color: var(--ll-border);
 }
 .el-table th.el-table__cell {
   font-weight: 600;

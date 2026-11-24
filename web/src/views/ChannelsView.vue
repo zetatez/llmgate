@@ -198,10 +198,15 @@ const keys = ref<ChannelKeyItem[]>([])
 const keyFilter = ref('')
 const statusFilter = ref<'all' | 'enabled' | 'disabled'>('all')
 const keysLoading = ref(false)
+// 明文只在需要时取一次，按 key id 缓存，AK/SK 两列共用同一次请求
+const keySecrets = ref<Record<number, { key: string; ak: string; sk: string }>>({})
 
 // 渠道表固定 5 行：紧凑样式下行高 28px、表头 32px（见下方 .channel-table 规则）。
 // 5 行 + 表头 = 5 × 28 + 32 = 172px
 const CHANNEL_TABLE_H = 172
+
+// Keys 表同样固定 5 行：表头 32px + 5 × 28px = 172px
+const KEYS_TABLE_H = 172
 
 const filteredKeys = computed(() => {
   const q = keyFilter.value.trim().toLowerCase()
@@ -232,6 +237,7 @@ function toKeyItem(k: UserKey): ChannelKeyItem {
 
 async function loadKeys() {
   if (!selected.value) return
+  keySecrets.value = {}
   keysLoading.value = true
   try {
     if (isUser.value) {
@@ -257,18 +263,36 @@ async function toggleKey(k: ChannelKeyItem) {
   } catch (e: any) { ElMessage.error('Operation failed: ' + (e?.response?.data?.error || e)) }
 }
 
-const { copy } = useCopy()
+const { copied, copy } = useCopy()
 
-// 复制 Key 明文：支持 AK:SK 格式分拆复制（后端按首个冒号拆分）。
-async function copyKey(k: ChannelKeyItem, part: 'full' | 'ak' | 'sk') {
+// 掩码展示：保留首尾各 4 位，长密钥不撑开列宽
+function maskSecret(s: string | undefined): string {
+  if (!s) return '—'
+  return s.length <= 10 ? '••••' : `${s.slice(0, 4)}••••${s.slice(-4)}`
+}
+
+// 每行只取一次明文（后端按首个冒号拆成 ak / sk），缓存后两个按钮都命中
+async function loadKeySecret(k: ChannelKeyItem): Promise<{ key: string; ak: string; sk: string } | null> {
+  const cached = keySecrets.value[k.id]
+  if (cached) return cached
   try {
     const s = isUser.value ? await portalApi.keySecret(k.id) : await channelsApi.keySecret(k.id)
-    const text = part === 'ak' ? s.ak : part === 'sk' ? s.sk : s.key
-    if (!text) { ElMessage.warning(`This key has no ${part.toUpperCase()}`); return }
-    const label = part === 'full' ? 'full key' : part.toUpperCase()
-    if (await copy(text, `${k.id}:${part}`)) ElMessage.success(`Copied ${label}`)
-    else ElMessage.error('Copy failed')
-  } catch (e: any) { ElMessage.error(e?.response?.data?.error || 'Failed to read key') }
+    keySecrets.value = { ...keySecrets.value, [k.id]: s }
+    return s
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || 'Failed to read key')
+    return null
+  }
+}
+
+// 直接复制 AK 或 SK，无需菜单
+async function copyPart(k: ChannelKeyItem, part: 'ak' | 'sk') {
+  const s = await loadKeySecret(k)
+  if (!s) return
+  const text = part === 'ak' ? s.ak : s.sk
+  if (!text) { ElMessage.warning(`This key has no ${part.toUpperCase()}`); return }
+  if (await copy(text, `${k.id}:${part}`)) ElMessage.success(`Copied ${part.toUpperCase()}`)
+  else ElMessage.error('Copy failed')
 }
 
 async function testKeyAction(k: ChannelKeyItem) {
@@ -394,7 +418,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <!-- 上下布局：上方渠道 + Key（区域内部滚动），下方固定约 33vh 的请求日志 -->
+    <!-- 上下布局：上方渠道 + Key（内部滚动），下方约 45% 视口的请求日志 -->
     <div class="channels-page">
       <div class="channels-main">
         <el-card shadow="never" class="channel-card">
@@ -496,10 +520,8 @@ onMounted(async () => {
             title="Channel disabled; its keys are unused."
           />
 
-          <!-- 行式表格：一次载入全部，表头冻结，支持快速滚动与搜索 -->
-          <!-- 外层占满卡片剩余高度（扣除禁用告警），表格在内部滚动 -->
-          <div class="keys-table-wrap">
-          <el-table v-loading="keysLoading" :data="filteredKeys" size="small" height="100%" row-key="id" class="keys-table" empty-text="No keys yet">
+          <!-- 行式表格：一次载入全部，表头冻结，固定 5 行后内部滚动 -->
+          <el-table v-loading="keysLoading" :data="filteredKeys" size="small" :height="KEYS_TABLE_H" row-key="id" class="keys-table" empty-text="No keys yet">
             <el-table-column type="index" label="#" width="45" />
             <el-table-column label="Name" min-width="130" show-overflow-tooltip>
               <template #default="{ row }"><b :class="{ dim: !row.name }">{{ row.name || 'Unnamed' }}</b></template>
@@ -513,19 +535,20 @@ onMounted(async () => {
             <el-table-column label="Remark" min-width="150" show-overflow-tooltip>
               <template #default="{ row }">{{ row.remark || '—' }}</template>
             </el-table-column>
-            <el-table-column label="Key" width="210">
+            <el-table-column label="AK" width="190" show-overflow-tooltip>
               <template #default="{ row }">
-                <code :class="{ dim: !row.key_tail }">{{ row.masked }}{{ row.key_tail }}</code>
-                <el-dropdown trigger="click" class="ml" @command="(cmd: any) => copyKey(row, cmd)">
-                  <el-button link type="primary" size="small">Copy</el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="full">Copy full key</el-dropdown-item>
-                      <el-dropdown-item command="ak">Copy AK</el-dropdown-item>
-                      <el-dropdown-item command="sk">Copy SK</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+                <div class="token-cell">
+                  <code :class="{ dim: !row.key_tail }">{{ keySecrets[row.id] ? maskSecret(keySecrets[row.id].ak) : row.masked + row.key_tail }}</code>
+                  <el-button link type="primary" size="small" @click="copyPart(row, 'ak')">{{ copied === row.id + ':ak' ? 'copied' : 'Copy' }}</el-button>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="SK" width="190" show-overflow-tooltip>
+              <template #default="{ row }">
+                <div class="token-cell">
+                  <code :class="{ dim: !row.key_tail }">{{ keySecrets[row.id] ? maskSecret(keySecrets[row.id].sk) : '••••' + row.key_tail }}</code>
+                  <el-button link type="primary" size="small" @click="copyPart(row, 'sk')">{{ copied === row.id + ':sk' ? 'copied' : 'Copy' }}</el-button>
+                </div>
               </template>
             </el-table-column>
             <el-table-column label="Weight" width="100">
@@ -555,7 +578,6 @@ onMounted(async () => {
               </template>
             </el-table-column>
           </el-table>
-          </div>
         </el-card>
         <el-card v-else shadow="never" class="placeholder-card">
           <el-empty description="Select a channel to manage its keys" :image-size="40" />
@@ -626,7 +648,7 @@ onMounted(async () => {
           <el-form label-width="80px">
             <el-form-item label="Name"><el-input v-model="addDialog.name" placeholder="e.g. main / backup" /></el-form-item>
             <el-form-item label="Remark"><el-input v-model="addDialog.remark" placeholder="e.g. expires end of year" /></el-form-item>
-            <el-form-item label="Key" required><el-input v-model="addDialog.key" autocomplete="off" placeholder="sk-... or AK:SK" /></el-form-item>
+            <el-form-item label="Key" required><el-input v-model="addDialog.key" autocomplete="off" placeholder="sk-... or AK:SK (both go in this one field)" /></el-form-item>
           </el-form>
           <el-button type="primary" :loading="addDialog.busy" @click="submitAdd">Add</el-button>
         </el-tab-pane>
@@ -642,8 +664,8 @@ onMounted(async () => {
       <el-form label-width="90px">
         <el-form-item label="Name"><el-input v-model="editKeyDialog.name" placeholder="e.g. main / backup" /></el-form-item>
         <el-form-item label="Remark"><el-input v-model="editKeyDialog.remark" placeholder="e.g. expires end of year" /></el-form-item>
-        <el-form-item label="Secret">
-          <el-input v-model="editKeyDialog.key" type="password" show-password autocomplete="new-password" name="llmgate-key-secret" placeholder="Leave empty to keep current; supports AK:SK" />
+            <el-form-item label="Secret">
+          <el-input v-model="editKeyDialog.key" type="password" show-password autocomplete="new-password" name="llmgate-key-secret" placeholder="Leave empty to keep current; AK:SK goes in this field" />
         </el-form-item>
         <el-form-item v-if="!isUser" label="Owner">
           <el-select v-model="editKeyDialog.user_id" style="width: 100%">
@@ -669,13 +691,11 @@ onMounted(async () => {
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 /* 上下布局：页面高度锁定为视口减去顶栏(32px)与 main 上下内边距(2×16px) = 64px */
 .channels-page { display: flex; flex-direction: column; gap: 8px; height: calc(100vh - 64px); min-height: 520px; }
-.channels-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.channels-main { flex: 0 0 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .channel-card { flex: 0 0 auto; }
-/* Keys 卡片吃掉剩余高度，表格在卡片内部滚动，页面本身不滚动 */
-.keys-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.keys-card :deep(.el-card__body) { padding: 6px 10px; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.keys-table-wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.keys-table { flex: 1 1 auto; min-height: 0; }
+/* Keys 卡片自然高度（头部 + 工具栏 + 5 行表格），多余空间让给底部日志 */
+.keys-card { flex: 0 0 auto; display: flex; flex-direction: column; }
+.keys-card :deep(.el-card__body) { padding: 6px 10px; }
 .placeholder-card { flex: 0 0 auto; }
 /* 收紧两张卡片的头部/内边距与标题字号 */
 .channel-card :deep(.el-card__header),
@@ -693,20 +713,24 @@ onMounted(async () => {
 .keys-table :deep(.el-table .cell) { padding: 0 5px; line-height: 1.3; }
 .channel-table :deep(.el-table__cell),
 .keys-table :deep(.el-table__cell) { padding: 3px 5px; }
-.channel-table :deep(.el-table__header .el-table__cell) { height: 32px; font-size: 11px; }
-.channel-table :deep(.el-table__body .el-table__cell) { height: 28px; }
+.channel-table :deep(.el-table__header .el-table__cell),
+.keys-table :deep(.el-table__header .el-table__cell) { height: 32px; font-size: 11px; }
+.channel-table :deep(.el-table__body .el-table__cell),
+.keys-table :deep(.el-table__body .el-table__cell) { height: 28px; }
 /* 只隐藏渠道表与 Keys 表的纵向滚动条，滚轮/键盘滚动仍可用 */
 .channel-table :deep(.el-scrollbar__bar.is-vertical),
 .keys-table :deep(.el-scrollbar__bar.is-vertical) { display: none; }
-/* 日志固定在底部约 1/3 视口高度，高度与上方 Key 内容无关 */
-.channels-logs { flex: 0 0 33%; min-height: 200px; max-height: 50vh; display: flex; flex-direction: column; overflow: hidden; }
+/* AK/SK 列：值 + 复制按钮同一行，长密钥不换行撑开列宽 */
+.token-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* 日志固定在底部约 45% 视口高度，高度与上方 Keys 内容无关 */
+.channels-logs { flex: 0 0 45%; min-height: 200px; max-height: 65vh; display: flex; flex-direction: column; overflow: hidden; }
 .channels-logs > * { min-height: 0; }
 /* 窄屏：取消视口锁定，页面自然流动，日志移到渠道/Key 之后 */
 @media (max-width: 900px) {
   .channels-page { height: auto; min-height: 0; }
   .channels-main { display: block; overflow: visible; }
   .keys-card, .placeholder-card { display: block; margin-top: 12px; }
-  .channels-logs { flex: 0 0 auto; height: 33vh; min-height: 200px; }
+  .channels-logs { flex: 0 0 auto; height: 45vh; min-height: 200px; }
 }
 .tip { font-size: 12px; color: var(--ll-muted); margin-left: 8px; }
 .mt { margin-top: 12px; }

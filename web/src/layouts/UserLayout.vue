@@ -16,6 +16,7 @@ const menus = [
   { path: '/user/channels', label: 'Channels', icon: 'Connection' },
   { path: '/user/routes', label: 'Routes', icon: 'Share' },
   { path: '/user/billing', label: 'Billing', icon: 'Wallet' },
+  { path: '/user/logs', label: 'Logs', icon: 'Document' },
 ]
 
 const active = computed(() => route.path)
@@ -130,8 +131,8 @@ onMounted(async () => {
   width: 20px;
   height: 20px;
   border-radius: 6px;
-  background: linear-gradient(135deg, #c3c7d1, #9aa0aa);
-  box-shadow: inset 0 0 0 1px rgba(31, 36, 48, .18);
+  background: linear-gradient(135deg, #e2e5ea, #b6bcc6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .45), 0 0 0 1px rgba(0, 0, 0, .22);
   display: inline-flex;
   align-items: center;
   justify-content: center;
